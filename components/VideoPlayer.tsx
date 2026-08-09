@@ -72,6 +72,22 @@ function isBuffered(video: HTMLVideoElement, targetLocalSeconds: number): boolea
   return false;
 }
 
+// `lock()` isn't in TypeScript's DOM lib (the API isn't Baseline yet) and isn't implemented at all
+// on iOS (Safari or Chrome-on-iOS, both WebKit — Apple doesn't expose it to web content), only on
+// Android Chrome/Firefox/Samsung Internet. Feature-detected and best-effort on purpose: on
+// unsupported browsers this is a silent no-op, fullscreen itself works exactly the same either way.
+type OrientationLock = ScreenOrientation & { lock?: (type: string) => Promise<void> };
+
+async function lockLandscape(): Promise<void> {
+  const orientation = screen.orientation as OrientationLock | undefined;
+  if (!orientation?.lock) return;
+  await orientation.lock("landscape").catch(() => {});
+}
+
+function unlockOrientation(): void {
+  (screen.orientation as OrientationLock | undefined)?.unlock?.();
+}
+
 /**
  * One player for both playback modes. Native MP4 (post-Converter content) is properly
  * Range-seekable, so the browser's own <video> element handles seeking/buffering directly. MKV
@@ -402,7 +418,17 @@ export default function VideoPlayer({
   }, [volume, muted]);
 
   useEffect(() => {
-    const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+    // Covers every way fullscreen can end (this button, the OS's own exit gesture, Android back
+    // button, ...) uniformly, not just the toggleFullscreen click path below.
+    const handleFullscreenChange = () => {
+      const nowFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(nowFullscreen);
+      if (nowFullscreen) {
+        lockLandscape();
+      } else {
+        unlockOrientation();
+      }
+    };
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
