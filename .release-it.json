@@ -4,6 +4,7 @@
     "tagName": "v${version}",
     "requireCleanWorkingDir": true,
     "requireBranch": "main",
+    "requireUpstream": false,
     "push": false
   },
   "github": {
