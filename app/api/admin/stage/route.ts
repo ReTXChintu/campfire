@@ -8,7 +8,8 @@ import { pipeline } from "node:stream/promises";
 import { auth } from "@/auth";
 import { isAdminEmail } from "@/lib/admin";
 import { probeLocalFile } from "@/lib/drive";
-import { stagedFilePath, stagedMetaPath } from "@/lib/staging";
+import { stagedFilePath, stagedMetaPath, sweepStaleStagedFiles } from "@/lib/staging";
+import { sweepStaleDownloads } from "@/lib/downloads";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,10 @@ export async function POST(req: NextRequest) {
   if (!req.body) {
     return NextResponse.json({ error: "Missing request body" }, { status: 400 });
   }
+
+  // Opportunistic cleanup of anything abandoned from a past session — best-effort, never blocks
+  // this upload if it fails for some reason.
+  await Promise.all([sweepStaleStagedFiles().catch(() => {}), sweepStaleDownloads().catch(() => {})]);
 
   const stagingId = randomUUID();
   const filePath = stagedFilePath(stagingId);

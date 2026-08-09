@@ -443,50 +443,59 @@ async function convertWithInputArgs(
   const inputArgs = await sourceInputArgs(source);
   const subtitleMapArgs = probe.subtitleTracks.flatMap((t) => ["-map", `0:${t.index}`]);
 
-  await new Promise<void>((resolve, reject) => {
-    const ffmpeg = spawn("ffmpeg", [
-      ...inputArgs,
-      "-map", "0:v:0",
-      "-map", `0:${audioIndex}`,
-      ...subtitleMapArgs,
-      ...videoArgs,
-      "-c:a", "aac",
-      "-b:a", "192k",
-      // Downmix to stereo: ffmpeg's native AAC encoder can't reliably encode >2 channels (hit
-      // live: "Unsupported channel layout '6 channels'" on a 5.1 AC3/EAC3 source track, which is
-      // common in MKV rips) — browsers don't render surround differently from stereo anyway, so
-      // this is a pure reliability fix, not a quality tradeoff that matters for web playback.
-      "-ac", "2",
-      ...(subtitleMapArgs.length > 0 ? ["-c:s", "mov_text"] : []),
-      "-movflags", "+faststart",
-      "-f", "mp4",
-      "-y",
-      tempFilePath,
-    ]);
-    const stderrTail: string[] = [];
-    ffmpeg.stderr.on("data", (chunk: Buffer) => {
-      process.stderr.write(`[ffmpeg-convert ${chunk}`);
-      stderrTail.push(chunk.toString("utf-8"));
-      if (stderrTail.length > 20) stderrTail.shift();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const ffmpeg = spawn("ffmpeg", [
+        ...inputArgs,
+        "-map", "0:v:0",
+        "-map", `0:${audioIndex}`,
+        ...subtitleMapArgs,
+        ...videoArgs,
+        "-c:a", "aac",
+        "-b:a", "192k",
+        // Downmix to stereo: ffmpeg's native AAC encoder can't reliably encode >2 channels (hit
+        // live: "Unsupported channel layout '6 channels'" on a 5.1 AC3/EAC3 source track, which is
+        // common in MKV rips) — browsers don't render surround differently from stereo anyway, so
+        // this is a pure reliability fix, not a quality tradeoff that matters for web playback.
+        "-ac", "2",
+        ...(subtitleMapArgs.length > 0 ? ["-c:s", "mov_text"] : []),
+        "-movflags", "+faststart",
+        "-f", "mp4",
+        "-y",
+        tempFilePath,
+      ]);
+      const stderrTail: string[] = [];
+      ffmpeg.stderr.on("data", (chunk: Buffer) => {
+        process.stderr.write(`[ffmpeg-convert ${chunk}`);
+        stderrTail.push(chunk.toString("utf-8"));
+        if (stderrTail.length > 20) stderrTail.shift();
+      });
+      ffmpeg.on("error", reject);
+      ffmpeg.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          // Surface ffmpeg's own diagnostic (e.g. "Unsupported channel layout") in the error that
+          // ends up on the job doc, instead of just the exit code — that's what's actually useful
+          // for figuring out what went wrong without digging through server logs.
+          const detail = stderrTail.join("").trim().split("\n").slice(-5).join(" | ");
+          reject(new Error(`ffmpeg conversion failed (exit ${code})${detail ? `: ${detail}` : ""}`));
+        }
+      });
     });
-    ffmpeg.on("error", reject);
-    ffmpeg.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        // Surface ffmpeg's own diagnostic (e.g. "Unsupported channel layout") in the error that
-        // ends up on the job doc, instead of just the exit code — that's what's actually useful
-        // for figuring out what went wrong without digging through server logs.
-        const detail = stderrTail.join("").trim().split("\n").slice(-5).join(" | ");
-        reject(new Error(`ffmpeg conversion failed (exit ${code})${detail ? `: ${detail}` : ""}`));
-      }
-    });
-  });
 
-  const chosenAudioTrack = probe.audioTracks.find((t) => t.index === audioIndex) ?? null;
-  const subtitles = await extractAllSubtitlesToVtt(tempFilePath, probe.subtitleTracks);
+    const chosenAudioTrack = probe.audioTracks.find((t) => t.index === audioIndex) ?? null;
+    const subtitles = await extractAllSubtitlesToVtt(tempFilePath, probe.subtitleTracks);
 
-  return { tempFilePath, chosenAudioTrack, durationSeconds: probe.durationSeconds, subtitles };
+    return { tempFilePath, chosenAudioTrack, durationSeconds: probe.durationSeconds, subtitles };
+  } catch (error) {
+    // ffmpeg's -y flag creates/truncates tempFilePath immediately, so a failure partway through
+    // (bad channel layout, unsupported codec, killed process, ...) leaves a broken partial file
+    // behind — nothing else ever cleans this up, since the caller's own cleanup only covers the
+    // staged *input*. Best-effort delete before re-throwing so the real error still propagates.
+    await unlink(tempFilePath).catch(() => {});
+    throw error;
+  }
 }
 
 /**
