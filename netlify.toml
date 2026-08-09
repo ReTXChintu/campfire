@@ -1,0 +1,21 @@
+# Required at runtime (set in Netlify's dashboard, not here - never commit secrets):
+# AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, AUTH_URL, AUTH_TRUST_HOST, MONGODB_URI,
+# MONGODB_DB_NAME, GOOGLE_SERVICE_ACCOUNT_KEY_BASE64, DRIVE_ROOT_FOLDER_ID, ADMIN_EMAILS.
+#
+# Known limitation: Netlify's serverless functions have a 10-26s timeout and no ffmpeg binary, no
+# persistent local disk across separate requests. The admin Converter and MKV live-remux streaming
+# (anything in lib/drive.ts that spawns ffmpeg) will not work here - only native MP4 playback
+# (plain Range-passthrough, no ffmpeg) does. Keep using the Converter against a self-hosted
+# instance (or locally) and publish the resulting MP4s; this deployment serves the library.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+  # Skip triggering a new build when only docs/templates changed (exit 0 = skip, exit 1 = build).
+  ignore = "git diff --quiet HEAD~1 HEAD -- . ':!README.md' ':!.env.example'"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
