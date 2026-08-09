@@ -12,5 +12,8 @@
   },
   "npm": {
     "publish": false
+  },
+  "hooks": {
+    "after:bump": "npm version ${version} --workspaces --include-workspace-root --no-git-tag-version --allow-same-version"
   }
 }

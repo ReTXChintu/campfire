@@ -5,34 +5,17 @@
   "engines": {
     "node": ">=20.9.0"
   },
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm:dev --workspace=apps/backend\" \"npm:dev --workspace=apps/frontend\"",
+    "build": "npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend",
+    "lint": "npm run lint --workspace=apps/backend && npm run lint --workspace=apps/frontend",
     "release": "release-it"
   },
-  "dependencies": {
-    "@auth/mongodb-adapter": "^3.11.3",
-    "google-auth-library": "^11.0.0",
-    "googleapis": "^174.0.1",
-    "lodash.throttle": "^4.1.1",
-    "mongodb": "^6.21.0",
-    "next": "16.3.0",
-    "next-auth": "^5.0.0-beta.32",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
-  },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/lodash.throttle": "^4.1.9",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.0",
-    "release-it": "^21.0.2",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "concurrently": "^9.1.2",
+    "release-it": "^21.0.2"
   }
 }
