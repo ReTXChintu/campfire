@@ -1,11 +1,11 @@
 {
-    "name": "campfire_mobile",
-    "short_name": "campfire_mobile",
+    "name": "Campfire",
+    "short_name": "Campfire",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0A0B0F",
+    "theme_color": "#0A0B0F",
+    "description": "Campfire — your library, ready to watch.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
