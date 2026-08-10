@@ -55,4 +55,12 @@ export const env = {
       (v): v is string => !!v,
     );
   },
+  // Optional — both unset means "serve plain HTTP" (local dev). Set by pm2's ecosystem.config.js
+  // in the https://<IP>:<PORT> deployment; see scripts/generate-self-signed-cert.sh.
+  get sslCertPath(): string | undefined {
+    return process.env.SSL_CERT_PATH || undefined;
+  },
+  get sslKeyPath(): string | undefined {
+    return process.env.SSL_KEY_PATH || undefined;
+  },
 };

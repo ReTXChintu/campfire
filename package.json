@@ -14,10 +14,19 @@
     "lint": "npm run lint --workspace=apps/backend && npm run lint --workspace=apps/frontend",
     "mobile:analyze": "cd apps/mobile && flutter analyze",
     "mobile:build:web": "cd apps/mobile && flutter build web",
-    "release": "release-it"
+    "release": "release-it",
+    "deploy:certs": "./scripts/generate-self-signed-cert.sh",
+    "deploy:start": "pm2 start ecosystem.config.js",
+    "deploy:stop": "pm2 stop ecosystem.config.js",
+    "deploy:restart": "pm2 restart ecosystem.config.js",
+    "deploy:logs": "pm2 logs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "pm2": "^5.4.3",
     "release-it": "^21.0.2"
   }
 }

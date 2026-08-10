@@ -2,6 +2,9 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import passport from "passport";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import { readFileSync } from "node:fs";
 import { env } from "./config/env";
 
 import authRoutes from "./routes/auth";
@@ -58,6 +61,15 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: "Internal server error" });
 });
 
-app.listen(env.port, () => {
-  console.log(`Campfire backend listening on port ${env.port}`);
+// SSL_CERT_PATH/SSL_KEY_PATH are set by the root ecosystem.config.js (pm2) for the
+// https://<IP>:<PORT> deployment (self-signed cert, see scripts/generate-self-signed-cert.sh) —
+// absent locally, where plain HTTP is fine.
+const server =
+  env.sslCertPath && env.sslKeyPath
+    ? createHttpsServer({ cert: readFileSync(env.sslCertPath), key: readFileSync(env.sslKeyPath) }, app)
+    : createHttpServer(app);
+
+server.listen(env.port, () => {
+  const protocol = env.sslCertPath && env.sslKeyPath ? "https" : "http";
+  console.log(`Campfire backend listening on ${protocol}://0.0.0.0:${env.port}`);
 });
