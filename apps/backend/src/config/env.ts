@@ -46,4 +46,13 @@ export const env = {
   get mediaTokenSecret() {
     return required("MEDIA_TOKEN_SECRET");
   },
+  // Mobile (google_sign_in) ID tokens are minted against the platform-specific OAuth client
+  // (Android/iOS), not the web client above — verifyIdToken needs every valid audience. Optional:
+  // the mobile app is a separate, later piece of setup, so the backend must keep working without
+  // these configured.
+  get googleMobileClientIds(): string[] {
+    return [process.env.GOOGLE_ANDROID_CLIENT_ID, process.env.GOOGLE_IOS_CLIENT_ID].filter(
+      (v): v is string => !!v,
+    );
+  },
 };

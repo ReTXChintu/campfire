@@ -2,7 +2,7 @@
 
 A personal streaming and watch party app that lists and streams videos from a single Google Drive folder. Subfolders inside the root folder are treated as series/playlists with ordered episodes and autoplay-next. Any Google account can sign in; per-user watch progress is stored in MongoDB.
 
-Monorepo: `apps/frontend` (Vite + React SPA, deploys as a static site) and `apps/backend` (Express + TypeScript, runs on a VPS — it needs a persistent process for `ffmpeg` and Drive streaming, which serverless functions can't provide).
+Monorepo: `apps/frontend` (Vite + React SPA, deploys as a static site), `apps/backend` (Express + TypeScript, runs on a VPS — it needs a persistent process for `ffmpeg` and Drive streaming, which serverless functions can't provide), and `apps/mobile` (Flutter, Android/iOS — same design, no admin screens; see `apps/mobile/README.md`).
 
 ## How it works
 
@@ -79,11 +79,16 @@ npm run dev
 
 This runs both `apps/backend` (http://localhost:4000) and `apps/frontend` (http://localhost:5173) in parallel via `concurrently`. Open the frontend URL.
 
+## Mobile app
+
+`apps/mobile` is a separate Flutter app (Android/iOS), not an npm workspace — see `apps/mobile/README.md` for its own setup (it needs its own Google OAuth client per platform). It mirrors the web app's screens and dark theme but has **no admin UI at all**; the Converter and Catalog stay web-only.
+
 ## Deployment
 
 - **Frontend**: static build (`apps/frontend/dist`) — deploy to Netlify/Vercel/any static host. `netlify.toml` at the repo root is already configured for this (build command runs from the repo root via the npm workspace).
 - **Backend**: needs a real, persistent Node process — deploy to a VPS (`npm run build --workspace=apps/backend` then `npm start --workspace=apps/backend`, behind a process manager like pm2 and a reverse proxy for TLS).
+- **Mobile**: `flutter build apk` / `flutter build ipa` from `apps/mobile`, pointed at the production backend via `--dart-define=API_URL=...`, then distributed through the Play Store / App Store / TestFlight as usual — no CI wiring for this is set up yet.
 
 ## Releasing
 
-`npm run release` (wraps `release-it`) bumps the version in the root `package.json` and both `apps/*/package.json` together in a single commit + tag.
+`npm run release` (wraps `release-it`) bumps the version in the root `package.json`, both `apps/*/package.json` (backend + frontend), and `apps/mobile/pubspec.yaml` (via `scripts/sync-mobile-version.mjs`, since Flutter isn't an npm package) together in a single commit + tag.

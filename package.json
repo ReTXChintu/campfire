@@ -12,6 +12,8 @@
     "dev": "concurrently -n backend,frontend -c blue,green \"npm:dev --workspace=apps/backend\" \"npm:dev --workspace=apps/frontend\"",
     "build": "npm run build --workspace=apps/backend && npm run build --workspace=apps/frontend",
     "lint": "npm run lint --workspace=apps/backend && npm run lint --workspace=apps/frontend",
+    "mobile:analyze": "cd apps/mobile && flutter analyze",
+    "mobile:build:web": "cd apps/mobile && flutter build web",
     "release": "release-it"
   },
   "devDependencies": {
