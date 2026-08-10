@@ -3,12 +3,16 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
 
+type Mode = "signin" | "signup";
+
 export default function LoginPage() {
-  const { token, isLoading, login } = useAuth();
+  const { token, isLoading, login, signup } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl");
 
+  const [mode, setMode] = useState<Mode>("signin");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,14 +22,23 @@ export default function LoginPage() {
     if (token && !isLoading) navigate(callbackUrl || "/", { replace: true });
   }, [token, isLoading, callbackUrl, navigate]);
 
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError(null);
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
+      if (mode === "signup") {
+        await signup(email, password, name.trim() || undefined);
+      } else {
+        await login(email, password);
+      }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Sign-in failed — please try again.");
+      setError(err instanceof ApiError ? err.message : "Something went wrong — please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -48,6 +61,21 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={onSubmit} className="flex w-full flex-col gap-4">
+          {mode === "signup" && (
+            <div>
+              <label htmlFor="name" className="mb-1.5 block text-sm font-medium text-white/90">
+                Name <span className="text-text-tertiary">(optional)</span>
+              </label>
+              <input
+                id="name"
+                type="text"
+                autoComplete="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-md border border-divider bg-surface px-3 py-2 text-sm text-white outline-none focus:border-white/30"
+              />
+            </div>
+          )}
           <div>
             <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-white/90">
               Email
@@ -69,12 +97,16 @@ export default function LoginPage() {
             <input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
               required
+              minLength={mode === "signup" ? 8 : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-divider bg-surface px-3 py-2 text-sm text-white outline-none focus:border-white/30"
             />
+            {mode === "signup" && (
+              <p className="mt-1 text-xs text-text-tertiary">At least 8 characters.</p>
+            )}
           </div>
 
           {error && <p className="text-sm text-red-400">{error}</p>}
@@ -84,9 +116,20 @@ export default function LoginPage() {
             disabled={submitting || !email || !password}
             className="mt-2 rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-white/90 disabled:opacity-50"
           >
-            {submitting ? "Signing in…" : "Sign in"}
+            {submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
           </button>
         </form>
+
+        <p className="text-sm text-text-secondary">
+          {mode === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
+          <button
+            type="button"
+            onClick={() => switchMode(mode === "signup" ? "signin" : "signup")}
+            className="font-medium text-white underline-offset-2 hover:underline"
+          >
+            {mode === "signup" ? "Sign in" : "Sign up"}
+          </button>
+        </p>
       </div>
     </div>
   );

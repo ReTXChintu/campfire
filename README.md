@@ -1,12 +1,12 @@
 # Campfire
 
-A personal streaming and watch party app that lists and streams videos from a single Google Drive folder. Subfolders inside the root folder are treated as series/playlists with ordered episodes and autoplay-next. Single admin account (email/password, no signup); per-user watch progress is stored in MongoDB.
+A personal streaming and watch party app that lists and streams videos from a single Google Drive folder. Subfolders inside the root folder are treated as series/playlists with ordered episodes and autoplay-next. Email/password login with open signup (one seeded admin account, everyone else signs up); per-user watch progress is stored in MongoDB.
 
 Monorepo: `apps/frontend` (Vite + React SPA, deploys as a static site), `apps/backend` (Express + TypeScript, runs on a VPS — it needs a persistent process for `ffmpeg` and Drive streaming, which serverless functions can't provide), and `apps/mobile` (Flutter, Android/iOS — same design, no admin screens; see `apps/mobile/README.md`).
 
 ## How it works
 
-- **Login**: a single admin account, seeded into Mongo from `ADMIN_EMAIL`/`ADMIN_PASSWORD` on every backend startup — no OAuth, no signup. Edit those two vars and restart the backend to change the password.
+- **Login**: no OAuth — plain email/password. One admin account is seeded into Mongo from `ADMIN_EMAIL`/`ADMIN_PASSWORD` on every backend startup (edit those two vars and restart the backend to change the password); anyone else can sign up for their own account from the login screen, same as the old "any Google account can sign in" behavior, just with a password instead of an OAuth handshake. Signup never grants admin — only the seeded `ADMIN_EMAIL` account gets the admin UI.
 - **Google Drive access**: server-side only, via a Service Account (`GOOGLE_SERVICE_ACCOUNT_KEY_BASE64`) — unrelated to login. Service accounts have no storage quota of their own, so the target Drive folder only needs to be shared with the service account's email as **Viewer**; the app never writes to Drive. New content is uploaded by hand through Drive's own UI; the admin **Converter** page is a local convert-and-download tool (device → server → browser-native MP4 download), not a Drive uploader.
 
 ## Google Cloud setup (Drive access only)
@@ -49,7 +49,7 @@ VITE_API_URL=http://localhost:4000    # your deployed backend URL in prod
 
 ## Admin Converter
 
-The (only) account can visit `/admin` to convert a video from their own device into a browser-native MP4 entirely on the server (no Drive round trip for the source file), then download the result and upload it to the Drive folder by hand. `ffprobe` runs once during staging so the admin can pick an audio track and see real track info before converting; extracted subtitle tracks are saved and can be linked to a catalog video afterwards without re-uploading them.
+The seeded `ADMIN_EMAIL` account can visit `/admin` to convert a video from their own device into a browser-native MP4 entirely on the server (no Drive round trip for the source file), then download the result and upload it to the Drive folder by hand. `ffprobe` runs once during staging so the admin can pick an audio track and see real track info before converting; extracted subtitle tracks are saved and can be linked to a catalog video afterwards without re-uploading them.
 
 ## Content conventions
 

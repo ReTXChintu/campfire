@@ -10,7 +10,7 @@ You need a running `apps/backend` (see the root README) reachable from wherever 
 
 ### 2. Login
 
-There's no signup and no OAuth — a single admin account, seeded into Mongo from `apps/backend/.env`'s `ADMIN_EMAIL`/`ADMIN_PASSWORD` on every backend startup (see the root README). Sign in with those same credentials on the login screen.
+No OAuth — plain email/password, with a "Sign up" toggle on the login screen for creating your own account (never grants admin, and this app has no admin UI to grant anyway). One admin account is also seeded into Mongo from `apps/backend/.env`'s `ADMIN_EMAIL`/`ADMIN_PASSWORD` on every backend startup, for signing into the web app's admin pages — see the root README.
 
 ### 3. Run
 

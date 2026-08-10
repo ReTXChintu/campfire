@@ -20,9 +20,10 @@ class CurrentUser {
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
-/// Single admin account, no signup — POST /auth/login (email+password) is the only way in, same
-/// as the web app. There is deliberately no admin concept surfaced beyond auth itself — the mobile
-/// app has no admin screens at all (see project README).
+/// One seeded admin account plus open signup for everyone else — POST /auth/login and
+/// /auth/signup (both email+password) are the only ways in, same as the web app. There is
+/// deliberately no admin concept surfaced beyond auth itself — the mobile app has no admin
+/// screens at all (see project README), and signup never grants admin either way.
 class AuthService extends ChangeNotifier {
   AuthStatus status = AuthStatus.unknown;
   CurrentUser? user;
@@ -63,6 +64,23 @@ class AuthService extends ChangeNotifier {
       await _loadCurrentUser();
     } catch (e) {
       error = e is ApiException ? e.message : 'Sign-in failed — please try again.';
+      notifyListeners();
+    }
+  }
+
+  Future<void> signUp(String email, String password, String? name) async {
+    error = null;
+    notifyListeners();
+    try {
+      final data = await ApiClient.post('/auth/signup', {
+        'email': email,
+        'password': password,
+        if (name != null && name.isNotEmpty) 'name': name,
+      }) as Map<String, dynamic>;
+      await TokenStore.write(data['token'] as String);
+      await _loadCurrentUser();
+    } catch (e) {
+      error = e is ApiException ? e.message : 'Sign-up failed — please try again.';
       notifyListeners();
     }
   }

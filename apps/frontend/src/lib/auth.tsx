@@ -13,13 +13,15 @@ type AuthContextValue = {
   isAdmin: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Single admin account, no signup — POST /auth/login (email+password) is the only way in, on both
-// web and mobile. See apps/backend/src/lib/users.ts's seedAdminUser.
+// One seeded admin account (apps/backend/src/lib/users.ts's seedAdminUser) plus open signup for
+// everyone else — POST /auth/login and /auth/signup (both email+password) are the only ways in,
+// on both web and mobile. Signup never grants admin.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [token, setTokenState] = useState<string | null>(() => getToken());
@@ -37,6 +39,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokenState(newToken);
   };
 
+  const signup = async (email: string, password: string, name?: string) => {
+    const { token: newToken } = await apiPost<{ token: string }>("/auth/signup", { email, password, name });
+    setToken(newToken);
+    setTokenState(newToken);
+  };
+
   const logout = () => {
     clearToken();
     setTokenState(null);
@@ -45,7 +53,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ token, user: user ?? null, isAdmin: user?.isAdmin ?? false, isLoading: !!token && isLoading, login, logout }}
+      value={{
+        token,
+        user: user ?? null,
+        isAdmin: user?.isAdmin ?? false,
+        isLoading: !!token && isLoading,
+        login,
+        signup,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>
