@@ -22,20 +22,14 @@ export const env = {
   get driveRootFolderId() {
     return required("DRIVE_ROOT_FOLDER_ID");
   },
-  get adminEmails(): string[] {
-    return (process.env.ADMIN_EMAILS ?? "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
+  // Single-admin app now (no Google login, no signup) — this is both the seeded login account
+  // (see lib/users.ts's seedAdminUser, called from index.ts at startup) and the only email
+  // isAdminEmail() ever matches.
+  get adminEmail() {
+    return required("ADMIN_EMAIL").toLowerCase();
   },
-  get googleClientId() {
-    return required("GOOGLE_CLIENT_ID");
-  },
-  get googleClientSecret() {
-    return required("GOOGLE_CLIENT_SECRET");
-  },
-  get authCallbackUrl() {
-    return required("AUTH_CALLBACK_URL");
+  get adminPassword() {
+    return required("ADMIN_PASSWORD");
   },
   get frontendUrl() {
     return required("FRONTEND_URL");
@@ -45,15 +39,6 @@ export const env = {
   },
   get mediaTokenSecret() {
     return required("MEDIA_TOKEN_SECRET");
-  },
-  // Mobile (google_sign_in) ID tokens are minted against the platform-specific OAuth client
-  // (Android/iOS), not the web client above — verifyIdToken needs every valid audience. Optional:
-  // the mobile app is a separate, later piece of setup, so the backend must keep working without
-  // these configured.
-  get googleMobileClientIds(): string[] {
-    return [process.env.GOOGLE_ANDROID_CLIENT_ID, process.env.GOOGLE_IOS_CLIENT_ID].filter(
-      (v): v is string => !!v,
-    );
   },
   // Optional — both unset means "serve plain HTTP" (local dev). Set by pm2's ecosystem.config.js
   // in the https://<IP>:<PORT> deployment; see scripts/generate-self-signed-cert.sh.

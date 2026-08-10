@@ -1,28 +1,21 @@
 # Campfire
 
-A personal streaming and watch party app that lists and streams videos from a single Google Drive folder. Subfolders inside the root folder are treated as series/playlists with ordered episodes and autoplay-next. Any Google account can sign in; per-user watch progress is stored in MongoDB.
+A personal streaming and watch party app that lists and streams videos from a single Google Drive folder. Subfolders inside the root folder are treated as series/playlists with ordered episodes and autoplay-next. Single admin account (email/password, no signup); per-user watch progress is stored in MongoDB.
 
 Monorepo: `apps/frontend` (Vite + React SPA, deploys as a static site), `apps/backend` (Express + TypeScript, runs on a VPS — it needs a persistent process for `ffmpeg` and Drive streaming, which serverless functions can't provide), and `apps/mobile` (Flutter, Android/iOS — same design, no admin screens; see `apps/mobile/README.md`).
 
 ## How it works
 
-Two separate Google credentials are used, on purpose:
+- **Login**: a single admin account, seeded into Mongo from `ADMIN_EMAIL`/`ADMIN_PASSWORD` on every backend startup — no OAuth, no signup. Edit those two vars and restart the backend to change the password.
+- **Google Drive access**: server-side only, via a Service Account (`GOOGLE_SERVICE_ACCOUNT_KEY_BASE64`) — unrelated to login. Service accounts have no storage quota of their own, so the target Drive folder only needs to be shared with the service account's email as **Viewer**; the app never writes to Drive. New content is uploaded by hand through Drive's own UI; the admin **Converter** page is a local convert-and-download tool (device → server → browser-native MP4 download), not a Drive uploader.
 
-1. **OAuth Web Client** — used only for login (identity), via Passport's Google strategy. This is what lets any Google account sign in to the app.
-2. **Service Account** — used only server-side to call the Drive API (listing, streaming, thumbnails). Service accounts have no storage quota of their own, so the target Drive folder only needs to be shared with the service account's email as **Viewer** — the app never writes to Drive. New content is uploaded by hand through Drive's own UI; the admin **Converter** page is a local convert-and-download tool (device → server → browser-native MP4 download), not a Drive uploader.
-
-## Google Cloud setup
+## Google Cloud setup (Drive access only)
 
 1. **Create a project** at [console.cloud.google.com](https://console.cloud.google.com/) → New Project.
 2. **Enable the Drive API**: APIs & Services → Library → search "Google Drive API" → Enable.
-3. **Configure the OAuth consent screen**: APIs & Services → OAuth consent screen → User type **External** → fill in app name / support email / developer email → only default non-sensitive scopes are used, so no Google verification is required → once set up, click **Publish App** (Testing → Production) so any Google account can sign in, not just added test users.
-4. **Create the OAuth Web Client** (login only): Credentials → Create Credentials → OAuth client ID → Web application → add authorized redirect URIs:
-   - Dev: `http://localhost:4000/auth/google/callback`
-   - Prod: `https://<your-backend-domain>/auth/google/callback` (can be added later without recreating the client)
-   Copy the Client ID and Client Secret.
-5. **Create a Service Account** (Drive access): Credentials → Create Credentials → Service account (e.g. `drive-reader`, no project IAM roles needed) → Keys tab → Add Key → JSON → download. Treat this file as a secret — never commit it.
-6. **Share the target Drive folder** with the service account's `client_email` (found in the downloaded JSON) as **Viewer**.
-7. **Get the folder ID**: from the folder's URL, `https://drive.google.com/drive/folders/<FOLDER_ID>` — the trailing segment is your `DRIVE_ROOT_FOLDER_ID`.
+3. **Create a Service Account**: Credentials → Create Credentials → Service account (e.g. `drive-reader`, no project IAM roles needed) → Keys tab → Add Key → JSON → download. Treat this file as a secret — never commit it.
+4. **Share the target Drive folder** with the service account's `client_email` (found in the downloaded JSON) as **Viewer**.
+5. **Get the folder ID**: from the folder's URL, `https://drive.google.com/drive/folders/<FOLDER_ID>` — the trailing segment is your `DRIVE_ROOT_FOLDER_ID`.
 
 ## Environment variables
 
@@ -31,10 +24,10 @@ Copy `apps/backend/.env.example` to `apps/backend/.env` and fill in:
 ```
 PORT=4000
 
-GOOGLE_CLIENT_ID=                     # OAuth Web Client ID (step 4)
-GOOGLE_CLIENT_SECRET=                 # OAuth Web Client Secret (step 4)
-AUTH_CALLBACK_URL=http://localhost:4000/auth/google/callback
 FRONTEND_URL=http://localhost:5173    # your deployed frontend URL in prod
+
+ADMIN_EMAIL=                          # the one account this app has
+ADMIN_PASSWORD=                       # change this and restart the backend to rotate it
 
 AUTH_JWT_SECRET=                      # openssl rand -base64 32
 MEDIA_TOKEN_SECRET=                   # openssl rand -base64 32 (a different secret from the above)
@@ -45,9 +38,7 @@ MONGODB_DB_NAME=stream
 GOOGLE_SERVICE_ACCOUNT_KEY_BASE64=    # base64 of the entire downloaded service-account JSON file
                                        # e.g. `base64 -w0 service-account.json`
 
-DRIVE_ROOT_FOLDER_ID=                 # target folder id (step 7)
-
-ADMIN_EMAILS=                         # comma-separated Google account emails allowed to use /admin
+DRIVE_ROOT_FOLDER_ID=                 # target folder id (Google Cloud setup, step 5)
 ```
 
 And copy `apps/frontend/.env.example` to `apps/frontend/.env`:
@@ -58,7 +49,7 @@ VITE_API_URL=http://localhost:4000    # your deployed backend URL in prod
 
 ## Admin Converter
 
-Accounts listed in `ADMIN_EMAILS` can visit `/admin` to convert a video from their own device into a browser-native MP4 entirely on the server (no Drive round trip for the source file), then download the result and upload it to the Drive folder by hand. `ffprobe` runs once during staging so the admin can pick an audio track and see real track info before converting; extracted subtitle tracks are saved and can be linked to a catalog video afterwards without re-uploading them.
+The (only) account can visit `/admin` to convert a video from their own device into a browser-native MP4 entirely on the server (no Drive round trip for the source file), then download the result and upload it to the Drive folder by hand. `ffprobe` runs once during staging so the admin can pick an audio track and see real track info before converting; extracted subtitle tracks are saved and can be linked to a catalog video afterwards without re-uploading them.
 
 ## Content conventions
 
@@ -77,11 +68,11 @@ npm install
 npm run dev
 ```
 
-This runs both `apps/backend` (http://localhost:4000) and `apps/frontend` (http://localhost:5173) in parallel via `concurrently`. Open the frontend URL.
+This runs both `apps/backend` (http://localhost:4000) and `apps/frontend` (http://localhost:5173) in parallel via `concurrently`. Open the frontend URL and sign in with `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
 
 ## Mobile app
 
-`apps/mobile` is a separate Flutter app (Android/iOS), not an npm workspace — see `apps/mobile/README.md` for its own setup (it needs its own Google OAuth client per platform). It mirrors the web app's screens and dark theme but has **no admin UI at all**; the Converter and Catalog stay web-only.
+`apps/mobile` is a separate Flutter app (Android/iOS), not an npm workspace — see `apps/mobile/README.md` for its own setup. It mirrors the web app's screens, dark theme, and email/password login, but has **no admin UI at all**; the Converter and Catalog stay web-only.
 
 ## Deployment
 

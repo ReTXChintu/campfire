@@ -1,11 +1,11 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import passport from "passport";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { readFileSync } from "node:fs";
 import { env } from "./config/env";
+import { seedAdminUser } from "./lib/users";
 
 import authRoutes from "./routes/auth";
 import mediaTokenRoutes from "./routes/media-token";
@@ -30,7 +30,6 @@ import adminSubtitleSetRoutes from "./routes/admin/subtitleSets";
 const app = express();
 
 app.use(cors({ origin: env.frontendUrl }));
-app.use(passport.initialize());
 // Only parses bodies whose Content-Type is application/json — binary uploads (stage) and raw-text
 // uploads (subtitles) declare other content types and pass through untouched.
 app.use(express.json({ limit: "5mb" }));
@@ -69,7 +68,14 @@ const server =
     ? createHttpsServer({ cert: readFileSync(env.sslCertPath), key: readFileSync(env.sslKeyPath) }, app)
     : createHttpServer(app);
 
-server.listen(env.port, () => {
-  const protocol = env.sslCertPath && env.sslKeyPath ? "https" : "http";
-  console.log(`Campfire backend listening on ${protocol}://0.0.0.0:${env.port}`);
-});
+seedAdminUser(env.adminEmail, env.adminPassword)
+  .then(() => {
+    server.listen(env.port, () => {
+      const protocol = env.sslCertPath && env.sslKeyPath ? "https" : "http";
+      console.log(`Campfire backend listening on ${protocol}://0.0.0.0:${env.port}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Failed to seed admin user:", error);
+    process.exit(1);
+  });

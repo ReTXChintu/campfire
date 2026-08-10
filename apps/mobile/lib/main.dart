@@ -8,9 +8,9 @@ import 'services/token_store.dart';
 import 'theme/app_theme.dart';
 
 // Debug-only dev convenience: `flutter run --dart-define=DEBUG_TOKEN=<jwt>` boots straight into
-// an authenticated session, skipping Google Sign-In — useful for UI work or testing against a
-// backend without wiring up real OAuth credentials locally. Compiled out of release builds
-// entirely via kDebugMode, so this never ships.
+// an authenticated session, skipping the login screen — useful for UI work without typing
+// credentials on every hot restart. Compiled out of release builds entirely via kDebugMode, so
+// this never ships.
 const _debugToken = String.fromEnvironment('DEBUG_TOKEN');
 
 void main() async {

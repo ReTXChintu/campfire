@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'api_client.dart';
 import 'token_store.dart';
 
@@ -21,13 +20,10 @@ class CurrentUser {
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
-/// Google Sign-In happens natively on-device (no browser redirect) — the resulting ID token is
-/// exchanged for our own session JWT via POST /auth/google/mobile (see apps/backend's routes/auth.ts),
-/// the same JWT format/secret the web app's OAuth-callback flow issues. There is deliberately no
-/// admin concept surfaced here — the mobile app has no admin screens at all (see project README).
+/// Single admin account, no signup — POST /auth/login (email+password) is the only way in, same
+/// as the web app. There is deliberately no admin concept surfaced beyond auth itself — the mobile
+/// app has no admin screens at all (see project README).
 class AuthService extends ChangeNotifier {
-  final _googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
-
   AuthStatus status = AuthStatus.unknown;
   CurrentUser? user;
   String? error;
@@ -55,28 +51,23 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> signIn() async {
+  Future<void> signIn(String email, String password) async {
     error = null;
     notifyListeners();
     try {
-      final account = await _googleSignIn.signIn();
-      if (account == null) return; // user cancelled the picker
-
-      final googleAuth = await account.authentication;
-      final idToken = googleAuth.idToken;
-      if (idToken == null) throw Exception('Google did not return an ID token');
-
-      final data = await ApiClient.post('/auth/google/mobile', {'idToken': idToken}) as Map<String, dynamic>;
+      final data = await ApiClient.post('/auth/login', {
+        'email': email,
+        'password': password,
+      }) as Map<String, dynamic>;
       await TokenStore.write(data['token'] as String);
       await _loadCurrentUser();
     } catch (e) {
-      error = e.toString();
+      error = e is ApiException ? e.message : 'Sign-in failed — please try again.';
       notifyListeners();
     }
   }
 
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
     await TokenStore.clear();
     user = null;
     status = AuthStatus.signedOut;

@@ -1,17 +1,35 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth, googleSignInUrl } from "../lib/auth";
+import { useAuth } from "../lib/auth";
+import { ApiError } from "../lib/api";
 
 export default function LoginPage() {
-  const { token, isLoading } = useAuth();
+  const { token, isLoading, login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl");
-  const authFailed = searchParams.get("error") === "1";
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (token && !isLoading) navigate(callbackUrl || "/", { replace: true });
   }, [token, isLoading, callbackUrl, navigate]);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await login(email, password);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Sign-in failed — please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="relative flex flex-1 items-center justify-center overflow-hidden">
@@ -21,38 +39,54 @@ export default function LoginPage() {
           background: "radial-gradient(circle at 50% 30%, #3a1a12 0%, #1a0e12 40%, #0A0B0F 75%)",
         }}
       />
-      <div className="relative flex flex-col items-center gap-8 rounded-2xl border border-divider bg-surface/60 px-12 py-14 shadow-2xl shadow-black/50 backdrop-blur">
+      <div className="relative flex w-full max-w-sm flex-col items-center gap-8 rounded-2xl border border-divider bg-surface/60 px-10 py-14 shadow-2xl shadow-black/50 backdrop-blur">
         <div className="flex flex-col items-center gap-2">
           <h1 className="flex items-center gap-0.5 font-display text-6xl tracking-wide text-white">
             CAMPFIRE<span className="text-accent">•</span>
           </h1>
           <p className="text-sm text-text-secondary">Your library, ready to watch.</p>
         </div>
-        {authFailed && <p className="text-sm text-red-400">Sign-in failed — please try again.</p>}
-        <a
-          href={googleSignInUrl()}
-          className="flex items-center gap-3 rounded-lg bg-white px-6 py-3 font-medium text-black transition hover:scale-[1.02] hover:bg-white/90"
-        >
-          <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-            <path
-              fill="#4285F4"
-              d="M23.52 12.27c0-.85-.08-1.66-.22-2.45H12v4.63h6.47c-.28 1.5-1.13 2.77-2.4 3.62v3h3.88c2.27-2.09 3.57-5.17 3.57-8.8z"
+
+        <form onSubmit={onSubmit} className="flex w-full flex-col gap-4">
+          <div>
+            <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-white/90">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="username"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-md border border-divider bg-surface px-3 py-2 text-sm text-white outline-none focus:border-white/30"
             />
-            <path
-              fill="#34A853"
-              d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.88-3c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.26v3.11C3.24 21.3 7.28 24 12 24z"
+          </div>
+          <div>
+            <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-white/90">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-md border border-divider bg-surface px-3 py-2 text-sm text-white outline-none focus:border-white/30"
             />
-            <path
-              fill="#FBBC05"
-              d="M5.27 14.29A7.2 7.2 0 0 1 4.9 12c0-.79.14-1.56.37-2.29V6.6H1.26A11.98 11.98 0 0 0 0 12c0 1.94.46 3.77 1.26 5.4l4.01-3.11z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0 7.28 0 3.24 2.7 1.26 6.6l4.01 3.11C6.22 6.86 8.87 4.75 12 4.75z"
-            />
-          </svg>
-          Sign in with Google
-        </a>
+          </div>
+
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={submitting || !email || !password}
+            className="mt-2 rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-white/90 disabled:opacity-50"
+          >
+            {submitting ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
       </div>
     </div>
   );

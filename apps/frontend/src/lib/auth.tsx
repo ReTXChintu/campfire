@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- this is a context/hook module under
-   lib/, not a component file Fast Refresh needs to isolate; AuthProvider, useAuth, and
-   googleSignInUrl are meant to be imported together. */
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+   lib/, not a component file Fast Refresh needs to isolate; AuthProvider and useAuth are meant to
+   be imported together. */
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { API_URL, apiGet, getToken, setToken, clearToken } from "./api";
+import { apiGet, apiPost, getToken, setToken, clearToken } from "./api";
 
 type Me = { userId: string; email: string; name: string | null; avatarUrl: string | null; isAdmin: boolean };
 
@@ -12,28 +12,17 @@ type AuthContextValue = {
   user: Me | null;
   isAdmin: boolean;
   isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// The OAuth callback (routes/auth.ts on the backend) redirects here as `/login#token=...` — a URL
-// fragment, not a query param, so the token never gets logged by any server/proxy along the way.
-// Read it once, persist it, and strip it from the URL so a page refresh/share doesn't re-expose it.
-function consumeTokenFromHash(): string | null {
-  if (!window.location.hash.startsWith("#token=")) return null;
-  const token = window.location.hash.slice("#token=".length);
-  window.history.replaceState(null, "", window.location.pathname + window.location.search);
-  return token;
-}
-
+// Single admin account, no signup — POST /auth/login (email+password) is the only way in, on both
+// web and mobile. See apps/backend/src/lib/users.ts's seedAdminUser.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [token, setTokenState] = useState<string | null>(() => consumeTokenFromHash() ?? getToken());
-
-  useEffect(() => {
-    if (token) setToken(token);
-  }, [token]);
+  const [token, setTokenState] = useState<string | null>(() => getToken());
 
   const { data: user, isLoading } = useQuery({
     queryKey: ["me", token],
@@ -41,6 +30,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     enabled: !!token,
     retry: false,
   });
+
+  const login = async (email: string, password: string) => {
+    const { token: newToken } = await apiPost<{ token: string }>("/auth/login", { email, password });
+    setToken(newToken);
+    setTokenState(newToken);
+  };
 
   const logout = () => {
     clearToken();
@@ -50,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ token, user: user ?? null, isAdmin: user?.isAdmin ?? false, isLoading: !!token && isLoading, logout }}
+      value={{ token, user: user ?? null, isAdmin: user?.isAdmin ?? false, isLoading: !!token && isLoading, login, logout }}
     >
       {children}
     </AuthContext.Provider>
@@ -61,8 +56,4 @@ export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-}
-
-export function googleSignInUrl(): string {
-  return `${API_URL}/auth/google`;
 }
