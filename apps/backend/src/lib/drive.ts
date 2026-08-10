@@ -236,32 +236,59 @@ export async function remuxToMp4(
   }
   args.push("-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "pipe:1");
 
-  const ffmpeg = spawn("ffmpeg", args, { signal, killSignal: "SIGKILL" });
+  const ffmpeg = spawn(env.ffmpegPath, args, { signal, killSignal: "SIGKILL" });
 
-  ffmpeg.on("error", () => {}); // spawn's `signal` abort emits 'error' (AbortError) — unhandled crashes the process
+  ffmpeg.on("error", (err) => {
+    // spawn's `signal` abort emits 'error' too (AbortError) — expected, not a real failure.
+    if (isEnoent(err)) logBinaryNotFound("ffmpeg", env.ffmpegPath);
+  });
   ffmpeg.stdout.on("error", () => {}); // client disconnects mid-stream (EPIPE), expected
   ffmpeg.stderr.on("data", (chunk) => process.stderr.write(`[ffmpeg ${chunk}`));
 
   return ffmpeg.stdout;
 }
 
+function isEnoent(err: unknown): boolean {
+  return err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function logBinaryNotFound(label: "ffmpeg" | "ffprobe", triedPath: string): void {
+  const envVar = label === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH";
+  console.error(
+    `[${label}] binary not found (tried "${triedPath}") — install it and make sure it's on PATH, or set ${envVar} in .env to its absolute path (e.g. the output of \`which ${label}\`). This is a common gotcha under pm2, whose daemon's PATH doesn't always match an interactive shell's.`,
+  );
+}
+
+/** Wraps a spawn/exit failure with an actionable message when the binary itself couldn't be
+ * found — the raw "spawn ffmpeg ENOENT" Node error isn't obvious about what to do next. */
+function friendlyBinaryError(err: unknown, label: "ffmpeg" | "ffprobe"): Error {
+  if (isEnoent(err)) {
+    logBinaryNotFound(label, label === "ffmpeg" ? env.ffmpegPath : env.ffprobePath);
+    const envVar = label === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH";
+    return new Error(
+      `${label} was not found — install it and make sure it's on PATH, or set ${envVar} in .env to its absolute path.`,
+    );
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 /** Spawns a process, buffers its full stdout, and kills it if it hasn't exited within `timeoutMs`. */
-function runBuffered(cmd: string, args: string[], timeoutMs: number): Promise<Buffer> {
+function runBuffered(cmd: string, label: "ffmpeg" | "ffprobe", args: string[], timeoutMs: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args);
     const chunks: Buffer[] = [];
     const timer = setTimeout(() => proc.kill("SIGKILL"), timeoutMs);
 
     proc.stdout.on("data", (chunk) => chunks.push(chunk));
-    proc.stderr.on("data", (chunk) => process.stderr.write(`[${cmd} ${chunk}`));
+    proc.stderr.on("data", (chunk) => process.stderr.write(`[${label} ${chunk}`));
     proc.on("error", (err) => {
       clearTimeout(timer);
-      reject(err);
+      reject(friendlyBinaryError(err, label));
     });
     proc.on("close", (code) => {
       clearTimeout(timer);
       if (code === 0) resolve(Buffer.concat(chunks));
-      else reject(new Error(`${cmd} exited with code ${code}`));
+      else reject(new Error(`${label} exited with code ${code}`));
     });
   });
 }
@@ -303,6 +330,7 @@ async function sourceInputArgs(source: MediaSource): Promise<string[]> {
 
 async function probeSource(source: MediaSource): Promise<ProbeResult> {
   const raw = await runBuffered(
+    env.ffprobePath,
     "ffprobe",
     [
       "-v", "error",
@@ -387,7 +415,7 @@ export async function extractSubtitle(
   const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
 
   const ffmpeg = spawn(
-    "ffmpeg",
+    env.ffmpegPath,
     [
       "-headers", `Authorization: Bearer ${accessToken}\r\n`,
       "-ss", String(Math.max(0, startSeconds)),
@@ -400,7 +428,10 @@ export async function extractSubtitle(
     { signal, killSignal: "SIGKILL" },
   );
 
-  ffmpeg.on("error", () => {});
+  ffmpeg.on("error", (err) => {
+    // spawn's `signal` abort emits 'error' too (AbortError) — expected, not a real failure.
+    if (isEnoent(err)) logBinaryNotFound("ffmpeg", env.ffmpegPath);
+  });
   ffmpeg.stdout.on("error", () => {});
   ffmpeg.stderr.on("data", (chunk) => process.stderr.write(`[ffmpeg-sub ${chunk}`));
 
@@ -445,7 +476,7 @@ async function convertWithInputArgs(
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const ffmpeg = spawn("ffmpeg", [
+      const ffmpeg = spawn(env.ffmpegPath, [
         ...inputArgs,
         "-map", "0:v:0",
         "-map", `0:${audioIndex}`,
@@ -470,7 +501,7 @@ async function convertWithInputArgs(
         stderrTail.push(chunk.toString("utf-8"));
         if (stderrTail.length > 20) stderrTail.shift();
       });
-      ffmpeg.on("error", reject);
+      ffmpeg.on("error", (err) => reject(friendlyBinaryError(err, "ffmpeg")));
       ffmpeg.on("close", (code) => {
         if (code === 0) {
           resolve();
@@ -526,6 +557,7 @@ async function extractAllSubtitlesToVtt(
     const track = tracks[i];
     try {
       const vtt = await runBuffered(
+        env.ffmpegPath,
         "ffmpeg",
         ["-i", outputPath, "-map", `0:s:${i}`, "-c:s", "webvtt", "-f", "webvtt", "pipe:1"],
         120_000,
@@ -552,7 +584,7 @@ export async function convertSrtTextToVtt(srtText: string): Promise<string> {
   const tempPath = join(tmpdir(), `subtitle-upload-${randomUUID()}.srt`);
   await writeFile(tempPath, srtText, "utf-8");
   try {
-    const vtt = await runBuffered("ffmpeg", ["-i", tempPath, "-f", "webvtt", "pipe:1"], 30_000);
+    const vtt = await runBuffered(env.ffmpegPath, "ffmpeg", ["-i", tempPath, "-f", "webvtt", "pipe:1"], 30_000);
     return vtt.toString("utf-8");
   } finally {
     await unlink(tempPath).catch(() => {});

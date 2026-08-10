@@ -61,7 +61,7 @@ The seeded `ADMIN_EMAIL` account can visit `/admin` to convert a video from thei
 
 ## Running locally
 
-Requires `ffmpeg`/`ffprobe` on PATH for the backend.
+Requires `ffmpeg`/`ffprobe` on PATH for the backend (or set `FFMPEG_PATH`/`FFPROBE_PATH` in `apps/backend/.env` to their absolute paths — see that file's `.env.example`. If you see `spawn ffmpeg ENOENT` in the logs or as an API error, this is why: it's almost always PATH not resolving the binary in whatever process actually started the backend, which is especially easy to hit under pm2, since its daemon's PATH doesn't always match your interactive shell's).
 
 ```bash
 npm install

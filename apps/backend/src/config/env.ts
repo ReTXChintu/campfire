@@ -22,9 +22,8 @@ export const env = {
   get driveRootFolderId() {
     return required("DRIVE_ROOT_FOLDER_ID");
   },
-  // Single-admin app now (no Google login, no signup) — this is both the seeded login account
-  // (see lib/users.ts's seedAdminUser, called from index.ts at startup) and the only email
-  // isAdminEmail() ever matches.
+  // The one seeded admin login account (see lib/users.ts's seedAdminUser, called from index.ts at
+  // startup) — the only email isAdminEmail() ever matches, regardless of who else signs up.
   get adminEmail() {
     return required("ADMIN_EMAIL").toLowerCase();
   },
@@ -47,5 +46,15 @@ export const env = {
   },
   get sslKeyPath(): string | undefined {
     return process.env.SSL_KEY_PATH || undefined;
+  },
+  // Optional — defaults to relying on PATH, which is what breaks under pm2 most often (its
+  // daemon's PATH doesn't always match an interactive shell's, e.g. nvm/asdf-installed tools or
+  // anything only added in .bashrc). Set these to absolute paths (`which ffmpeg`) if you see
+  // "spawn ffmpeg ENOENT" / "spawn ffprobe ENOENT" in the logs.
+  get ffmpegPath() {
+    return process.env.FFMPEG_PATH || "ffmpeg";
+  },
+  get ffprobePath() {
+    return process.env.FFPROBE_PATH || "ffprobe";
   },
 };
