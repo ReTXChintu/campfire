@@ -7,15 +7,17 @@
 
   A base-config (not scoped to one domain) so this doesn't need editing every time the server's
   IP changes — it ADDS this one cert as an extra trusted anchor alongside the normal system CA
-  list (@system is still included), it doesn't replace anything, so HTTPS to any other real
-  (CA-signed) host still validates normally. The cert's own subjectAltName still locks it to
-  whatever IP it was generated for, so this doesn't let it impersonate other domains.
+  list (the "system" keyword below — note: no "@", that sigil is only for @resource references
+  like @raw/backend_cert; "system"/"user" are the two special keywords), it doesn't replace
+  anything, so HTTPS to any other real (CA-signed) host still validates normally. The cert's own
+  subjectAltName still locks it to whatever IP it was generated for, so this doesn't let it
+  impersonate other domains.
 -->
 <network-security-config>
     <base-config>
         <trust-anchors>
             <certificates src="@raw/backend_cert" />
-            <certificates src="@system" />
+            <certificates src="system" />
         </trust-anchors>
     </base-config>
 </network-security-config>
