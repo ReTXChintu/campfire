@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'app_router.dart';
 import 'services/auth_service.dart';
+import 'services/backend_trust.dart';
 import 'services/token_store.dart';
 import 'theme/app_theme.dart';
 
@@ -15,6 +16,7 @@ const _debugToken = String.fromEnvironment('DEBUG_TOKEN');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await installBackendCertTrust();
   if (kDebugMode && _debugToken.isNotEmpty) {
     await TokenStore.write(_debugToken);
   }

@@ -26,6 +26,11 @@ apps/frontend/dist/
 .DS_Store
 *.pem
 /certs/
+# Placeholder certs committed on purpose so a fresh clone's `flutter pub get`/build doesn't break
+# (Flutter errors if a declared asset is missing) — scripts/generate-self-signed-cert.sh
+# overwrites them locally with the real deployment cert; don't commit that overwrite.
+!apps/mobile/assets/certs/backend_cert.pem
+!apps/mobile/android/app/src/main/res/raw/backend_cert.pem
 
 # debug
 npm-debug.log*

@@ -94,7 +94,7 @@ SSL_KEY_PATH=./certs/key.pem
 ```
 
 1. Point `apps/backend/.env`'s `FRONTEND_URL` at `https://<SERVER_IP>:<FRONTEND_PORT>` and `apps/frontend/.env`'s `VITE_API_URL` at `https://<SERVER_IP>:<BACKEND_PORT>` (the frontend one has to be set *before* building — it's baked into the static JS bundle, pm2 can't override it at runtime).
-2. Generate a self-signed cert (browsers will warn on first visit — expected for an IP address with no real CA): `npm run deploy:certs` (reads `SERVER_IP` from `.env`, or pass an IP directly: `./scripts/generate-self-signed-cert.sh <ip>`).
+2. Generate a self-signed cert (browsers will warn on first visit — expected for an IP address with no real CA): `npm run deploy:certs` (reads `SERVER_IP` from `.env`, or pass an IP directly: `./scripts/generate-self-signed-cert.sh <ip>`). This also copies the public cert into `apps/mobile` — see that app's README if you're building the mobile app too, since native Android/iOS networking can't click through a self-signed-cert warning the way a browser can.
 3. Build both apps: `npm run build`.
 4. `npm run deploy:start` (wraps `pm2 start ecosystem.config.js`) — starts `campfire-backend` serving the API and `campfire-frontend` serving the static build, both over HTTPS with the generated cert, on the ports from `.env`. `npm run deploy:stop` / `deploy:restart` / `deploy:logs` manage them the same way; `pm2 save && pm2 startup` (run manually, not wrapped) makes them survive a reboot.
 
@@ -102,7 +102,7 @@ Without `SSL_CERT_PATH`/`SSL_KEY_PATH` set, both apps fall back to plain HTTP �
 
 ### Mobile
 
-`flutter build apk` / `flutter build ipa` from `apps/mobile`, pointed at the production backend via `--dart-define=API_URL=...`, then distributed through the Play Store / App Store / TestFlight, or a direct download link — set `VITE_MOBILE_APP_DOWNLOAD_URL` in `apps/frontend/.env` to show a "Get the App" button in the web app's top bar linking to it. No CI wiring for building/publishing the mobile app is set up yet.
+`flutter build apk` / `flutter build ipa` from `apps/mobile`, pointed at the production backend via `--dart-define=API_URL=...`, then distributed through the Play Store / App Store / TestFlight, or a direct download link — set `VITE_MOBILE_APP_DOWNLOAD_URL` in `apps/frontend/.env` to show a "Get the App" button in the web app's top bar linking to it. No CI wiring for building/publishing the mobile app is set up yet. If the backend uses the self-signed cert (Option B above), see `apps/mobile/README.md`'s certificate-trust section first — the app needs the cert bundled in to reach the backend at all, and iOS video playback specifically won't work against a self-signed cert regardless.
 
 ## Releasing
 

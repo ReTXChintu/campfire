@@ -31,6 +31,16 @@ openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
 
 chmod 600 "$CERT_DIR/key.pem"
 
+# The mobile app (apps/mobile) needs the *public* cert bundled in two places so it can trust this
+# specific self-signed cert at runtime — a browser lets you click through the warning, native
+# Android/iOS networking doesn't, so without this the app simply can't reach the backend at all.
+# Only the public certificate is copied — never key.pem, which stays server-side only.
+MOBILE_DART_ASSET="$ROOT_DIR/apps/mobile/assets/certs/backend_cert.pem"
+MOBILE_ANDROID_RAW="$ROOT_DIR/apps/mobile/android/app/src/main/res/raw/backend_cert.pem"
+mkdir -p "$(dirname "$MOBILE_DART_ASSET")" "$(dirname "$MOBILE_ANDROID_RAW")"
+cp "$CERT_DIR/cert.pem" "$MOBILE_DART_ASSET"
+cp "$CERT_DIR/cert.pem" "$MOBILE_ANDROID_RAW"
+
 echo
 echo "Generated self-signed certificate for $IP (valid 825 days):"
 echo "  $CERT_DIR/cert.pem"
@@ -39,3 +49,7 @@ echo
 echo "Set these in $ENV_FILE (already the default in .env.example):"
 echo "  SSL_CERT_PATH=./certs/cert.pem"
 echo "  SSL_KEY_PATH=./certs/key.pem"
+echo
+echo "Also copied the public cert into the mobile app (rebuild it after regenerating the cert):"
+echo "  $MOBILE_DART_ASSET"
+echo "  $MOBILE_ANDROID_RAW"
