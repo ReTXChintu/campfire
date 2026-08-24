@@ -44,11 +44,11 @@ class CampfireVideoPlayer extends StatefulWidget {
   State<CampfireVideoPlayer> createState() => _CampfireVideoPlayerState();
 }
 
-class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsBindingObserver {
+class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
+    with WidgetsBindingObserver {
   VideoPlayerController? _controller;
   bool _isBuffering = true;
   bool _controlsVisible = true;
-  bool _isFullscreen = false;
   bool _episodesOpen = false;
   bool _subtitleMenuOpen = false;
   bool _audioMenuOpen = false;
@@ -74,15 +74,20 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _enterImmersiveLandscape();
 
-    if (!video.isNative && !video.initialCompleted && video.initialPositionSeconds > 5) {
+    if (!video.isNative &&
+        !video.initialCompleted &&
+        video.initialPositionSeconds > 5) {
       _baseOffsetSeconds = video.initialPositionSeconds;
     }
 
     if (!video.isNative) {
-      CatalogService.fetchProbe(video.fileId).then((probe) {
-        if (mounted) setState(() => _probe = probe);
-      }).catchError((_) {});
+      CatalogService.fetchProbe(video.fileId)
+          .then((probe) {
+            if (mounted) setState(() => _probe = probe);
+          })
+          .catchError((_) {});
     }
 
     _bootstrap();
@@ -106,7 +111,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _saveProgress();
-    if (_isFullscreen) _restoreSystemChrome();
+    _restoreSystemChrome();
     _controller?.removeListener(_onTick);
     _controller?.dispose();
     super.dispose();
@@ -114,19 +119,25 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
       _saveProgress(force: true);
     }
   }
 
   Uri _currentUri() {
-    final params = <String, String>{if (_mediaToken != null) 'token': _mediaToken!};
+    final params = <String, String>{
+      if (_mediaToken != null) 'token': _mediaToken!,
+    };
     if (!video.isNative) {
-      if (_baseOffsetSeconds > 0) params['t'] = _baseOffsetSeconds.floor().toString();
+      if (_baseOffsetSeconds > 0)
+        params['t'] = _baseOffsetSeconds.floor().toString();
       if (_audioIndex != null) params['audio'] = _audioIndex.toString();
     }
     final base = '$apiBaseUrl/api/stream/${video.fileId}';
-    return params.isEmpty ? Uri.parse(base) : Uri.parse(base).replace(queryParameters: params);
+    return params.isEmpty
+        ? Uri.parse(base)
+        : Uri.parse(base).replace(queryParameters: params);
   }
 
   Future<void> _initController(Uri uri) async {
@@ -144,8 +155,12 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     }
     controller.addListener(_onTick);
     controller.setPlaybackSpeed(_speed);
-    if (video.isNative && !video.initialCompleted && video.initialPositionSeconds > 5) {
-      await controller.seekTo(Duration(milliseconds: (video.initialPositionSeconds * 1000).round()));
+    if (video.isNative &&
+        !video.initialCompleted &&
+        video.initialPositionSeconds > 5) {
+      await controller.seekTo(
+        Duration(milliseconds: (video.initialPositionSeconds * 1000).round()),
+      );
     }
     controller.play();
     setState(() => _isBuffering = false);
@@ -174,11 +189,16 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     if (video.isNative) {
       final d = _controller?.value.duration;
       if (d != null && d > Duration.zero) return d;
-      return video.durationSeconds != null ? Duration(milliseconds: (video.durationSeconds! * 1000).round()) : null;
+      return video.durationSeconds != null
+          ? Duration(milliseconds: (video.durationSeconds! * 1000).round())
+          : null;
     }
     final probeDuration = _probe?.durationSeconds;
-    if (probeDuration != null) return Duration(milliseconds: (probeDuration * 1000).round());
-    return video.durationSeconds != null ? Duration(milliseconds: (video.durationSeconds! * 1000).round()) : null;
+    if (probeDuration != null)
+      return Duration(milliseconds: (probeDuration * 1000).round());
+    return video.durationSeconds != null
+        ? Duration(milliseconds: (video.durationSeconds! * 1000).round())
+        : null;
   }
 
   void _onTick() {
@@ -192,7 +212,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     final duration = controller.value.duration;
     if (!_endedHandled &&
         duration > Duration.zero &&
-        controller.value.position >= duration - const Duration(milliseconds: 300) &&
+        controller.value.position >=
+            duration - const Duration(milliseconds: 300) &&
         !controller.value.isPlaying) {
       _endedHandled = true;
       _goToNext();
@@ -204,12 +225,15 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
       _saveProgress();
     }
 
-    setState(() {}); // cheap: drives the seek bar / subtitle overlay off _absolutePosition
+    setState(
+      () {},
+    ); // cheap: drives the seek bar / subtitle overlay off _absolutePosition
   }
 
   void _saveProgress({bool force = false}) {
     final now = DateTime.now();
-    if (!force && now.difference(_lastSave) < const Duration(seconds: 2)) return;
+    if (!force && now.difference(_lastSave) < const Duration(seconds: 2))
+      return;
     _lastSave = now;
     final duration = _effectiveDuration;
     CatalogService.saveProgress(
@@ -231,7 +255,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
   void _scheduleHide() {
     _hideTimer?.cancel();
     _hideTimer = Timer(_hideControlsDelay, () {
-      if (mounted && (_controller?.value.isPlaying ?? false) && !_episodesOpen && !_subtitleMenuOpen && !_audioMenuOpen) {
+      if (mounted &&
+          (_controller?.value.isPlaying ?? false) &&
+          !_episodesOpen &&
+          !_subtitleMenuOpen &&
+          !_audioMenuOpen) {
         setState(() => _controlsVisible = false);
       }
     });
@@ -264,7 +292,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
       if (duration > Duration.zero && target > duration) target = duration;
       controller.seekTo(target);
     } else {
-      final target = (_baseOffsetSeconds + controller.value.position.inSeconds + deltaSeconds).clamp(0, double.infinity);
+      final target =
+          (_baseOffsetSeconds +
+                  controller.value.position.inSeconds +
+                  deltaSeconds)
+              .clamp(0, double.infinity);
       _reload(seekTo: target.toDouble());
     }
     _showControls();
@@ -285,18 +317,14 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     _controller?.setPlaybackSpeed(next);
   }
 
-  Future<void> _toggleFullscreen() async {
-    if (_isFullscreen) {
-      await _restoreSystemChrome();
-      setState(() => _isFullscreen = false);
-    } else {
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      setState(() => _isFullscreen = true);
-    }
+  /// Watching is always landscape + immersive (status/nav bars hidden) — entered as soon as this
+  /// screen mounts, not gated behind a manual toggle. Reverted in `_restoreSystemChrome` on exit.
+  Future<void> _enterImmersiveLandscape() async {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
   Future<void> _restoreSystemChrome() async {
@@ -322,7 +350,10 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
   }
 
   List<VttCue> _cuesFor(int index) {
-    return _parsedCues.putIfAbsent(index, () => parseVtt(video.subtitles[index].vtt));
+    return _parsedCues.putIfAbsent(
+      index,
+      () => parseVtt(video.subtitles[index].vtt),
+    );
   }
 
   String? _currentSubtitleText() {
@@ -336,277 +367,353 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     final duration = _effectiveDuration;
     final position = _absolutePosition;
     final absolute = video.introStart != null && video.introEnd != null
-        ? position.inSeconds >= video.introStart! && position.inSeconds < video.introEnd!
+        ? position.inSeconds >= video.introStart! &&
+              position.inSeconds < video.introEnd!
         : false;
-    final showNext = video.outroStart != null && position.inSeconds >= video.outroStart! && video.nextFileId != null;
+    final showNext =
+        video.outroStart != null &&
+        position.inSeconds >= video.outroStart! &&
+        video.nextFileId != null;
     final subtitleText = _currentSubtitleText();
 
-    return PopScope(
-      canPop: !_isFullscreen,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _isFullscreen) _toggleFullscreen();
-      },
-      child: GestureDetector(
-        onTap: _showControls,
-        child: AspectRatio(
-          aspectRatio: 16 / 9,
-          child: ClipRRect(
-            borderRadius: _isFullscreen ? BorderRadius.zero : BorderRadius.circular(8),
-            child: ColoredBox(
-              color: Colors.black,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (_controller != null && _controller!.value.isInitialized)
-                    Center(
-                      child: AspectRatio(
-                        aspectRatio: _controller!.value.aspectRatio,
-                        child: VideoPlayer(_controller!),
-                      ),
-                    ),
+    return GestureDetector(
+      onTap: _showControls,
+      child: ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_controller != null && _controller!.value.isInitialized)
+              Center(
+                child: AspectRatio(
+                  aspectRatio: _controller!.value.aspectRatio,
+                  child: VideoPlayer(_controller!),
+                ),
+              ),
 
-                  if (subtitleText != null)
-                    Positioned(
-                      left: 24,
-                      right: 24,
-                      bottom: _controlsVisible ? 96 : 24,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), borderRadius: BorderRadius.circular(4)),
+            if (subtitleText != null)
+              Positioned(
+                left: 24,
+                right: 24,
+                bottom: _controlsVisible ? 96 : 24,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    subtitleText,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 15),
+                  ),
+                ),
+              ),
+
+            if (_isBuffering)
+              const Center(
+                child: CircularProgressIndicator(color: Colors.white70),
+              ),
+
+            if (!(_controller?.value.isPlaying ?? false) && !_isBuffering)
+              Center(
+                child: GestureDetector(
+                  onTap: _togglePlay,
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow,
+                      size: 40,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+
+            if (absolute)
+              Positioned(
+                right: 12,
+                bottom: 90,
+                child: _pillButton('Skip Intro', () {
+                  if (video.introEnd != null) _seekTo(video.introEnd!);
+                }),
+              ),
+            if (showNext)
+              Positioned(
+                right: 12,
+                bottom: 90,
+                child: _pillButton('Next Episode ›', _goToNext),
+              ),
+
+            // Top bar
+            AnimatedOpacity(
+              opacity: _controlsVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: IgnorePointer(
+                ignoring: !_controlsVisible,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.8),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        onPressed: () {
+                          if (context.canPop()) {
+                            context.pop();
+                          } else {
+                            context.go(video.backHref);
+                          }
+                        },
+                      ),
+                      Expanded(
                         child: Text(
-                          subtitleText,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white, fontSize: 15),
-                        ),
-                      ),
-                    ),
-
-                  if (_isBuffering)
-                    const Center(child: CircularProgressIndicator(color: Colors.white70)),
-
-                  if (!(_controller?.value.isPlaying ?? false) && !_isBuffering)
-                    Center(
-                      child: GestureDetector(
-                        onTap: _togglePlay,
-                        child: Container(
-                          padding: const EdgeInsets.all(18),
-                          decoration: BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
-                          child: const Icon(Icons.play_arrow, size: 40, color: Colors.white),
-                        ),
-                      ),
-                    ),
-
-                  if (absolute)
-                    Positioned(
-                      right: 12,
-                      bottom: 90,
-                      child: _pillButton('Skip Intro', () {
-                        if (video.introEnd != null) _seekTo(video.introEnd!);
-                      }),
-                    ),
-                  if (showNext)
-                    Positioned(right: 12, bottom: 90, child: _pillButton('Next Episode ›', _goToNext)),
-
-                  // Top bar
-                  AnimatedOpacity(
-                    opacity: _controlsVisible ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: IgnorePointer(
-                      ignoring: !_controlsVisible,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Colors.black.withValues(alpha: 0.8), Colors.transparent],
+                          video.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Bottom bar
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: AnimatedOpacity(
+                opacity: _controlsVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !_controlsVisible,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.9),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(8, 24, 8, 4),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.arrow_back, color: Colors.white),
-                              onPressed: () {
-                                if (_isFullscreen) {
-                                  _toggleFullscreen();
-                                } else if (context.canPop()) {
-                                  context.pop();
-                                } else {
-                                  context.go(video.backHref);
-                                }
-                              },
+                            const SizedBox(width: 8),
+                            Text(
+                              _formatTime(position),
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                              ),
                             ),
                             Expanded(
-                              child: Text(
-                                video.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                              child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 2,
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 6,
+                                  ),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 12,
+                                  ),
+                                  activeTrackColor: Colors.white,
+                                  inactiveTrackColor: Colors.white24,
+                                  thumbColor: Colors.white,
+                                ),
+                                child: Slider(
+                                  value:
+                                      duration != null &&
+                                          duration.inMilliseconds > 0
+                                      ? position.inMilliseconds
+                                            .clamp(0, duration.inMilliseconds)
+                                            .toDouble()
+                                      : 0,
+                                  max: (duration?.inMilliseconds ?? 0)
+                                      .toDouble()
+                                      .clamp(1, double.infinity),
+                                  onChanged: duration == null
+                                      ? null
+                                      : (value) => setState(() {}),
+                                  onChangeEnd: duration == null
+                                      ? null
+                                      : (value) => _seekTo(value / 1000),
+                                ),
                               ),
+                            ),
+                            Text(
+                              duration != null
+                                  ? _formatTime(duration)
+                                  : '--:--',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.skip_previous,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: video.previousFileId == null
+                                      ? null
+                                      : () => context.pushReplacement(
+                                          '/watch/${video.previousFileId}',
+                                        ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.replay_10,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: () => _skip(-_skipSeconds),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    (_controller?.value.isPlaying ?? false)
+                                        ? Icons.pause
+                                        : Icons.play_arrow,
+                                    color: Colors.white,
+                                    size: 30,
+                                  ),
+                                  onPressed: _togglePlay,
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.forward_10,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: () => _skip(_skipSeconds),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.skip_next,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: video.nextFileId == null
+                                      ? null
+                                      : () => context.pushReplacement(
+                                          '/watch/${video.nextFileId}',
+                                        ),
+                                ),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                TextButton(
+                                  onPressed: _cycleSpeed,
+                                  child: Text(
+                                    '${_speed}x',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                if (video.isNative &&
+                                    video.subtitles.isNotEmpty)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.subtitles_outlined,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: () => setState(() {
+                                      _subtitleMenuOpen = !_subtitleMenuOpen;
+                                      _audioMenuOpen = false;
+                                      _episodesOpen = false;
+                                      _hideTimer?.cancel();
+                                      _controlsVisible = true;
+                                    }),
+                                  ),
+                                if (!video.isNative &&
+                                    (_probe?.audioTracks.length ?? 0) > 1)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.audiotrack,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: () => setState(() {
+                                      _audioMenuOpen = !_audioMenuOpen;
+                                      _subtitleMenuOpen = false;
+                                      _episodesOpen = false;
+                                      _hideTimer?.cancel();
+                                      _controlsVisible = true;
+                                    }),
+                                  ),
+                                if (video.episodes.isNotEmpty)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.playlist_play,
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                    onPressed: () => setState(() {
+                                      _episodesOpen = !_episodesOpen;
+                                      _subtitleMenuOpen = false;
+                                      _audioMenuOpen = false;
+                                      _hideTimer?.cancel();
+                                      _controlsVisible = true;
+                                    }),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
-                      ),
+                      ],
                     ),
                   ),
-
-                  // Bottom bar
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: AnimatedOpacity(
-                      opacity: _controlsVisible ? 1 : 0,
-                      duration: const Duration(milliseconds: 200),
-                      child: IgnorePointer(
-                        ignoring: !_controlsVisible,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [Colors.black.withValues(alpha: 0.9), Colors.transparent],
-                            ),
-                          ),
-                          padding: const EdgeInsets.fromLTRB(8, 24, 8, 4),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                children: [
-                                  const SizedBox(width: 8),
-                                  Text(_formatTime(position), style: const TextStyle(color: Colors.white70, fontSize: 11)),
-                                  Expanded(
-                                    child: SliderTheme(
-                                      data: SliderTheme.of(context).copyWith(
-                                        trackHeight: 2,
-                                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                                        activeTrackColor: Colors.white,
-                                        inactiveTrackColor: Colors.white24,
-                                        thumbColor: Colors.white,
-                                      ),
-                                      child: Slider(
-                                        value: duration != null && duration.inMilliseconds > 0
-                                            ? position.inMilliseconds.clamp(0, duration.inMilliseconds).toDouble()
-                                            : 0,
-                                        max: (duration?.inMilliseconds ?? 0).toDouble().clamp(1, double.infinity),
-                                        onChanged: duration == null ? null : (value) => setState(() {}),
-                                        onChangeEnd: duration == null
-                                            ? null
-                                            : (value) => _seekTo(value / 1000),
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    duration != null ? _formatTime(duration) : '--:--',
-                                    style: const TextStyle(color: Colors.white70, fontSize: 11),
-                                  ),
-                                  const SizedBox(width: 8),
-                                ],
-                              ),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Row(
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.skip_previous, color: Colors.white),
-                                        onPressed: video.previousFileId == null
-                                            ? null
-                                            : () => context.pushReplacement('/watch/${video.previousFileId}'),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.replay_10, color: Colors.white),
-                                        onPressed: () => _skip(-_skipSeconds),
-                                      ),
-                                      IconButton(
-                                        icon: Icon(
-                                          (_controller?.value.isPlaying ?? false) ? Icons.pause : Icons.play_arrow,
-                                          color: Colors.white,
-                                          size: 30,
-                                        ),
-                                        onPressed: _togglePlay,
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.forward_10, color: Colors.white),
-                                        onPressed: () => _skip(_skipSeconds),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.skip_next, color: Colors.white),
-                                        onPressed: video.nextFileId == null
-                                            ? null
-                                            : () => context.pushReplacement('/watch/${video.nextFileId}'),
-                                      ),
-                                    ],
-                                  ),
-                                  Row(
-                                    children: [
-                                      TextButton(
-                                        onPressed: _cycleSpeed,
-                                        child: Text('${_speed}x', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                      ),
-                                      if (video.isNative && video.subtitles.isNotEmpty)
-                                        IconButton(
-                                          icon: const Icon(Icons.subtitles_outlined, color: Colors.white, size: 20),
-                                          onPressed: () => setState(() {
-                                            _subtitleMenuOpen = !_subtitleMenuOpen;
-                                            _audioMenuOpen = false;
-                                            _episodesOpen = false;
-                                            _hideTimer?.cancel();
-                                            _controlsVisible = true;
-                                          }),
-                                        ),
-                                      if (!video.isNative && (_probe?.audioTracks.length ?? 0) > 1)
-                                        IconButton(
-                                          icon: const Icon(Icons.audiotrack, color: Colors.white, size: 20),
-                                          onPressed: () => setState(() {
-                                            _audioMenuOpen = !_audioMenuOpen;
-                                            _subtitleMenuOpen = false;
-                                            _episodesOpen = false;
-                                            _hideTimer?.cancel();
-                                            _controlsVisible = true;
-                                          }),
-                                        ),
-                                      if (video.episodes.isNotEmpty)
-                                        IconButton(
-                                          icon: const Icon(Icons.playlist_play, color: Colors.white, size: 22),
-                                          onPressed: () => setState(() {
-                                            _episodesOpen = !_episodesOpen;
-                                            _subtitleMenuOpen = false;
-                                            _audioMenuOpen = false;
-                                            _hideTimer?.cancel();
-                                            _controlsVisible = true;
-                                          }),
-                                        ),
-                                      IconButton(
-                                        icon: Icon(_isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white),
-                                        onPressed: _toggleFullscreen,
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  if (_episodesOpen)
-                    EpisodesPanel(
-                      episodes: video.episodes,
-                      progressByFileId: video.progressByFileId,
-                      currentFileId: video.fileId,
-                      onSelect: (id) => context.pushReplacement('/watch/$id'),
-                      onClose: _closePanels,
-                    ),
-
-                  if (_subtitleMenuOpen) _subtitleMenu(),
-                  if (_audioMenuOpen) _audioMenu(),
-                ],
+                ),
               ),
             ),
-          ),
+
+            if (_episodesOpen)
+              EpisodesPanel(
+                episodes: video.episodes,
+                progressByFileId: video.progressByFileId,
+                currentFileId: video.fileId,
+                onSelect: (id) => context.pushReplacement('/watch/$id'),
+                onClose: _closePanels,
+              ),
+
+            if (_subtitleMenuOpen) _subtitleMenu(),
+            if (_audioMenuOpen) _audioMenu(),
+          ],
         ),
       ),
     );
@@ -622,7 +729,14 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
           border: Border.all(color: Colors.white24),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
       ),
     );
   }
@@ -631,7 +745,12 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     return Positioned.fill(
       child: Row(
         children: [
-          Expanded(child: GestureDetector(onTap: _closePanels, child: Container(color: Colors.black54))),
+          Expanded(
+            child: GestureDetector(
+              onTap: _closePanels,
+              child: Container(color: Colors.black54),
+            ),
+          ),
           Container(
             width: 260,
             color: const Color(0xF2141414),
@@ -643,8 +762,19 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
                     padding: const EdgeInsets.all(12),
                     child: Row(
                       children: [
-                        Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
-                        IconButton(icon: const Icon(Icons.close, color: Colors.white70), onPressed: _closePanels),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: _closePanels,
+                        ),
                       ],
                     ),
                   ),
@@ -684,7 +814,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
     final tracks = _probe?.audioTracks ?? [];
     return _sidePanel('Audio Track', [
       ...tracks.map((t) {
-        final label = '${t.language ?? 'Track ${t.index}'} (${t.codecName.toUpperCase()})';
+        final label =
+            '${t.language ?? 'Track ${t.index}'} (${t.codecName.toUpperCase()})';
         return RadioListTile<int?>(
           value: t.index,
           groupValue: _audioIndex ?? tracks.first.index,
@@ -692,7 +823,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer> with WidgetsB
           activeColor: AppColors.accent,
           onChanged: (value) {
             _closePanels();
-            if (value != null) _reload(seekTo: _absolutePosition.inSeconds.toDouble(), audioIndex: value);
+            if (value != null)
+              _reload(
+                seekTo: _absolutePosition.inSeconds.toDouble(),
+                audioIndex: value,
+              );
           },
         );
       }),

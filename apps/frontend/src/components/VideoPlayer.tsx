@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import throttle from "lodash.throttle";
-import type { ProbeResult, ConvertedSubtitle } from "../lib/types";
+import type { ProbeResult, ConvertedSubtitle, WatchPartySyncState } from "../lib/types";
 import { languageName } from "../lib/languageNames";
 import { API_URL, apiGet, apiPost, apiPostKeepalive } from "../lib/api";
 import { useMediaToken } from "../lib/mediaToken";
@@ -43,6 +43,12 @@ type Props = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  watchPartySync?: {
+    enabled: boolean;
+    isHost: boolean;
+    inboundState: WatchPartySyncState | null;
+    onStateChange?: (state: WatchPartySyncState) => void | Promise<void>;
+  };
 };
 
 const SAVE_INTERVAL_MS = 10_000;
@@ -116,14 +122,20 @@ export default function VideoPlayer({
   introStart,
   introEnd,
   outroStart,
+  watchPartySync,
 }: Props) {
   const isNative = seekMode === "native";
+  const syncEnabled = !!watchPartySync?.enabled && isNative;
+  // Guests can't seek/skip/change speed during a synced party — those actions would silently
+  // desync them until the host's next broadcast, with no indication anything "failed".
+  const locked = syncEnabled && watchPartySync?.isHost === false;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<HTMLTrackElement>(null);
   const appliedSubtitleDelayRef = useRef(0);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const applyingInboundSyncRef = useRef(false);
   const navigate = useNavigate();
 
   const { data: mediaToken } = useMediaToken(fileId);
@@ -171,6 +183,26 @@ export default function VideoPlayer({
   const getAbsolutePosition = useCallback(
     (video: HTMLVideoElement) => (isNative ? video.currentTime : baseOffsetSeconds + video.currentTime),
     [isNative, baseOffsetSeconds],
+  );
+
+  const emitWatchPartyState = useCallback(
+    (input?: Partial<Omit<WatchPartySyncState, "type" | "updatedAt">>) => {
+      if (!syncEnabled || !watchPartySync?.isHost || !watchPartySync.onStateChange || !videoRef.current) return;
+      void watchPartySync.onStateChange({
+        type: "sync-state",
+        playing: input?.playing ?? !videoRef.current.paused,
+        positionSeconds: input?.positionSeconds ?? getAbsolutePosition(videoRef.current),
+        playbackRate: input?.playbackRate ?? speed,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    // Deliberately keyed on the individual fields we read, not the `watchPartySync` object
+    // itself — that object is a fresh literal on every WatchPage render (participant join/leave,
+    // mic toggle, connection-state change, ...), and depending on its reference would recreate
+    // this callback — and every effect that lists it as a dependency below — on each of those
+    // unrelated re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [getAbsolutePosition, speed, syncEnabled, watchPartySync?.isHost, watchPartySync?.onStateChange],
   );
 
   // Auto-hide the control overlay during playback, same as any streaming service — always
@@ -296,12 +328,16 @@ export default function VideoPlayer({
     const handlePlay = () => {
       setIsPlaying(true);
       scheduleHide();
+      if (!applyingInboundSyncRef.current) emitWatchPartyState({ playing: true });
     };
     const handlePause = () => {
       setIsPlaying(false);
       save(getAbsolutePosition(video));
       clearHideTimer();
       setControlsVisible(true);
+      if (!applyingInboundSyncRef.current) {
+        emitWatchPartyState({ playing: false, positionSeconds: getAbsolutePosition(video) });
+      }
     };
 
     const handleEnded = () => goToNext();
@@ -381,6 +417,7 @@ export default function VideoPlayer({
     introStart,
     introEnd,
     outroStart,
+    emitWatchPartyState,
   ]);
 
   // Browsers reset playbackRate to 1 whenever `src` changes, not just when the user picks a new
@@ -396,6 +433,38 @@ export default function VideoPlayer({
     video.addEventListener("loadedmetadata", applyRate);
     return () => video.removeEventListener("loadedmetadata", applyRate);
   }, [speed, src]);
+
+  useEffect(() => {
+    if (!syncEnabled || watchPartySync?.isHost || !watchPartySync?.inboundState || !videoRef.current) return;
+    const video = videoRef.current;
+    const state = watchPartySync.inboundState;
+    const elapsedSeconds = Math.max(0, Date.now() - Date.parse(state.updatedAt)) / 1000;
+    const targetPosition = Math.max(
+      0,
+      state.positionSeconds + (state.playing ? elapsedSeconds * state.playbackRate : 0),
+    );
+
+    applyingInboundSyncRef.current = true;
+    video.currentTime = targetPosition;
+    video.playbackRate = state.playbackRate;
+    video.preservesPitch = true;
+    setSpeed(state.playbackRate);
+    setDisplaySeconds(targetPosition);
+
+    if (state.playing) {
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+
+    const timeout = setTimeout(() => {
+      applyingInboundSyncRef.current = false;
+    }, 0);
+    return () => clearTimeout(timeout);
+    // Keyed on the actual inbound state, not the wrapping `watchPartySync` object (see the note
+    // on `emitWatchPartyState` above) — otherwise this re-applies the same, increasingly stale
+    // position on every unrelated WatchPage render, visibly re-seeking/replaying a guest's video.
+  }, [syncEnabled, watchPartySync?.isHost, watchPartySync?.inboundState]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -471,9 +540,10 @@ export default function VideoPlayer({
   };
 
   const commitSeek = () => {
-    if (scrubValue == null) return;
+    if (scrubValue == null || locked) return;
     if (isNative) {
       if (videoRef.current) videoRef.current.currentTime = scrubValue;
+      emitWatchPartyState({ positionSeconds: scrubValue });
     } else {
       setBaseOffsetSeconds(scrubValue);
     }
@@ -529,6 +599,7 @@ export default function VideoPlayer({
   };
 
   const skip = (deltaSeconds: number) => {
+    if (locked) return;
     const video = videoRef.current;
     if (!video) return;
     if (isNative) {
@@ -537,6 +608,7 @@ export default function VideoPlayer({
         effectiveDuration ?? Number.POSITIVE_INFINITY,
       );
       video.currentTime = target;
+      emitWatchPartyState({ positionSeconds: target });
       return;
     }
     const targetLocal = video.currentTime + deltaSeconds;
@@ -548,8 +620,11 @@ export default function VideoPlayer({
   };
 
   const cycleSpeed = () => {
+    if (locked) return;
     const idx = SPEED_OPTIONS.indexOf(speed);
-    setSpeed(SPEED_OPTIONS[(idx + 1) % SPEED_OPTIONS.length]);
+    const nextSpeed = SPEED_OPTIONS[(idx + 1) % SPEED_OPTIONS.length];
+    setSpeed(nextSpeed);
+    emitWatchPartyState({ playbackRate: nextSpeed });
   };
 
   const shownSeconds = scrubValue ?? displaySeconds;
@@ -692,7 +767,8 @@ export default function VideoPlayer({
             max={effectiveDuration ?? 0}
             step={1}
             value={Math.min(shownSeconds, effectiveDuration ?? shownSeconds)}
-            disabled={effectiveDuration == null}
+            disabled={effectiveDuration == null || locked}
+            title={locked ? "Only the host can seek during a watch party" : undefined}
             onChange={(e) => setScrubValue(Number(e.target.value))}
             onMouseUp={commitSeek}
             onTouchEnd={commitSeek}
@@ -731,8 +807,10 @@ export default function VideoPlayer({
             <button
               type="button"
               onClick={() => skip(-SKIP_SECONDS)}
+              disabled={locked}
+              title={locked ? "Only the host can seek during a watch party" : undefined}
               aria-label="Back 10 seconds"
-              className={iconButton}
+              className={`${iconButton} disabled:opacity-30`}
             >
               <Replay10Icon className="h-7 w-7" />
             </button>
@@ -747,8 +825,10 @@ export default function VideoPlayer({
             <button
               type="button"
               onClick={() => skip(SKIP_SECONDS)}
+              disabled={locked}
+              title={locked ? "Only the host can seek during a watch party" : undefined}
               aria-label="Forward 10 seconds"
-              className={iconButton}
+              className={`${iconButton} disabled:opacity-30`}
             >
               <Forward10Icon className="h-7 w-7" />
             </button>
@@ -792,7 +872,13 @@ export default function VideoPlayer({
           </div>
 
           <div className="flex items-center gap-4">
-            <button type="button" onClick={cycleSpeed} className="text-sm text-white/80 hover:text-white">
+            <button
+              type="button"
+              onClick={cycleSpeed}
+              disabled={locked}
+              title={locked ? "Only the host can change speed during a watch party" : undefined}
+              className="text-sm text-white/80 hover:text-white disabled:opacity-30"
+            >
               {speed}x
             </button>
             <button type="button" onClick={toggleSettings} aria-label="Settings" className={iconButton}>

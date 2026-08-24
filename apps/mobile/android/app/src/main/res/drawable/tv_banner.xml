@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV home-screen banner (320x180dp per Android TV requirements). Layer-list
+     rather than a raster asset since there's no dedicated TV artwork yet — reuses the
+     existing brand color and launcher icon. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/tv_banner_background" />
+    <item android:gravity="center" android:width="96dp" android:height="96dp">
+        <bitmap
+            android:gravity="center"
+            android:src="@mipmap/ic_launcher" />
+    </item>
+</layer-list>

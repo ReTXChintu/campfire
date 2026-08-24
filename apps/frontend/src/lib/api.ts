@@ -54,6 +54,12 @@ export function apiPatch<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+export function apiDelete<T>(path: string): Promise<T> {
+  return request<T>(path, {
+    method: "DELETE",
+  });
+}
+
 export function apiPostText<T>(path: string, text: string): Promise<T> {
   return request<T>(path, { method: "POST", headers: { "Content-Type": "text/plain" }, body: text });
 }

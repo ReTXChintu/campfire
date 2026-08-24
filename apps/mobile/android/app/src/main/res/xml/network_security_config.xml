@@ -14,7 +14,7 @@
   impersonate other domains.
 -->
 <network-security-config>
-    <base-config>
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="@raw/backend_cert" />
             <certificates src="system" />

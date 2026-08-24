@@ -16,6 +16,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "googleapis": "^174.0.1",
+    "livekit-server-sdk": "^2.14.0",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.21.0"
   },

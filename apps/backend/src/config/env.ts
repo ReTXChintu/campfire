@@ -39,6 +39,15 @@ export const env = {
   get mediaTokenSecret() {
     return required("MEDIA_TOKEN_SECRET");
   },
+  get livekitUrl(): string | undefined {
+    return process.env.LIVEKIT_URL || undefined;
+  },
+  get livekitApiKey(): string | undefined {
+    return process.env.LIVEKIT_API_KEY || undefined;
+  },
+  get livekitApiSecret(): string | undefined {
+    return process.env.LIVEKIT_API_SECRET || undefined;
+  },
   // Optional — both unset means "serve plain HTTP" (local dev). Set by pm2's ecosystem.config.js
   // in the https://<IP>:<PORT> deployment; see scripts/generate-self-signed-cert.sh.
   get sslCertPath(): string | undefined {

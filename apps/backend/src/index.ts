@@ -16,6 +16,7 @@ import thumbnailRoutes, { folderThumbnailRouter } from "./routes/thumbnail";
 import progressRoutes from "./routes/progress";
 import probeRoutes from "./routes/probe";
 import healthRoutes from "./routes/health";
+import watchPartyRoutes from "./routes/watchParties";
 
 import adminStageRoutes from "./routes/admin/stage";
 import adminConvertRoutes from "./routes/admin/convert";
@@ -44,6 +45,7 @@ app.use("/api/thumbnail-folder", folderThumbnailRouter);
 app.use("/api/progress", progressRoutes);
 app.use("/api/probe", probeRoutes);
 app.use("/api/health", healthRoutes);
+app.use("/api/watch-parties", watchPartyRoutes);
 
 app.use("/api/admin/stage", adminStageRoutes);
 app.use("/api/admin/convert", adminConvertRoutes);

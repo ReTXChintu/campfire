@@ -110,3 +110,36 @@ export type VideoResponse = {
   introEnd: number | null;
   outroStart: number | null;
 };
+
+export type WatchParty = {
+  id: string;
+  roomName: string;
+  fileId: string;
+  title: string | null;
+  hostUserId: string;
+  hostParticipantIdentity: string;
+  playing: boolean;
+  positionSeconds: number;
+  effectivePositionSeconds: number;
+  playbackRate: number;
+  createdAt: string;
+  updatedAt: string;
+  endedAt: string | null;
+};
+
+export type WatchPartyJoinTokenResponse = {
+  serverUrl: string;
+  participantToken: string;
+  participantIdentity: string;
+  participantName: string;
+  isHost: boolean;
+  party: WatchParty;
+};
+
+export type WatchPartySyncState = {
+  type: "sync-state";
+  playing: boolean;
+  positionSeconds: number;
+  playbackRate: number;
+  updatedAt: string;
+};
