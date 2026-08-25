@@ -14,6 +14,7 @@ type AuthContextValue = {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name?: string) => Promise<void>;
+  resetPassword: (email: string, newPassword: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -45,6 +46,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokenState(newToken);
   };
 
+  const resetPassword = async (email: string, newPassword: string) => {
+    const { token: newToken } = await apiPost<{ token: string }>("/auth/reset-password", { email, newPassword });
+    setToken(newToken);
+    setTokenState(newToken);
+  };
+
   const logout = () => {
     clearToken();
     setTokenState(null);
@@ -60,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading: !!token && isLoading,
         login,
         signup,
+        resetPassword,
         logout,
       }}
     >

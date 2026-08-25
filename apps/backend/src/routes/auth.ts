@@ -1,7 +1,14 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
-import { createUser, EmailAlreadyRegisteredError, getUserByEmail, getUserById, verifyPassword } from "../lib/users";
+import {
+  createUser,
+  EmailAlreadyRegisteredError,
+  getUserByEmail,
+  getUserById,
+  resetPassword,
+  verifyPassword,
+} from "../lib/users";
 import { requireAuth } from "../middleware/auth";
 import { isAdminEmail } from "../lib/admin";
 
@@ -58,6 +65,29 @@ router.post("/signup", async (req, res) => {
   }
 
   res.json({ token: signToken(user) });
+});
+
+// No email/token step, no old-password check — personal-use app, forgetting the password
+// shouldn't lock anyone out. See lib/users.ts's resetPassword for the admin-account caveat.
+router.post("/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body as { email?: string; newPassword?: string };
+  if (!email || !newPassword) {
+    res.status(400).json({ error: "email and newPassword are required" });
+    return;
+  }
+  if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    return;
+  }
+
+  const updated = await resetPassword(email, newPassword);
+  if (!updated) {
+    res.status(404).json({ error: "No account with that email" });
+    return;
+  }
+
+  const user = await getUserByEmail(email);
+  res.json({ token: signToken(user!) });
 });
 
 router.get("/me", requireAuth, async (req, res) => {

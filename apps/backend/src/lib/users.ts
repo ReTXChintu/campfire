@@ -92,3 +92,15 @@ export async function createUser(input: {
 export async function verifyPassword(user: UserDoc, password: string): Promise<boolean> {
   return bcrypt.compare(password, user.passwordHash);
 }
+
+/** No email/token step by design — this app is personal-use only. Note the admin account is a
+ * special case: seedAdminUser re-syncs its passwordHash from ADMIN_PASSWORD on every backend
+ * restart, so a reset here won't stick for that account past the next restart unless .env is
+ * also updated. Returns false if no account has this email. */
+export async function resetPassword(email: string, newPassword: string): Promise<boolean> {
+  const col = await collection();
+  const id = email.toLowerCase();
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+  const result = await col.updateOne({ _id: id }, { $set: { passwordHash, updatedAt: new Date() } });
+  return result.matchedCount > 0;
+}

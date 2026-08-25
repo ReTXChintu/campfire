@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
 
 type Mode = "signin" | "signup";
+
+const mobileAppDownloadUrl = import.meta.env.VITE_MOBILE_APP_DOWNLOAD_URL;
 
 export default function LoginPage() {
   const { token, isLoading, login, signup } = useAuth();
@@ -91,9 +93,16 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-white/90">
-              Password
-            </label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label htmlFor="password" className="block text-sm font-medium text-white/90">
+                Password
+              </label>
+              {mode === "signin" && (
+                <Link to="/reset-password" className="text-xs text-text-secondary underline-offset-2 hover:underline">
+                  Forgot password?
+                </Link>
+              )}
+            </div>
             <input
               id="password"
               type="password"
@@ -130,6 +139,21 @@ export default function LoginPage() {
             {mode === "signup" ? "Sign in" : "Sign up"}
           </button>
         </p>
+
+        {mobileAppDownloadUrl && (
+          <a
+            href={mobileAppDownloadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-full border border-divider px-3 py-1.5 text-xs font-medium text-white/90 transition hover:border-white/30 hover:text-white"
+          >
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+              <path d="M12 2a1 1 0 0 1 1 1v10.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V3a1 1 0 0 1 1-1Z" />
+              <path d="M5 20a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z" />
+            </svg>
+            Get the App
+          </a>
+        )}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import TopBar from "./components/TopBar";
 import { ProtectedRoute, AdminRoute } from "./components/ProtectedRoute";
 import LoginPage from "./routes/LoginPage";
+import ResetPasswordPage from "./routes/ResetPasswordPage";
 import LibraryPage from "./routes/LibraryPage";
 import FolderPage from "./routes/FolderPage";
 import WatchPage from "./routes/WatchPage";
@@ -17,6 +18,7 @@ export default function App() {
       <TopBar />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route
           path="/"
           element={
