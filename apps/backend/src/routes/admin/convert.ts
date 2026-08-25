@@ -1,63 +1,31 @@
 import { Router } from "express";
-import { randomUUID } from "node:crypto";
 import { requireAdmin } from "../../middleware/auth";
-import { convertLocalFileToMp4 } from "../../lib/drive";
-import { createJob, completeJob, failJob } from "../../lib/uploadJobs";
-import { stagedFilePath, deleteStagedFile } from "../../lib/staging";
-import { moveToDownload } from "../../lib/downloads";
-import { createSubtitleSet } from "../../lib/subtitleSets";
+import { createJobs, type ConvertItem } from "../../lib/uploadJobs";
 
 const router = Router();
 
-// Converts a locally-staged file (see /api/admin/stage) to a browser-native MP4 entirely on this
-// machine — no Drive involved at all. The admin downloads the result and uploads it to Drive by
-// hand; this endpoint never writes to Drive (that path is what hit "Service Accounts do not have
-// storage quota" — service accounts have no storage of their own outside a shared drive).
+// Enqueues one or more locally-staged files (see /api/admin/stage) for conversion to a
+// browser-native MP4 — entirely on this machine, no Drive involved. The actual ffmpeg work happens
+// in lib/conversionQueue.ts's background runner, strictly one file at a time; this route just
+// records the jobs and returns immediately so the admin can queue a whole batch and walk away. The
+// admin downloads each result as it finishes and uploads it to Drive by hand; this never writes to
+// Drive itself (that path is what hit "Service Accounts do not have storage quota" — service
+// accounts have no storage of their own outside a shared drive).
 router.post("/", requireAdmin, async (req, res) => {
-  const { stagingId, title, audioIndex } = req.body as {
-    stagingId?: string;
-    title?: string;
-    audioIndex?: number;
-  };
-  if (!stagingId || !title || audioIndex == null) {
-    res.status(400).json({ error: "stagingId, title, and audioIndex are required" });
+  const { items } = req.body as { items?: ConvertItem[] };
+  if (!Array.isArray(items) || items.length === 0) {
+    res.status(400).json({ error: "items must be a non-empty array" });
     return;
   }
-
-  const jobId = randomUUID();
-  const requestedBy = req.authUser!.email;
-  await createJob(jobId, requestedBy);
-
-  // No Next.js after() equivalent needed here — this is an always-on process, not a serverless
-  // function that freezes after the response. A plain un-awaited async call is enough, with an
-  // explicit .catch() since an unhandled rejection in a long-lived process is a real crash risk.
-  (async () => {
-    const localPath = stagedFilePath(stagingId);
-    try {
-      const result = await convertLocalFileToMp4(localPath, audioIndex);
-      const downloadId = randomUUID();
-      await moveToDownload(result.tempFilePath, downloadId);
-
-      const subtitleSetId =
-        result.subtitles.length > 0
-          ? await createSubtitleSet({
-              sourceLabel: title,
-              subtitles: result.subtitles,
-              jobId,
-              createdBy: requestedBy,
-            })
-          : null;
-
-      await completeJob(jobId, downloadId, `${title}.mp4`, subtitleSetId);
-    } catch (error) {
-      console.error(`[convert] job ${jobId} failed:`, error);
-      await failJob(jobId, error instanceof Error ? error.message : "Conversion failed").catch(() => {});
-    } finally {
-      await deleteStagedFile(stagingId);
+  for (const item of items) {
+    if (!item.stagingId || !item.title || item.audioIndex == null) {
+      res.status(400).json({ error: "each item requires stagingId, title, and audioIndex" });
+      return;
     }
-  })().catch((error) => console.error(`[convert] job ${jobId} unhandled error:`, error));
+  }
 
-  res.json({ jobId });
+  const { batchId, jobIds } = await createJobs(items, req.authUser!.email);
+  res.json({ batchId, jobIds });
 });
 
 export default router;

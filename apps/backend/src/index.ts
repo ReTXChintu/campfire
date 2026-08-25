@@ -6,6 +6,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { readFileSync } from "node:fs";
 import { env } from "./config/env";
 import { seedAdminUser } from "./lib/users";
+import { startConversionQueue } from "./lib/conversionQueue";
 
 import authRoutes from "./routes/auth";
 import mediaTokenRoutes from "./routes/media-token";
@@ -72,6 +73,7 @@ const server =
 
 seedAdminUser(env.adminEmail, env.adminPassword)
   .then(() => {
+    startConversionQueue();
     server.listen(env.port, () => {
       const protocol = env.sslCertPath && env.sslKeyPath ? "https" : "http";
       console.log(`Campfire backend listening on ${protocol}://0.0.0.0:${env.port}`);
