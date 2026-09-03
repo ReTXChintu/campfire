@@ -1,10 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'app_router.dart';
 import 'services/auth_service.dart';
-import 'services/backend_trust.dart';
 import 'services/token_store.dart';
 import 'theme/app_theme.dart';
 
@@ -15,8 +15,11 @@ import 'theme/app_theme.dart';
 const _debugToken = String.fromEnvironment('DEBUG_TOKEN');
 
 void main() async {
+  // Registers libmpv bindings for the MKV player (see widgets/mkv_video_player.dart) — safe/cheap
+  // to call even on platforms that never use it (e.g. this build running on iOS), and must happen
+  // before any Player() is constructed.
+  MediaKit.ensureInitialized();
   WidgetsFlutterBinding.ensureInitialized();
-  await installBackendCertTrust();
   if (kDebugMode && _debugToken.isNotEmpty) {
     await TokenStore.write(_debugToken);
   }

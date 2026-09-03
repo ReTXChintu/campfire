@@ -161,6 +161,24 @@ export function isNativelyPlayable(mimeType: string): boolean {
   return NATIVE_MIME_TYPES.has(mimeType);
 }
 
+// MKV gets a third streaming mode of its own, but — unlike native mp4/webm/ogg — only on explicit
+// request (see routes/stream.ts's `raw` query param): its bytes are just as Range-servable as
+// MP4's (see streamFile below), but a plain browser <video> can't demux the container at all, so
+// the *default* behavior for an MKV fileId must stay the ffmpeg remux, same as before this existed
+// — that's what the web admin curation page's plain <video> preview relies on, for any video
+// regardless of seekMode. Only a capable client that explicitly asks for raw bytes (the desktop/
+// mobile MKV player, built on libmpv via media_kit) gets true seeking and native embedded audio/
+// subtitle track selection instead of ffmpeg's live restart-on-seek hack.
+// "video/x-matroska" is the IANA-registered type, but Google Drive's own detector reports plain
+// "video/matroska" for at least some MKV files (confirmed live — Drive doesn't consistently use
+// the x- prefixed form) — both are accepted so isMkv() doesn't silently miss real MKV files and
+// fall back to the ffmpeg remux path.
+const MKV_MIME_TYPES = new Set(["video/x-matroska", "video/matroska"]);
+
+export function isMkv(mimeType: string): boolean {
+  return MKV_MIME_TYPES.has(mimeType);
+}
+
 export async function getDriveAccessToken(): Promise<string> {
   const { token } = await getAuthClient().getAccessToken();
   if (!token) throw new Error("Failed to obtain Drive access token");

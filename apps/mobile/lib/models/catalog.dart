@@ -249,7 +249,7 @@ class VideoResponse {
   final Map<String, EpisodeProgress> progressByFileId;
   final double initialPositionSeconds;
   final bool initialCompleted;
-  final String seekMode; // "native" | "restart"
+  final String seekMode; // "native" | "restart" | "raw" (MKV — see MkvVideoPlayer)
   final double? durationSeconds;
   final List<ConvertedSubtitle> subtitles;
   final double? introStart;
@@ -276,6 +276,7 @@ class VideoResponse {
   });
 
   bool get isNative => seekMode == 'native';
+  bool get isRaw => seekMode == 'raw';
 
   factory VideoResponse.fromJson(Map<String, dynamic> json) => VideoResponse(
     fileId: json['fileId'] as String,

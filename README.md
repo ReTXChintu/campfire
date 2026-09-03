@@ -70,9 +70,9 @@ npm run dev
 
 This runs both `apps/backend` (http://localhost:4000) and `apps/frontend` (http://localhost:5173) in parallel via `concurrently`. Open the frontend URL and sign in with `ADMIN_EMAIL`/`ADMIN_PASSWORD`.
 
-## Mobile app
+## Mobile / desktop app
 
-`apps/mobile` is a separate Flutter app (Android/iOS), not an npm workspace — see `apps/mobile/README.md` for its own setup. It mirrors the web app's screens, dark theme, and email/password login, but has **no admin UI at all**; the Converter and Catalog stay web-only.
+`apps/mobile` is a separate Flutter app (Android + Windows desktop), not an npm workspace — see `apps/mobile/README.md` for its own setup. It mirrors the web app's screens, dark theme, and email/password login. Admin/curation screens exist there too, but only in the Windows build — Android has none, same as before. The Converter tool is still web-only.
 
 ## Deployment
 
@@ -81,28 +81,24 @@ This runs both `apps/backend` (http://localhost:4000) and `apps/frontend` (http:
 - **Frontend**: static build (`apps/frontend/dist`) — deploy to Netlify/Vercel/any static host. `netlify.toml` at the repo root is already configured for this (build command runs from the repo root via the npm workspace).
 - **Backend**: needs a real, persistent Node process — deploy to a VPS (`npm run build --workspace=apps/backend` then `npm start --workspace=apps/backend`, behind a process manager and a reverse proxy for TLS).
 
-### Option B — both on one VPS via pm2, over `https://<IP>:<PORT>` (no domain/reverse proxy)
+### Option B — both on one VPS via pm2, over `http://<IP>:<PORT>` (no domain/reverse proxy/TLS)
 
 Root `.env` (copy from `.env.example`) controls this — separate from `apps/backend/.env` and `apps/frontend/.env`, which still hold each app's own secrets:
 
 ```
-SERVER_IP=203.0.113.10   # your VPS's public IP
 BACKEND_PORT=50001
 FRONTEND_PORT=50000
-SSL_CERT_PATH=./certs/cert.pem
-SSL_KEY_PATH=./certs/key.pem
 ```
 
-1. Point `apps/backend/.env`'s `FRONTEND_URL` at `https://<SERVER_IP>:<FRONTEND_PORT>` and `apps/frontend/.env`'s `VITE_API_URL` at `https://<SERVER_IP>:<BACKEND_PORT>` (the frontend one has to be set *before* building — it's baked into the static JS bundle, pm2 can't override it at runtime).
-2. Generate a self-signed cert (browsers will warn on first visit — expected for an IP address with no real CA): `npm run deploy:certs` (reads `SERVER_IP` from `.env`, or pass an IP directly: `./scripts/generate-self-signed-cert.sh <ip>`). This also copies the public cert into `apps/mobile` — see that app's README if you're building the mobile app too, since native Android/iOS networking can't click through a self-signed-cert warning the way a browser can.
-3. Build both apps: `npm run build`.
-4. `npm run deploy:start` (wraps `pm2 start ecosystem.config.js`) — starts `campfire-backend` serving the API and `campfire-frontend` serving the static build, both over HTTPS with the generated cert, on the ports from `.env`. `npm run deploy:stop` / `deploy:restart` / `deploy:logs` manage them the same way; `pm2 save && pm2 startup` (run manually, not wrapped) makes them survive a reboot.
+1. Point `apps/backend/.env`'s `FRONTEND_URL` at `http://<SERVER_IP>:<FRONTEND_PORT>` and `apps/frontend/.env`'s `VITE_API_URL` at `http://<SERVER_IP>:<BACKEND_PORT>` (the frontend one has to be set *before* building — it's baked into the static JS bundle, pm2 can't override it at runtime).
+2. Build both apps: `npm run build`.
+3. `npm run deploy:start` (wraps `pm2 start ecosystem.config.js`) — starts `campfire-backend` serving the API and `campfire-frontend` serving the static build, both over plain HTTP, on the ports from `.env`. `npm run deploy:stop` / `deploy:restart` / `deploy:logs` manage them the same way; `pm2 save && pm2 startup` (run manually, not wrapped) makes them survive a reboot.
 
-Without `SSL_CERT_PATH`/`SSL_KEY_PATH` set, both apps fall back to plain HTTP — that's what local dev already uses.
+Both apps only ever serve plain HTTP — put a reverse proxy (nginx, Caddy, a load balancer) in front if you need TLS, same as Option A's backend.
 
-### Mobile
+### Mobile / Desktop
 
-`flutter build apk` / `flutter build ipa` from `apps/mobile`, pointed at the production backend via `--dart-define=API_URL=...`, then distributed through the Play Store / App Store / TestFlight, or a direct download link — set `VITE_MOBILE_APP_DOWNLOAD_URL` in `apps/frontend/.env` to show a "Get the App" button in the web app's top bar linking to it. No CI wiring for building/publishing the mobile app is set up yet. If the backend uses the self-signed cert (Option B above), see `apps/mobile/README.md`'s certificate-trust section first — the app needs the cert bundled in to reach the backend at all, and iOS video playback specifically won't work against a self-signed cert regardless.
+`flutter build apk` (Android) / `flutter build windows` (desktop admin build) from `apps/mobile`, pointed at the production backend via `--dart-define=API_URL=...`, then distributed through the Play Store or a direct download link — set `VITE_MOBILE_APP_DOWNLOAD_URL` / `VITE_DESKTOP_APP_DOWNLOAD_URL` in `apps/frontend/.env` to show "Get the App" / "Desktop App" buttons in the web app's top bar linking to them. No CI wiring for building/publishing either is set up yet.
 
 ## Releasing
 

@@ -7,23 +7,32 @@ class CurrentUser {
   final String email;
   final String? name;
   final String? avatarUrl;
+  final bool isAdmin;
 
-  const CurrentUser({required this.userId, required this.email, this.name, this.avatarUrl});
+  const CurrentUser({
+    required this.userId,
+    required this.email,
+    this.name,
+    this.avatarUrl,
+    this.isAdmin = false,
+  });
 
   factory CurrentUser.fromJson(Map<String, dynamic> json) => CurrentUser(
     userId: json['userId'] as String,
     email: json['email'] as String,
     name: json['name'] as String?,
     avatarUrl: json['avatarUrl'] as String?,
+    isAdmin: json['isAdmin'] as bool? ?? false,
   );
 }
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
 /// One seeded admin account plus open signup for everyone else — POST /auth/login and
-/// /auth/signup (both email+password) are the only ways in, same as the web app. There is
-/// deliberately no admin concept surfaced beyond auth itself — the mobile app has no admin
-/// screens at all (see project README), and signup never grants admin either way.
+/// /auth/signup (both email+password) are the only ways in, same as the web app. `isAdmin` on
+/// CurrentUser only ever matters on Windows, where it gates the admin routes (see app_router.dart
+/// and platform_info.dart's isDesktopAdminCapable) — the Android build never surfaces it in the
+/// UI, same as before. Signup never grants admin either way.
 class AuthService extends ChangeNotifier {
   AuthStatus status = AuthStatus.unknown;
   CurrentUser? user;

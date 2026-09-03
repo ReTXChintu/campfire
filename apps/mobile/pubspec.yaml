@@ -42,6 +42,18 @@ dependencies:
   google_fonts: ^6.2.1
   shared_preferences: ^2.3.3
 
+  # MKV playback (Windows desktop + Android): libmpv-backed, unlike video_player this decodes the
+  # real container directly (true seeking, native embedded audio/subtitle track selection) instead
+  # of relying on the backend's live ffmpeg-remux fallback used for every other unsupported format.
+  # See lib/widgets/mkv_video_player.dart and seekMode: "raw" in apps/backend's catalog route.
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
+
+  # Admin panel only (Windows — see platform_info.dart's isDesktopAdminCapable): picking a local
+  # .srt/.vtt file to upload, mirroring the web admin's <input type="file">.
+  file_picker: ^8.1.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -63,12 +75,6 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
-
-  # Backend's self-signed cert (see services/backend_trust.dart) — kept in sync by
-  # scripts/generate-self-signed-cert.sh at the repo root. Not present/needed if the backend has
-  # a real (CA-signed) certificate.
-  assets:
-    - assets/certs/backend_cert.pem
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

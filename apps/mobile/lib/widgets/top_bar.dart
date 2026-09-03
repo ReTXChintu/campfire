@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../platform_info.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 
@@ -38,12 +40,17 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
           color: AppColors.surface,
           onSelected: (value) {
             if (value == 'signout') auth.signOut();
+            if (value == 'admin') context.push('/admin');
           },
           itemBuilder: (context) => [
             PopupMenuItem(
               enabled: false,
               child: Text(auth.user?.email ?? '', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
             ),
+            // Windows + the seeded admin account only — see app_router.dart's redirect, which is
+            // the actual guard; this entry is just a shortcut, not itself a security boundary.
+            if (isDesktopAdminCapable && (auth.user?.isAdmin ?? false))
+              const PopupMenuItem(value: 'admin', child: Text('Admin')),
             const PopupMenuItem(value: 'signout', child: Text('Sign out')),
           ],
         ),

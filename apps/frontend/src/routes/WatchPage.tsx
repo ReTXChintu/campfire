@@ -3,6 +3,7 @@ import { RoomAudioRenderer, RoomContext } from "@livekit/components-react";
 import { ConnectionState, Room, RoomEvent, type Participant } from "livekit-client";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import VideoPlayer from "../components/VideoPlayer";
+import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
 import WatchPartyChat from "../components/WatchPartyChat";
 import { useVideo } from "../hooks/useCatalog";
 import {
@@ -478,25 +479,29 @@ export default function WatchPage() {
         )}
       </section>
 
-      <VideoPlayer
-        fileId={video.fileId}
-        title={video.title!}
-        backHref={video.backHref}
-        parentFolderId={video.parentFolderId}
-        nextFileId={video.nextFileId}
-        previousFileId={video.previousFileId}
-        episodes={video.episodes}
-        progressByFileId={video.progressByFileId}
-        initialPositionSeconds={video.initialPositionSeconds}
-        initialCompleted={video.initialCompleted}
-        seekMode={video.seekMode}
-        durationSeconds={video.durationSeconds}
-        subtitles={video.subtitles}
-        introStart={video.introStart}
-        introEnd={video.introEnd}
-        outroStart={video.outroStart}
-        watchPartySync={watchPartySyncProp}
-      />
+      {video.seekMode === "raw" ? (
+        <DesktopAppRequiredNotice title={video.title ?? "This video"} />
+      ) : (
+        <VideoPlayer
+          fileId={video.fileId}
+          title={video.title!}
+          backHref={video.backHref}
+          parentFolderId={video.parentFolderId}
+          nextFileId={video.nextFileId}
+          previousFileId={video.previousFileId}
+          episodes={video.episodes}
+          progressByFileId={video.progressByFileId}
+          initialPositionSeconds={video.initialPositionSeconds}
+          initialCompleted={video.initialCompleted}
+          seekMode={video.seekMode}
+          durationSeconds={video.durationSeconds}
+          subtitles={video.subtitles}
+          introStart={video.introStart}
+          introEnd={video.introEnd}
+          outroStart={video.outroStart}
+          watchPartySync={watchPartySyncProp}
+        />
+      )}
     </div>
   );
 }

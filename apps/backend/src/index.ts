@@ -2,8 +2,6 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { createServer as createHttpServer } from "node:http";
-import { createServer as createHttpsServer } from "node:https";
-import { readFileSync } from "node:fs";
 import { env } from "./config/env";
 import { seedAdminUser } from "./lib/users";
 import { startConversionQueue } from "./lib/conversionQueue";
@@ -63,20 +61,13 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: "Internal server error" });
 });
 
-// SSL_CERT_PATH/SSL_KEY_PATH are set by the root ecosystem.config.js (pm2) for the
-// https://<IP>:<PORT> deployment (self-signed cert, see scripts/generate-self-signed-cert.sh) —
-// absent locally, where plain HTTP is fine.
-const server =
-  env.sslCertPath && env.sslKeyPath
-    ? createHttpsServer({ cert: readFileSync(env.sslCertPath), key: readFileSync(env.sslKeyPath) }, app)
-    : createHttpServer(app);
+const server = createHttpServer(app);
 
 seedAdminUser(env.adminEmail, env.adminPassword)
   .then(() => {
     startConversionQueue();
     server.listen(env.port, () => {
-      const protocol = env.sslCertPath && env.sslKeyPath ? "https" : "http";
-      console.log(`Campfire backend listening on ${protocol}://0.0.0.0:${env.port}`);
+      console.log(`Campfire backend listening on http://0.0.0.0:${env.port}`);
     });
   })
   .catch((error) => {

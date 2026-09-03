@@ -193,4 +193,29 @@ class ApiClient {
   static Future<dynamic> patch(String path, Object body) async {
     return _send('PATCH', path, body: body);
   }
+
+  /// Mirrors apps/frontend/src/lib/api.ts's apiPostText — a POST with a raw text/plain body
+  /// instead of JSON, used only by the admin subtitle-upload endpoint (the body IS the .srt/.vtt
+  /// file's text, not a JSON-wrapped field).
+  static Future<dynamic> postText(String path, String text) async {
+    final uri = _uri(path);
+    final headers = await _headers();
+    headers['Content-Type'] = 'text/plain';
+    final stopwatch = Stopwatch()..start();
+    _logRequest('POST', uri, headers, text);
+    try {
+      final res = await http.post(uri, headers: headers, body: text);
+      stopwatch.stop();
+      _logResponse('POST', uri, res, stopwatch.elapsed);
+      return _decode(res);
+    } on SocketException catch (e, stackTrace) {
+      stopwatch.stop();
+      _logFailure('POST', uri, e, stopwatch.elapsed, stackTrace);
+      rethrow;
+    } on http.ClientException catch (e, stackTrace) {
+      stopwatch.stop();
+      _logFailure('POST', uri, e, stopwatch.elapsed, stackTrace);
+      rethrow;
+    }
+  }
 }

@@ -103,7 +103,7 @@ export type VideoResponse = {
   progressByFileId: Record<string, { positionSeconds: number; completed: boolean }>;
   initialPositionSeconds: number;
   initialCompleted: boolean;
-  seekMode: "native" | "restart";
+  seekMode: "native" | "restart" | "raw";
   durationSeconds: number | null;
   subtitles: ConvertedSubtitle[];
   introStart: number | null;

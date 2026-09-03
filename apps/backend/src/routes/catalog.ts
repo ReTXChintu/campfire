@@ -2,7 +2,7 @@ import { Router } from "express";
 import { env } from "../config/env";
 import { requireAuth } from "../middleware/auth";
 import { isAdminEmail } from "../lib/admin";
-import { isNativelyPlayable, type ConvertedSubtitle } from "../lib/drive";
+import { isNativelyPlayable, isMkv, type ConvertedSubtitle } from "../lib/drive";
 import {
   getCatalogFolder,
   listPublishedFoldersByParent,
@@ -211,7 +211,10 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
 
   const progress = await getProgress(req.authUser!.userId, fileId);
   const backHref = isStandalone ? "/" : `/folder/${parentFolderId}`;
-  const seekMode = isNativelyPlayable(video.mimeType) ? "native" : "restart";
+  // "native": browser <video> plays it directly. "raw": MKV — not web-playable at all, only the
+  // desktop/mobile app's native player handles it (see isMkv in lib/drive.ts and the `raw` query
+  // param on routes/stream.ts). "restart": anything else, remuxed live on every seek.
+  const seekMode = isNativelyPlayable(video.mimeType) ? "native" : isMkv(video.mimeType) ? "raw" : "restart";
 
   const subtitleSets = await listSubtitleSetsByIds(video.subtitleSetIds ?? []);
   // Re-index sequentially — track `index` is only meaningful within the source it came from, and

@@ -3,6 +3,7 @@ import {
   streamFile,
   getMimeType,
   isNativelyPlayable,
+  isMkv,
   remuxToMp4,
   readDriveHeader,
 } from "../lib/drive";
@@ -15,7 +16,13 @@ router.get("/:fileId", requireMediaAccess("fileId"), async (req, res) => {
   const range = req.headers.range ?? null;
   const mimeType = await getMimeType(fileId);
 
-  if (isNativelyPlayable(mimeType)) {
+  // MKV only takes the raw byte-passthrough path when a capable client explicitly asks for it
+  // (desktop/mobile's media_kit-based player — see MkvVideoPlayer) — by default (and always for
+  // web, which never sends this param) it still goes through the ffmpeg remux below, same as any
+  // other non-native container. This keeps the web admin curation page's plain <video> preview
+  // working for MKV files exactly as before, since a browser can't demux raw MKV at all.
+  const wantsRaw = req.query.raw === "1";
+  if (isNativelyPlayable(mimeType) || (isMkv(mimeType) && wantsRaw)) {
     const driveRes = await streamFile(fileId, range);
 
     const passthroughHeaders = ["content-type", "content-length", "content-range", "accept-ranges"];
@@ -31,7 +38,7 @@ router.get("/:fileId", requireMediaAccess("fileId"), async (req, res) => {
     return;
   }
 
-  // Non-natively-playable container (e.g. MKV): remux to fragmented MP4 on the fly, seeking near
+  // Any other non-natively-playable container: remux to fragmented MP4 on the fly, seeking near
   // `t` seconds via ffmpeg input-level -ss. Each request is a fresh non-seekable resource (no
   // Range/duration) — the player restarts the stream at a new `t` whenever the user scrubs.
   const tParam = req.query.t;

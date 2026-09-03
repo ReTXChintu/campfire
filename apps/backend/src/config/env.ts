@@ -48,14 +48,6 @@ export const env = {
   get livekitApiSecret(): string | undefined {
     return process.env.LIVEKIT_API_SECRET || undefined;
   },
-  // Optional — both unset means "serve plain HTTP" (local dev). Set by pm2's ecosystem.config.js
-  // in the https://<IP>:<PORT> deployment; see scripts/generate-self-signed-cert.sh.
-  get sslCertPath(): string | undefined {
-    return process.env.SSL_CERT_PATH || undefined;
-  },
-  get sslKeyPath(): string | undefined {
-    return process.env.SSL_KEY_PATH || undefined;
-  },
   // Optional — defaults to relying on PATH, which is what breaks under pm2 most often (its
   // daemon's PATH doesn't always match an interactive shell's, e.g. nvm/asdf-installed tools or
   // anything only added in .bashrc). Set these to absolute paths (`which ffmpeg`) if you see
