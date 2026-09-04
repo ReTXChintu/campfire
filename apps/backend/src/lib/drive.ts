@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { env } from "../config/env";
+import { videoBitrateKbpsFor, audioBitrateKbpsFor } from "./qualityLadder";
 
 // Read-only: the app no longer writes to Drive at all. (It briefly did, for an in-app upload
 // flow — abandoned because service accounts have no storage quota of their own, so any write
@@ -206,15 +207,19 @@ export async function streamFile(fileId: string, range: string | null) {
   return res;
 }
 
-export type RemuxOptions = { audioIndex?: number | null; audioDelayMs?: number };
+export type RemuxOptions = { audioIndex?: number | null; audioDelayMs?: number; targetHeight?: number | null };
 
 /**
  * Remuxes a non-natively-playable container (e.g. MKV) into fragmented MP4 on the fly via ffmpeg.
  * ffmpeg fetches directly from Drive's HTTP media endpoint (rather than us piping bytes through
  * Node) so its own demuxer can issue Range requests and seek near `startSeconds` via input-level
  * `-ss` — this is what makes scrubbing possible despite the output being a live, moov-less stream
- * with no byte-range/duration info of its own. Video is stream-copied (no re-encode); audio is
- * transcoded to AAC since browsers can't decode the AC3/DTS/etc. tracks common in MKV rips.
+ * with no byte-range/duration info of its own. Audio is transcoded to AAC since browsers can't
+ * decode the AC3/DTS/etc. tracks common in MKV rips. Video is stream-copied (no re-encode) unless
+ * `targetHeight` is given (see routes/stream.ts's `h` query param), in which case it's re-encoded
+ * and downscaled instead — this is also how a quality *below* a video's native/raw resolution gets
+ * served, not just non-natively-playable containers; see stream.ts for when this path is entered
+ * either way.
  *
  * `audioIndex` (an absolute ffprobe stream index, from `probeStreams`) selects a non-default audio
  * track — omitted, this falls back to ffmpeg's own "first audio stream" shorthand. `audioDelayMs`
@@ -226,11 +231,24 @@ export async function remuxToMp4(
   fileId: string,
   startSeconds: number,
   signal: AbortSignal,
-  { audioIndex = null, audioDelayMs = 0 }: RemuxOptions = {},
+  { audioIndex = null, audioDelayMs = 0, targetHeight = null }: RemuxOptions = {},
 ): Promise<Readable> {
   const accessToken = await getDriveAccessToken();
   const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
   const audioMapArg = audioIndex != null ? `0:${audioIndex}` : "0:a:0";
+
+  const videoArgs =
+    targetHeight != null
+      ? [
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-vf", `scale=-2:${targetHeight}`,
+          "-b:v", `${videoBitrateKbpsFor(targetHeight)}k`,
+          "-maxrate", `${Math.round(videoBitrateKbpsFor(targetHeight) * 1.5)}k`,
+          "-bufsize", `${videoBitrateKbpsFor(targetHeight) * 2}k`,
+          "-pix_fmt", "yuv420p",
+        ]
+      : ["-c:v", "copy"];
 
   const args = [
     "-headers", `Authorization: Bearer ${accessToken}\r\n`,
@@ -238,9 +256,9 @@ export async function remuxToMp4(
     "-i", mediaUrl,
     "-map", "0:v:0",
     "-map", audioMapArg,
-    "-c:v", "copy",
+    ...videoArgs,
     "-c:a", "aac",
-    "-b:a", "192k",
+    "-b:a", `${audioBitrateKbpsFor(targetHeight ?? 1080)}k`,
     // Downmix to stereo: ffmpeg's native AAC encoder can't reliably encode >2 channels (hit
     // live: "Unsupported channel layout '6 channels'" on a 5.1 AC3/EAC3 source track, common in
     // MKV rips) — browsers don't render surround differently from stereo, so this is a pure
@@ -319,7 +337,7 @@ export type StreamTrack = {
 };
 
 export type ProbeResult = {
-  videoTrack: { index: number; codecName: string } | null;
+  videoTrack: { index: number; codecName: string; width: number | null; height: number | null } | null;
   audioTracks: StreamTrack[];
   subtitleTracks: StreamTrack[];
   durationSeconds: number | null;
@@ -366,6 +384,8 @@ async function probeSource(source: MediaSource): Promise<ProbeResult> {
       index: number;
       codec_type: string;
       codec_name: string;
+      width?: number;
+      height?: number;
       tags?: { language?: string; title?: string };
     }[];
   };
@@ -381,7 +401,14 @@ async function probeSource(source: MediaSource): Promise<ProbeResult> {
   const videoStream = parsed.streams.find((s) => s.codec_type === "video");
 
   return {
-    videoTrack: videoStream ? { index: videoStream.index, codecName: videoStream.codec_name } : null,
+    videoTrack: videoStream
+      ? {
+          index: videoStream.index,
+          codecName: videoStream.codec_name,
+          width: videoStream.width ?? null,
+          height: videoStream.height ?? null,
+        }
+      : null,
     audioTracks: parsed.streams.filter((s) => s.codec_type === "audio").map(toTrack),
     subtitleTracks: parsed.streams
       .filter((s) => s.codec_type === "subtitle" && TEXT_SUBTITLE_CODECS.has(s.codec_name))

@@ -1,5 +1,6 @@
 
 import { CloseIcon } from "./player-icons";
+import QualitySection, { type QualitySelection } from "./QualitySection";
 
 export type SubtitleOption = { index: number; label: string };
 
@@ -9,13 +10,29 @@ type Props = {
   onSelect: (index: number | null) => void;
   open: boolean;
   onClose: () => void;
+  availableQualities: { label: string; height: number }[];
+  sourceHeight: number | null;
+  qualitySelection: QualitySelection;
+  autoResolvedHeight: number | null;
+  onSelectQuality: (value: QualitySelection) => void;
 };
 
 // The native-playback counterpart to TrackSettingsMenu — much simpler, since a converted video
 // bakes in exactly one audio track (no switching, no delay controls needed) and its subtitles are
 // fully static text already loaded as <track> elements, so selecting one is just picking which
 // TextTrack is "showing", not a live re-fetch like the restart-mode path.
-export default function SubtitleMenu({ tracks, selectedIndex, onSelect, open, onClose }: Props) {
+export default function SubtitleMenu({
+  tracks,
+  selectedIndex,
+  onSelect,
+  open,
+  onClose,
+  availableQualities,
+  sourceHeight,
+  qualitySelection,
+  autoResolvedHeight,
+  onSelectQuality,
+}: Props) {
   if (!open) return null;
 
   return (
@@ -28,13 +45,22 @@ export default function SubtitleMenu({ tracks, selectedIndex, onSelect, open, on
       />
       <div className="flex w-full max-w-sm flex-col gap-5 overflow-y-auto bg-neutral-900/95 p-4 backdrop-blur">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white/90">Subtitles</h2>
-          <button type="button" onClick={onClose} aria-label="Close subtitles" className="text-white/60 hover:text-white">
+          <h2 className="text-base font-semibold text-white/90">Settings</h2>
+          <button type="button" onClick={onClose} aria-label="Close settings" className="text-white/60 hover:text-white">
             <CloseIcon className="h-5 w-5" />
           </button>
         </div>
 
+        <QualitySection
+          availableQualities={availableQualities}
+          sourceHeight={sourceHeight}
+          selection={qualitySelection}
+          autoResolvedHeight={autoResolvedHeight}
+          onSelect={onSelectQuality}
+        />
+
         <section className="flex flex-col gap-2">
+          <h3 className="text-xs uppercase tracking-wide text-white/40">Subtitles</h3>
           <label className="flex items-center gap-2 text-sm text-white/80">
             <input type="radio" name="native-subtitle" checked={selectedIndex == null} onChange={() => onSelect(null)} />
             Off

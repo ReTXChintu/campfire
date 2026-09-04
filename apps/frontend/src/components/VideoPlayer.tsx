@@ -8,6 +8,7 @@ import { useMediaToken } from "../lib/mediaToken";
 import EpisodesPanel from "./EpisodesPanel";
 import TrackSettingsMenu from "./TrackSettingsMenu";
 import SubtitleMenu from "./SubtitleMenu";
+import type { QualitySelection } from "./QualitySection";
 import {
   PlayIcon,
   PauseIcon,
@@ -56,6 +57,17 @@ const MIN_RESUME_SECONDS = 5;
 const SKIP_SECONDS = 10;
 const HIDE_CONTROLS_MS = 3000;
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+// Auto-mode quality heuristic — same constants and shape as the mobile players' (kept in sync by
+// hand, no shared code across TS/Dart): react to buffering events, not real throughput/segment
+// measurement (there are no segments, it's one continuous stream). See the effect below for the
+// full algorithm; this is deliberately MVP-realistic, not broadcast-grade ABR.
+const AUTO_WINDOW_MS = 30_000; // sliding window for counting buffering events
+const AUTO_STEP_DOWN_EVENT_COUNT = 2; // ≥2 buffering events within the window → step down
+const AUTO_STALL_MS = 4_000; // one buffering stall this long → step down immediately
+const AUTO_SUSTAINED_MS = 180_000; // this long with zero buffering events → eligible to step up
+const AUTO_COOLDOWN_MS = 60_000; // minimum gap between automatic changes (anti-oscillation)
+const AUTO_QUALITY_STORAGE_KEY = "campfire-auto-quality-ceiling";
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
@@ -136,12 +148,33 @@ export default function VideoPlayer({
   const appliedSubtitleDelayRef = useRef(0);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingInboundSyncRef = useRef(false);
+  // Set when a quality change is about to land on the zero-transcode passthrough path (Original,
+  // on native content) — the native <video> has no `t=` URL param to resume at, so the position
+  // captured at switch time has to be re-applied manually once the reloaded element's metadata is
+  // ready (see handleLoadedMetadata below). Unused for every other transition, which resumes via
+  // the `t=` param the same way restart-mode audio/subtitle switches already do.
+  const pendingPassthroughSeekRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
   const { data: mediaToken } = useMediaToken(fileId);
 
+  // "auto" starts unresolved (null) — see QualitySection/the Auto-mode heuristic — so it behaves
+  // exactly like "original" until that adaptive logic actually seeds/adjusts it.
+  const [qualitySelection, setQualitySelection] = useState<QualitySelection>("auto");
+  const [autoResolvedHeight, setAutoResolvedHeight] = useState<number | null>(null);
+  const effectiveHeight =
+    qualitySelection === "auto"
+      ? autoResolvedHeight
+      : qualitySelection === "original"
+        ? null
+        : qualitySelection;
+  // True only for real Range-seekable byte passthrough — native content at its own source
+  // resolution. Anything downscaled (any seekMode) is a live re-encode with no more byte-range
+  // seeking than restart mode already has, so it has to be treated the same way mechanically.
+  const usingPassthrough = isNative && effectiveHeight == null;
+
   const [baseOffsetSeconds, setBaseOffsetSeconds] = useState(
-    !isNative && !initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS
+    !usingPassthrough && !initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS
       ? initialPositionSeconds
       : 0,
   );
@@ -175,14 +208,22 @@ export default function VideoPlayer({
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showNextEpisode, setShowNextEpisode] = useState(false);
 
-  // Native: the browser knows real duration from the MP4 itself once metadata loads. Restart:
-  // Drive's own duration metadata can't be trusted for MKV (it returns a truthy "0"), so ffprobe's
-  // real duration (once it loads) takes over from the server-provided guess.
-  const effectiveDuration = isNative ? (nativeDuration ?? durationSeconds) : (probe?.durationSeconds ?? durationSeconds);
+  // Passthrough: the browser knows real duration from the MP4 itself once metadata loads.
+  // Everything else (restart mode, or any downscaled quality): Drive's own duration metadata can't
+  // be trusted for MKV (it returns a truthy "0"), and a live re-encode has no reliable duration of
+  // its own either, so ffprobe's real duration (once it loads) takes over from the server guess.
+  const effectiveDuration = usingPassthrough
+    ? (nativeDuration ?? durationSeconds)
+    : (probe?.durationSeconds ?? durationSeconds);
 
   const getAbsolutePosition = useCallback(
-    (video: HTMLVideoElement) => (isNative ? video.currentTime : baseOffsetSeconds + video.currentTime),
-    [isNative, baseOffsetSeconds],
+    (video: HTMLVideoElement) => (usingPassthrough ? video.currentTime : baseOffsetSeconds + video.currentTime),
+    [usingPassthrough, baseOffsetSeconds],
+  );
+
+  const currentAbsoluteSeconds = useCallback(
+    () => (videoRef.current ? getAbsolutePosition(videoRef.current) : baseOffsetSeconds),
+    [getAbsolutePosition, baseOffsetSeconds],
   );
 
   const emitWatchPartyState = useCallback(
@@ -272,9 +313,11 @@ export default function VideoPlayer({
     }
   }, [isNative, nativeSubtitleIndex, subtitleUrls]);
 
-  // Restart-mode only: probes audio/subtitle tracks client-side so it never delays video start.
+  // Probes audio/subtitle tracks (and, now, source resolution/available qualities — see
+  // QualitySection) client-side so it never delays video start. Fetched for every video
+  // regardless of seekMode now, not just restart-mode content, since the quality menu needs
+  // sourceHeight/availableQualities either way.
   useEffect(() => {
-    if (isNative) return;
     let cancelled = false;
     apiGet<ProbeResult>(`/api/probe/${fileId}`)
       .then((data) => {
@@ -284,19 +327,22 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [isNative, fileId]);
+  }, [fileId]);
 
   const src = useMemo(() => {
     if (!mediaToken) return undefined;
     const params = new URLSearchParams();
     params.set("token", mediaToken);
-    if (!isNative) {
+    if (effectiveHeight != null) params.set("h", String(effectiveHeight));
+    if (!usingPassthrough) {
       if (baseOffsetSeconds > 0) params.set("t", String(Math.floor(baseOffsetSeconds)));
-      if (audioIndex != null) params.set("audio", String(audioIndex));
-      if (audioDelayMs !== 0) params.set("adelay", String(audioDelayMs));
+      if (!isNative) {
+        if (audioIndex != null) params.set("audio", String(audioIndex));
+        if (audioDelayMs !== 0) params.set("adelay", String(audioDelayMs));
+      }
     }
     return `${API_URL}/api/stream/${fileId}?${params.toString()}`;
-  }, [isNative, fileId, baseOffsetSeconds, audioIndex, audioDelayMs, mediaToken]);
+  }, [usingPassthrough, isNative, fileId, baseOffsetSeconds, audioIndex, audioDelayMs, effectiveHeight, mediaToken]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -367,13 +413,20 @@ export default function VideoPlayer({
     };
     const handleCanPlay = () => setIsBuffering(false);
 
-    // Native only: the static MP4 always starts serving from byte 0, so resuming means seeking
-    // forward once real metadata is available (unlike restart mode, which starts the ffmpeg
-    // remux at the right offset from the very first byte via `t` in the src itself).
+    // Passthrough only: the static byte stream always starts serving from byte 0, so resuming
+    // means seeking forward once real metadata is available (unlike restart mode/any downscaled
+    // quality, which starts the live stream at the right offset from its very first byte via `t`
+    // in the src itself). A pending quality-switch-triggered seek (see changeQuality) takes
+    // priority over the original server-provided resume position — it means the viewer already had
+    // a newer position mid-session.
     const handleLoadedMetadata = () => {
-      if (!isNative) return;
+      if (!usingPassthrough) return;
       setNativeDuration(video.duration || null);
-      if (!initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS) {
+      const pendingSeek = pendingPassthroughSeekRef.current;
+      if (pendingSeek != null) {
+        pendingPassthroughSeekRef.current = null;
+        video.currentTime = pendingSeek;
+      } else if (!initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS) {
         video.currentTime = initialPositionSeconds;
       }
     };
@@ -407,7 +460,7 @@ export default function VideoPlayer({
     parentFolderId,
     nextFileId,
     effectiveDuration,
-    isNative,
+    usingPassthrough,
     initialCompleted,
     initialPositionSeconds,
     getAbsolutePosition,
@@ -541,7 +594,7 @@ export default function VideoPlayer({
 
   const commitSeek = () => {
     if (scrubValue == null || locked) return;
-    if (isNative) {
+    if (usingPassthrough) {
       if (videoRef.current) videoRef.current.currentTime = scrubValue;
       emitWatchPartyState({ positionSeconds: scrubValue });
     } else {
@@ -550,7 +603,135 @@ export default function VideoPlayer({
     setScrubValue(null);
   };
 
-  const currentAbsoluteSeconds = () => baseOffsetSeconds + (videoRef.current?.currentTime ?? 0);
+  const changeQuality = (value: QualitySelection) => {
+    const nextEffectiveHeight =
+      value === "auto" ? autoResolvedHeight : value === "original" ? null : value;
+    const nextUsingPassthrough = isNative && nextEffectiveHeight == null;
+    const position = currentAbsoluteSeconds();
+    if (nextUsingPassthrough) {
+      // No `t=` param exists on the passthrough path to resume at — re-apply the position by hand
+      // once the reloaded element's metadata is ready (see handleLoadedMetadata).
+      pendingPassthroughSeekRef.current = position;
+    } else {
+      setBaseOffsetSeconds(position);
+    }
+    setQualitySelection(value);
+  };
+
+  // Auto-mode's own quality changes reuse the exact same position-preserving reload mechanics as a
+  // manual pick (changeQuality above) — the only difference is who decided the target height.
+  const applyAutoChange = useCallback(
+    (newHeight: number | null) => {
+      const nextUsingPassthrough = isNative && newHeight == null;
+      const position = currentAbsoluteSeconds();
+      if (nextUsingPassthrough) {
+        pendingPassthroughSeekRef.current = position;
+      } else {
+        setBaseOffsetSeconds(position);
+      }
+      try {
+        localStorage.setItem(AUTO_QUALITY_STORAGE_KEY, newHeight == null ? "original" : String(newHeight));
+      } catch {
+        // Unavailable (private mode, disabled) — Auto still works, just doesn't remember across sessions.
+      }
+      setAutoResolvedHeight(newHeight);
+    },
+    [isNative, currentAbsoluteSeconds],
+  );
+
+  // Seeds Auto's starting tier from this device's last learned ceiling once probe resolves (so a
+  // known-weak device doesn't have to rediscover its ceiling via a rough patch on every video) —
+  // clamped to this video's own ladder, since a remembered height might not apply to a
+  // lower-resolution source. Only runs once per mount, before any buffering-driven adjustment has
+  // had a chance to set autoResolvedHeight itself.
+  useEffect(() => {
+    if (qualitySelection !== "auto" || autoResolvedHeight != null || !probe) return;
+    try {
+      const stored = localStorage.getItem(AUTO_QUALITY_STORAGE_KEY);
+      if (!stored || stored === "original") return; // no memory, or remembered "original" — already the default
+      const storedHeight = Number(stored);
+      const ladderHeights = probe.availableQualities.map((q) => q.height);
+      if (Number.isFinite(storedHeight) && ladderHeights.includes(storedHeight)) {
+        applyAutoChange(storedHeight);
+      }
+    } catch {
+      // localStorage unavailable — fall back to the "start at Original" default.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qualitySelection, probe]);
+
+  // The actual Auto-mode adaptive heuristic: steps quality down on buffering trouble, back up
+  // after a sustained stretch of smooth playback, with a shared cooldown on both directions as the
+  // whole anti-oscillation mechanism. Buffering is used as a single unified signal because it
+  // already captures both hardware- and network-limited struggles without needing to tell them
+  // apart. Own event listeners, independent of the main playback effect above, active only while
+  // "Auto" is actually selected.
+  useEffect(() => {
+    if (qualitySelection !== "auto") return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    const ladderHeights = (probe?.availableQualities ?? []).map((q) => q.height);
+    let stallStart: number | null = null;
+    let bufferEventTimes: number[] = [];
+    let lastChangeAt = Date.now();
+    let stableSinceAt = Date.now();
+
+    const stepDown = () => {
+      const now = Date.now();
+      if (now - lastChangeAt < AUTO_COOLDOWN_MS || ladderHeights.length === 0) return;
+      const next =
+        autoResolvedHeight == null
+          ? ladderHeights[ladderHeights.length - 1]
+          : ladderHeights[Math.max(0, ladderHeights.indexOf(autoResolvedHeight) - 1)];
+      if (next === autoResolvedHeight) return;
+      lastChangeAt = now;
+      stableSinceAt = now;
+      bufferEventTimes = [];
+      applyAutoChange(next);
+    };
+
+    const stepUp = () => {
+      const now = Date.now();
+      if (now - lastChangeAt < AUTO_COOLDOWN_MS) return;
+      if (now - stableSinceAt < AUTO_SUSTAINED_MS) return;
+      if (autoResolvedHeight == null) return; // already at Original, nowhere higher to go
+      const idx = ladderHeights.indexOf(autoResolvedHeight);
+      const next = idx === -1 || idx === ladderHeights.length - 1 ? null : ladderHeights[idx + 1];
+      lastChangeAt = now;
+      stableSinceAt = now;
+      applyAutoChange(next);
+    };
+
+    const handleWaitingForAuto = () => {
+      const now = Date.now();
+      stallStart = now;
+      bufferEventTimes.push(now);
+      bufferEventTimes = bufferEventTimes.filter((t) => now - t < AUTO_WINDOW_MS);
+    };
+    const handleRecoveredForAuto = () => {
+      if (stallStart != null && Date.now() - stallStart >= AUTO_STALL_MS) {
+        stepDown();
+      } else if (bufferEventTimes.length >= AUTO_STEP_DOWN_EVENT_COUNT) {
+        stepDown();
+      }
+      stallStart = null;
+    };
+
+    video.addEventListener("waiting", handleWaitingForAuto);
+    video.addEventListener("playing", handleRecoveredForAuto);
+    video.addEventListener("canplay", handleRecoveredForAuto);
+    const interval = setInterval(() => {
+      if (!video.paused) stepUp();
+    }, AUTO_WINDOW_MS);
+
+    return () => {
+      video.removeEventListener("waiting", handleWaitingForAuto);
+      video.removeEventListener("playing", handleRecoveredForAuto);
+      video.removeEventListener("canplay", handleRecoveredForAuto);
+      clearInterval(interval);
+    };
+  }, [qualitySelection, probe, autoResolvedHeight, applyAutoChange]);
 
   const changeAudioTrack = (index: number | null) => {
     setBaseOffsetSeconds(currentAbsoluteSeconds());
@@ -602,7 +783,7 @@ export default function VideoPlayer({
     if (locked) return;
     const video = videoRef.current;
     if (!video) return;
-    if (isNative) {
+    if (usingPassthrough) {
       const target = Math.min(
         Math.max(0, video.currentTime + deltaSeconds),
         effectiveDuration ?? Number.POSITIVE_INFINITY,
@@ -697,7 +878,7 @@ export default function VideoPlayer({
           type="button"
           onClick={() => {
             if (introEnd == null) return;
-            if (isNative) {
+            if (usingPassthrough) {
               if (videoRef.current) videoRef.current.currentTime = introEnd;
             } else {
               setBaseOffsetSeconds(introEnd);
@@ -734,6 +915,11 @@ export default function VideoPlayer({
           onSelect={setNativeSubtitleIndex}
           open={settingsOpen}
           onClose={closePanels}
+          availableQualities={probe?.availableQualities ?? []}
+          sourceHeight={probe?.sourceHeight ?? null}
+          qualitySelection={qualitySelection}
+          autoResolvedHeight={autoResolvedHeight}
+          onSelectQuality={changeQuality}
         />
       ) : (
         <TrackSettingsMenu
@@ -748,6 +934,11 @@ export default function VideoPlayer({
           onSubtitleDelay={setSubtitleDelay}
           open={settingsOpen}
           onClose={closePanels}
+          availableQualities={probe?.availableQualities ?? []}
+          sourceHeight={probe?.sourceHeight ?? null}
+          qualitySelection={qualitySelection}
+          autoResolvedHeight={autoResolvedHeight}
+          onSelectQuality={changeQuality}
         />
       )}
 

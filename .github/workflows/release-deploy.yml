@@ -1,0 +1,130 @@
+name: Release build & deploy
+
+# Only ever runs on a published GitHub Release, or by hand from the Actions tab — never on every
+# push. Builds the Android APK and Windows desktop app, ships both to the server with fixed
+# filenames (so apps/frontend/.env's VITE_MOBILE_APP_DOWNLOAD_URL/VITE_DESKTOP_APP_DOWNLOAD_URL
+# never need to change), then redeploys the web apps there.
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+# Prevents two deploys from racing each other over the same server if this is ever triggered twice
+# in quick succession — the second run waits for the first to finish rather than interleaving.
+concurrency:
+  group: release-deploy
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: "3.47.2"
+  # Baked into both mobile builds at compile time (apps/mobile/lib/config.dart). Override by
+  # setting an API_URL repository variable (Settings -> Secrets and variables -> Actions ->
+  # Variables) if the backend's address ever changes — no workflow edit needed.
+  API_URL: ${{ vars.API_URL || 'http://187.127.179.114:50001' }}
+  APK_NAME: app-release.apk
+  WINDOWS_ZIP_NAME: campfire-windows.zip
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: flutter pub get
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: apps/mobile
+        run: flutter build apk --release --dart-define=API_URL=${{ env.API_URL }}
+
+      - name: Stage artifact under its fixed deploy name
+        run: cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk ${{ env.APK_NAME }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ env.APK_NAME }}
+          retention-days: 14
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: flutter pub get
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Build Windows release
+        working-directory: apps/mobile
+        run: flutter build windows --release --dart-define=API_URL=${{ env.API_URL }}
+
+      - name: Zip the release build under its fixed deploy name
+        shell: pwsh
+        run: Compress-Archive -Path "apps/mobile/build/windows/x64/runner/Release/*" -DestinationPath "${{ env.WINDOWS_ZIP_NAME }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: ${{ env.WINDOWS_ZIP_NAME }}
+          retention-days: 14
+
+  deploy:
+    needs: [build-android, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      # No `path:` given — actions/download-artifact reconstructs each single-file artifact
+      # directly at the workspace root under its original name, so the scp step below needs no
+      # directory-stripping trickery to avoid nesting a "dist/" prefix on the server.
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+
+      # Always the same two destination filenames — overwrites whatever was there before, so
+      # apps/frontend/.env's download URLs never need updating.
+      - name: Upload builds to the server's frontend/public folder
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "${{ env.APK_NAME }},${{ env.WINDOWS_ZIP_NAME }}"
+          target: "/opt/var/campfire/apps/frontend/public"
+
+      - name: Pull latest code, rebuild the web apps, restart pm2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /opt/var/campfire
+            git pull
+            npm install
+            npm run build
+            npm run deploy:restart

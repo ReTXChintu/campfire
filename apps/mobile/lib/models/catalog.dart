@@ -72,17 +72,45 @@ class StreamTrack {
   );
 }
 
+/// One rung of the adjustable-quality ladder — mirrors apps/backend/src/lib/qualityLadder.ts.
+/// Clients never hardcode the ladder; they just render whatever the backend's probe response says
+/// is available for this particular video (filtered to below its own source resolution there).
+class QualityOption {
+  final String label;
+  final int height;
+
+  const QualityOption({required this.label, required this.height});
+
+  factory QualityOption.fromJson(Map<String, dynamic> json) =>
+      QualityOption(label: json['label'] as String, height: json['height'] as int);
+}
+
 class ProbeResult {
   final List<StreamTrack> audioTracks;
   final List<StreamTrack> subtitleTracks;
   final double? durationSeconds;
+  final int? sourceHeight;
+  final int? sourceWidth;
+  final List<QualityOption> availableQualities;
 
-  const ProbeResult({required this.audioTracks, required this.subtitleTracks, this.durationSeconds});
+  const ProbeResult({
+    required this.audioTracks,
+    required this.subtitleTracks,
+    this.durationSeconds,
+    this.sourceHeight,
+    this.sourceWidth,
+    this.availableQualities = const [],
+  });
 
   factory ProbeResult.fromJson(Map<String, dynamic> json) => ProbeResult(
     audioTracks: (json['audioTracks'] as List).map((t) => StreamTrack.fromJson(t)).toList(),
     subtitleTracks: (json['subtitleTracks'] as List).map((t) => StreamTrack.fromJson(t)).toList(),
     durationSeconds: (json['durationSeconds'] as num?)?.toDouble(),
+    sourceHeight: json['sourceHeight'] as int?,
+    sourceWidth: json['sourceWidth'] as int?,
+    availableQualities: json['availableQualities'] == null
+        ? const []
+        : (json['availableQualities'] as List).map((q) => QualityOption.fromJson(q)).toList(),
   );
 }
 

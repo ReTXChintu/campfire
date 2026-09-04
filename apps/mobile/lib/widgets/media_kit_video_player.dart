@@ -8,6 +8,7 @@ import '../config.dart';
 import '../models/catalog.dart';
 import '../services/catalog_service.dart';
 import '../services/media_token_service.dart';
+import '../services/quality_prefs_service.dart';
 import '../theme/app_theme.dart';
 import 'episodes_panel.dart';
 
@@ -15,6 +16,16 @@ const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 const _hideControlsDelay = Duration(seconds: 3);
 const _saveInterval = Duration(seconds: 10);
 const _skipSeconds = 10;
+
+// Auto-mode quality heuristic — same constants and shape as the web player's (kept in sync by
+// hand, no shared code across TS/Dart): react to buffering events, not real throughput/segment
+// measurement. Deliberately MVP-realistic, not broadcast-grade ABR — see QualitySection.tsx/
+// VideoPlayer.tsx on web for the full rationale.
+const _autoWindow = Duration(seconds: 30);
+const _autoStepDownEventCount = 2;
+const _autoStallDuration = Duration(seconds: 4);
+const _autoSustained = Duration(seconds: 180);
+const _autoCooldown = Duration(seconds: 60);
 
 String _formatTime(Duration d) {
   if (d.isNegative) d = Duration.zero;
@@ -61,6 +72,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   bool _episodesOpen = false;
   bool _subtitleMenuOpen = false;
   bool _audioMenuOpen = false;
+  bool _qualityMenuOpen = false;
   bool _endedHandled = false;
   Timer? _hideTimer;
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
@@ -73,14 +85,31 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   bool _playing = false;
   Tracks _tracks = const Tracks();
   Track _track = const Track();
-  ProbeResult? _probe; // restart-mode only — the live remux stream reports no reliable duration.
+  ProbeResult? _probe; // now fetched for every video — see _bootstrap — not just restart mode.
+
+  // "auto" | "original" | "<height>" — mirrors QualitySelection on web (Dart has no union types).
+  String _qualitySelection = 'auto';
+  int? _autoResolvedHeight;
+  DateTime? _autoStallStart;
+  final List<DateTime> _autoBufferEvents = [];
+  DateTime _autoLastChange = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _autoStableSince = DateTime.now();
+  Timer? _autoStepUpTimer;
 
   VideoResponse get video => widget.video;
 
-  // "native" and "raw" both serve true Range-seekable bytes (see isRawStreamable in
-  // apps/backend/src/lib/drive.ts) — only "restart" (the ffmpeg-remux fallback) needs the
-  // reopen-at-a-new-offset trick instead of a real seek.
-  bool get _canSeekDirectly => video.isNative || video.isRaw;
+  int? get _effectiveHeight {
+    if (_qualitySelection == 'auto') return _autoResolvedHeight;
+    if (_qualitySelection == 'original') return null;
+    return int.tryParse(_qualitySelection);
+  }
+
+  List<int> get _ladderHeights => (_probe?.availableQualities ?? const []).map((q) => q.height).toList();
+
+  // True only for real Range-seekable byte passthrough — native/raw content at its own source
+  // resolution. Anything downscaled is a live re-encode with no more byte-range seeking than
+  // restart mode already has, so it has to be treated the same way mechanically.
+  bool get _usingPassthrough => (video.isNative || video.isRaw) && _effectiveHeight == null;
 
   Duration get _effectiveDuration {
     if (_duration > Duration.zero) return _duration;
@@ -110,7 +139,15 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         if (mounted) setState(() => _playing = p);
       }),
       _player.stream.buffering.listen((b) {
-        if (mounted) setState(() => _isBuffering = b);
+        if (!mounted) return;
+        setState(() => _isBuffering = b);
+        if (_qualitySelection == 'auto') {
+          if (b) {
+            _onAutoBufferingStart();
+          } else {
+            _onAutoBufferingRecovered();
+          }
+        }
       }),
       _player.stream.tracks.listen((t) {
         if (mounted) setState(() => _tracks = t);
@@ -127,6 +164,9 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         if (mounted) setState(() => _errorMessage = message);
       }),
     ]);
+    _autoStepUpTimer = Timer.periodic(_autoWindow, (_) {
+      if (mounted && _qualitySelection == 'auto' && _playing) _autoStepUp();
+    });
     _bootstrap();
     _scheduleHide();
   }
@@ -135,11 +175,15 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final params = <String, String>{
       if (_mediaToken != null) 'token': _mediaToken!,
     };
-    if (video.isRaw) {
+    final height = _effectiveHeight;
+    if (height != null) params['h'] = height.toString();
+    if (video.isRaw && _usingPassthrough) {
       // Opts into the true byte-passthrough path for MKV (see routes/stream.ts) — without it the
-      // backend defaults to the ffmpeg-remux "restart" behavior every other client gets.
+      // backend defaults to the ffmpeg-remux "restart" behavior every other client gets. Only
+      // applies at Original quality — a genuine downscale always needs decoding regardless of
+      // container, so it can't stay on the raw byte-passthrough path.
       params['raw'] = '1';
-    } else if (!video.isNative && restartOffsetSeconds > 0) {
+    } else if (!_usingPassthrough && restartOffsetSeconds > 0) {
       params['t'] = restartOffsetSeconds.floor().toString();
     }
     final base = '$apiBaseUrl/api/stream/${video.fileId}';
@@ -147,13 +191,14 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   Future<void> _bootstrap() async {
-    if (!video.isNative && !video.isRaw) {
-      CatalogService.fetchProbe(video.fileId)
-          .then((p) {
-            if (mounted) setState(() => _probe = p);
-          })
-          .catchError((_) {});
-    }
+    // Probed for every video now (not just restart mode) — the quality menu needs
+    // sourceHeight/availableQualities regardless of seekMode. Fire-and-forget so it never delays
+    // playback start; the quality menu (and Auto's initial seed, below) just populate a beat later.
+    CatalogService.fetchProbe(video.fileId).then((p) {
+      if (!mounted) return;
+      setState(() => _probe = p);
+      _maybeSeedAutoQuality(p);
+    }).catchError((_) {});
 
     try {
       _mediaToken = await MediaTokenService.mint(video.fileId);
@@ -171,8 +216,23 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     // Embedded subtitles default off, matching the native-mode player's default (no track
     // pre-selected) rather than libmpv's own default-flag-driven auto-selection.
     await _player.setSubtitleTrack(SubtitleTrack.no());
-    if (resumeSeconds > 0 && _canSeekDirectly) {
+    if (resumeSeconds > 0 && _usingPassthrough) {
       await _player.seek(Duration(milliseconds: (resumeSeconds * 1000).round()));
+    }
+  }
+
+  // Seeds Auto's starting tier from this device's last learned ceiling once probe resolves (so a
+  // known-weak device doesn't have to rediscover its ceiling via a rough patch on every video) —
+  // clamped to this video's own ladder. Only applies if nothing has already resolved Auto's height
+  // (a buffering event firing before probe even returns is vanishingly unlikely, but don't clobber
+  // it if it somehow did).
+  void _maybeSeedAutoQuality(ProbeResult probe) async {
+    if (_qualitySelection != 'auto' || _autoResolvedHeight != null) return;
+    final heights = probe.availableQualities.map((q) => q.height).toList();
+    final remembered = await QualityPrefsService.getCeiling();
+    if (!mounted || _qualitySelection != 'auto' || _autoResolvedHeight != null) return;
+    if (remembered != null && heights.contains(remembered)) {
+      _applyAutoChange(remembered);
     }
   }
 
@@ -180,6 +240,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
+    _autoStepUpTimer?.cancel();
     for (final sub in _subs) {
       sub.cancel();
     }
@@ -232,7 +293,12 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   void _scheduleHide() {
     _hideTimer?.cancel();
     _hideTimer = Timer(_hideControlsDelay, () {
-      if (mounted && _playing && !_episodesOpen && !_subtitleMenuOpen && !_audioMenuOpen) {
+      if (mounted &&
+          _playing &&
+          !_episodesOpen &&
+          !_subtitleMenuOpen &&
+          !_audioMenuOpen &&
+          !_qualityMenuOpen) {
         setState(() => _controlsVisible = false);
       }
     });
@@ -257,10 +323,16 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     setState(() => _isBuffering = true);
     await _player.open(Media(_streamUri(restartOffsetSeconds: seconds).toString()));
     await _player.setRate(_speed);
+    // Passthrough targets have no `t=` URL param to resume at (see _streamUri) — real Range
+    // seeking means a plain post-open seek works fine, unlike the reload-based approach every
+    // other case needs.
+    if (_usingPassthrough && seconds > 0) {
+      await _player.seek(Duration(milliseconds: (seconds * 1000).round()));
+    }
   }
 
   void _skip(int deltaSeconds) {
-    if (_canSeekDirectly) {
+    if (_usingPassthrough) {
       var target = _position + Duration(seconds: deltaSeconds);
       if (target < Duration.zero) target = Duration.zero;
       final duration = _effectiveDuration;
@@ -274,10 +346,73 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   void _seekTo(double seconds) {
-    if (_canSeekDirectly) {
+    if (_usingPassthrough) {
       _player.seek(Duration(milliseconds: (seconds * 1000).round()));
     } else {
       _reopenAt(seconds);
+    }
+  }
+
+  void _changeQuality(String value) {
+    final position = _position.inMilliseconds / 1000;
+    setState(() => _qualitySelection = value);
+    _reopenAt(position);
+  }
+
+  // Auto-mode's own quality changes reuse the exact same reopen mechanics as a manual pick above —
+  // the only difference is who decided the target height.
+  void _applyAutoChange(int? newHeight) {
+    if (newHeight == _autoResolvedHeight) return;
+    final position = _position.inMilliseconds / 1000;
+    setState(() => _autoResolvedHeight = newHeight);
+    QualityPrefsService.setCeiling(newHeight);
+    _reopenAt(position);
+  }
+
+  void _autoStepDown() {
+    final now = DateTime.now();
+    if (now.difference(_autoLastChange) < _autoCooldown) return;
+    final heights = _ladderHeights;
+    if (heights.isEmpty) return;
+    final current = _autoResolvedHeight;
+    final next = current == null
+        ? heights.last
+        : heights[(heights.indexOf(current) - 1).clamp(0, heights.length - 1)];
+    if (next == current) return;
+    _autoLastChange = now;
+    _autoStableSince = now;
+    _autoBufferEvents.clear();
+    _applyAutoChange(next);
+  }
+
+  void _autoStepUp() {
+    final now = DateTime.now();
+    if (now.difference(_autoLastChange) < _autoCooldown) return;
+    if (now.difference(_autoStableSince) < _autoSustained) return;
+    final current = _autoResolvedHeight;
+    if (current == null) return; // already Original, nowhere higher to go
+    final heights = _ladderHeights;
+    final idx = heights.indexOf(current);
+    final next = (idx == -1 || idx == heights.length - 1) ? null : heights[idx + 1];
+    _autoLastChange = now;
+    _autoStableSince = now;
+    _applyAutoChange(next);
+  }
+
+  void _onAutoBufferingStart() {
+    final now = DateTime.now();
+    _autoStallStart = now;
+    _autoBufferEvents.add(now);
+    _autoBufferEvents.removeWhere((t) => now.difference(t) > _autoWindow);
+  }
+
+  void _onAutoBufferingRecovered() {
+    final stallStart = _autoStallStart;
+    _autoStallStart = null;
+    if (stallStart != null && DateTime.now().difference(stallStart) >= _autoStallDuration) {
+      _autoStepDown();
+    } else if (_autoBufferEvents.length >= _autoStepDownEventCount) {
+      _autoStepDown();
     }
   }
 
@@ -309,6 +444,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       _episodesOpen = false;
       _subtitleMenuOpen = false;
       _audioMenuOpen = false;
+      _qualityMenuOpen = false;
     });
     if (_playing) {
       _scheduleHide();
@@ -523,6 +659,18 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                                   ),
                                 ),
+                                if (_ladderHeights.isNotEmpty)
+                                  IconButton(
+                                    icon: const Icon(Icons.hd_outlined, color: Colors.white, size: 20),
+                                    onPressed: () => setState(() {
+                                      _qualityMenuOpen = !_qualityMenuOpen;
+                                      _subtitleMenuOpen = false;
+                                      _audioMenuOpen = false;
+                                      _episodesOpen = false;
+                                      _hideTimer?.cancel();
+                                      _controlsVisible = true;
+                                    }),
+                                  ),
                                 if (hasSubtitles)
                                   IconButton(
                                     icon: const Icon(Icons.subtitles_outlined, color: Colors.white, size: 20),
@@ -530,6 +678,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                       _subtitleMenuOpen = !_subtitleMenuOpen;
                                       _audioMenuOpen = false;
                                       _episodesOpen = false;
+                                      _qualityMenuOpen = false;
                                       _hideTimer?.cancel();
                                       _controlsVisible = true;
                                     }),
@@ -541,6 +690,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                       _audioMenuOpen = !_audioMenuOpen;
                                       _subtitleMenuOpen = false;
                                       _episodesOpen = false;
+                                      _qualityMenuOpen = false;
                                       _hideTimer?.cancel();
                                       _controlsVisible = true;
                                     }),
@@ -552,6 +702,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                       _episodesOpen = !_episodesOpen;
                                       _subtitleMenuOpen = false;
                                       _audioMenuOpen = false;
+                                      _qualityMenuOpen = false;
                                       _hideTimer?.cancel();
                                       _controlsVisible = true;
                                     }),
@@ -578,6 +729,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
 
             if (_subtitleMenuOpen) _subtitleMenu(),
             if (_audioMenuOpen) _audioMenu(),
+            if (_qualityMenuOpen) _qualityMenu(),
           ],
         ),
       ),
@@ -632,6 +784,45 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         ],
       ),
     );
+  }
+
+  Widget _qualityMenu() {
+    final heights = _ladderHeights;
+    final sourceHeight = _probe?.sourceHeight;
+    return _sidePanel('Quality', [
+      RadioListTile<String>(
+        value: 'auto',
+        groupValue: _qualitySelection,
+        title: Text(
+          _qualitySelection == 'auto' && _autoResolvedHeight != null
+              ? 'Auto (${_autoResolvedHeight}p)'
+              : 'Auto',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        activeColor: AppColors.accent,
+        onChanged: (_) => _changeQuality('auto'),
+      ),
+      RadioListTile<String>(
+        value: 'original',
+        groupValue: _qualitySelection,
+        title: Text(
+          sourceHeight != null ? 'Original (${sourceHeight}p)' : 'Original',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        activeColor: AppColors.accent,
+        onChanged: (_) => _changeQuality('original'),
+      ),
+      ...heights.map((h) {
+        final option = _probe!.availableQualities.firstWhere((q) => q.height == h);
+        return RadioListTile<String>(
+          value: h.toString(),
+          groupValue: _qualitySelection,
+          title: Text(option.label, style: const TextStyle(color: Colors.white70)),
+          activeColor: AppColors.accent,
+          onChanged: (_) => _changeQuality(h.toString()),
+        );
+      }),
+    ]);
   }
 
   Widget _subtitleMenu() {

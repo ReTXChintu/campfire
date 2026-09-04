@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ProbeResult } from "../lib/types";
 import { CloseIcon } from "./player-icons";
 import { trackLabel } from "../lib/languageNames";
+import QualitySection, { type QualitySelection } from "./QualitySection";
 
 type Props = {
   probe: ProbeResult | null;
@@ -15,6 +16,11 @@ type Props = {
   onSubtitleDelay: (ms: number) => void;
   open: boolean;
   onClose: () => void;
+  availableQualities: { label: string; height: number }[];
+  sourceHeight: number | null;
+  qualitySelection: QualitySelection;
+  autoResolvedHeight: number | null;
+  onSelectQuality: (value: QualitySelection) => void;
 };
 
 const AUDIO_DELAY_MIN = -5000;
@@ -34,6 +40,11 @@ export default function TrackSettingsMenu({
   onSubtitleDelay,
   open,
   onClose,
+  availableQualities,
+  sourceHeight,
+  qualitySelection,
+  autoResolvedHeight,
+  onSelectQuality,
 }: Props) {
   // Audio delay must only restart the stream on release (each tick would kill/respawn ffmpeg),
   // mirroring the same draft-until-commit pattern the seek bar uses.
@@ -60,6 +71,14 @@ export default function TrackSettingsMenu({
             <CloseIcon className="h-5 w-5" />
           </button>
         </div>
+
+        <QualitySection
+          availableQualities={availableQualities}
+          sourceHeight={sourceHeight}
+          selection={qualitySelection}
+          autoResolvedHeight={autoResolvedHeight}
+          onSelect={onSelectQuality}
+        />
 
         {!probe && <p className="text-sm text-white/50">Loading tracks…</p>}
 

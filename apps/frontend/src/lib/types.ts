@@ -11,11 +11,16 @@ export type WatchProgress = {
   updatedAt: string;
 };
 
+export type QualityOption = { label: string; height: number };
+
 export type ProbeResult = {
-  videoTrack: { index: number; codecName: string } | null;
+  videoTrack: { index: number; codecName: string; width: number | null; height: number | null } | null;
   audioTracks: StreamTrack[];
   subtitleTracks: StreamTrack[];
   durationSeconds: number | null;
+  sourceHeight: number | null;
+  sourceWidth: number | null;
+  availableQualities: QualityOption[];
 };
 
 export type ConvertedSubtitle = {
