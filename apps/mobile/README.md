@@ -33,13 +33,23 @@ flutter run --dart-define=API_URL=http://localhost:4000 --dart-define=DEBUG_TOKE
 
 ```bash
 flutter build apk --release --dart-define=API_URL=http://<server-ip-or-domain>:<port>
-# or, for a Play Store upload:
+# or, for a Play Store upload (not used today — see "Releasing" below):
 flutter build appbundle --release --dart-define=API_URL=http://<server-ip-or-domain>:<port>
 # Windows desktop (admin panel + MKV playback):
 flutter build windows --release --dart-define=API_URL=http://<server-ip-or-domain>:<port>
 ```
 
-Android output: `build/app/outputs/flutter-apk/app-release.apk` (or `build/app/outputs/bundle/release/app-release.aab`). Sideload the APK directly, or upload the `.aab` to Play Console. Windows output: `build/windows/x64/runner/Release/`. To show "Get the App" / "Desktop App" buttons on the web app linking to wherever you host these, set `VITE_MOBILE_APP_DOWNLOAD_URL` / `VITE_DESKTOP_APP_DOWNLOAD_URL` in `apps/frontend/.env` before rebuilding the frontend.
+Android output: `build/app/outputs/flutter-apk/app-release.apk` (or `build/app/outputs/bundle/release/app-release.aab`). Sideload the APK directly, or upload the `.aab` to Play Console.
+
+Windows output is the raw `build/windows/x64/runner/Release/` folder (exe + required DLLs, not distributable on its own) — package it into a proper installer with [Inno Setup](https://jrsoftware.org/isinfo.php) (`windows/installer/campfire.iss`):
+
+```powershell
+iscc windows/installer/campfire.iss /DMyAppVersion=1.2.3
+```
+
+Output: `windows/installer/Output/CampfireSetup.exe` — a standard installer wizard (Start Menu shortcut, optional desktop icon, proper uninstaller). Not code-signed, so Windows SmartScreen will warn on first run ("More info" → "Run anyway"); the `.github/workflows/release-deploy.yml` CI pipeline builds this automatically on every release.
+
+To show "Get the App" / "Desktop App" buttons on the web app linking to wherever you host these, set `VITE_MOBILE_APP_DOWNLOAD_URL` / `VITE_DESKTOP_APP_DOWNLOAD_URL` in `apps/frontend/.env` before rebuilding the frontend.
 
 Both apps only ever speak plain HTTP — if you need TLS, put a reverse proxy in front of the backend and point `API_URL` at that instead (nothing here needs to change either way).
 

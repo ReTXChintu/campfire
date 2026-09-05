@@ -22,7 +22,7 @@ env:
   # Variables) if the backend's address ever changes — no workflow edit needed.
   API_URL: ${{ vars.API_URL || 'http://187.127.179.114:50001' }}
   APK_NAME: app-release.apk
-  WINDOWS_ZIP_NAME: campfire-windows.zip
+  WINDOWS_INSTALLER_NAME: CampfireSetup.exe
 
 jobs:
   build-android:
@@ -77,14 +77,37 @@ jobs:
         working-directory: apps/mobile
         run: flutter build windows --release --dart-define=API_URL=${{ env.API_URL }}
 
-      - name: Zip the release build under its fixed deploy name
+      # AppVersion for the installer's Setup/uninstall entry — read from pubspec.yaml (already the
+      # single source of truth, kept in sync by `npm run release` — see scripts/sync-mobile-version.mjs)
+      # rather than duplicating a version bump here.
+      - name: Determine app version
         shell: pwsh
-        run: Compress-Archive -Path "apps/mobile/build/windows/x64/runner/Release/*" -DestinationPath "${{ env.WINDOWS_ZIP_NAME }}"
+        run: |
+          $pubspec = Get-Content apps/mobile/pubspec.yaml -Raw
+          if ($pubspec -match 'version:\s*([0-9]+\.[0-9]+\.[0-9]+)') {
+            $version = $Matches[1]
+          } else {
+            $version = "0.0.0"
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer (apps/mobile/windows/installer/campfire.iss)
+        shell: pwsh
+        working-directory: apps/mobile/windows/installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" campfire.iss "/DMyAppVersion=$env:APP_VERSION"
+
+      - name: Stage artifact under its fixed deploy name
+        shell: pwsh
+        run: Copy-Item "apps/mobile/windows/installer/Output/CampfireSetup.exe" "${{ env.WINDOWS_INSTALLER_NAME }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-zip
-          path: ${{ env.WINDOWS_ZIP_NAME }}
+          name: windows-installer
+          path: ${{ env.WINDOWS_INSTALLER_NAME }}
           retention-days: 14
 
   deploy:
@@ -100,7 +123,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: windows-zip
+          name: windows-installer
 
       # Always the same two destination filenames — overwrites whatever was there before, so
       # apps/frontend/.env's download URLs never need updating.
@@ -111,7 +134,7 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "${{ env.APK_NAME }},${{ env.WINDOWS_ZIP_NAME }}"
+          source: "${{ env.APK_NAME }},${{ env.WINDOWS_INSTALLER_NAME }}"
           target: "/opt/var/campfire/apps/frontend/public"
 
       - name: Pull latest code, rebuild the web apps, restart pm2

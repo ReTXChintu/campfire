@@ -25,6 +25,10 @@ apps/frontend/dist/
 # mobile/desktop app builds served for download - too large for git, regenerate from a flutter build
 apps/frontend/public/*.apk
 apps/frontend/public/*.zip
+apps/frontend/public/*.exe
+
+# Inno Setup's compiled installer output (apps/mobile/windows/installer/campfire.iss)
+apps/mobile/windows/installer/Output/
 
 # misc
 .DS_Store
