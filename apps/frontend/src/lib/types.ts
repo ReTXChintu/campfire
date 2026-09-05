@@ -45,6 +45,12 @@ export type CatalogFolder = {
 };
 
 export type CatalogVideoStatus = "pending" | "curated" | "published";
+
+export type RenditionStatus = "queued" | "processing" | "done" | "failed";
+export type RenditionEntry = { status: RenditionStatus; error: string | null; generatedAt: string | null };
+// Keyed by height as a string ("480" | "720" | "1080").
+export type CatalogVideoRenditions = Partial<Record<string, RenditionEntry>>;
+
 export type CatalogVideo = {
   _id: string;
   parentFolderId: string;
@@ -58,6 +64,7 @@ export type CatalogVideo = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  renditions: CatalogVideoRenditions;
   createdAt: string;
   curatedAt: string | null;
   curatedBy: string | null;

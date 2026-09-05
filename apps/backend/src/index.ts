@@ -5,6 +5,7 @@ import { createServer as createHttpServer } from "node:http";
 import { env } from "./config/env";
 import { seedAdminUser } from "./lib/users";
 import { startConversionQueue } from "./lib/conversionQueue";
+import { startRenditionQueue } from "./lib/renditionQueue";
 
 import authRoutes from "./routes/auth";
 import mediaTokenRoutes from "./routes/media-token";
@@ -66,6 +67,7 @@ const server = createHttpServer(app);
 seedAdminUser(env.adminEmail, env.adminPassword)
   .then(() => {
     startConversionQueue();
+    startRenditionQueue();
     server.listen(env.port, () => {
       console.log(`Campfire backend listening on http://0.0.0.0:${env.port}`);
     });

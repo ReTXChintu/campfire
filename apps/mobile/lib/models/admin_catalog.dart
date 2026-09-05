@@ -33,6 +33,18 @@ class CatalogFolder {
   );
 }
 
+// Mirrors apps/frontend/src/lib/types.ts's RenditionEntry — one pre-generated quality tier's
+// status (see apps/backend/src/lib/qualityLadder.ts / lib/renditions.ts).
+class RenditionEntry {
+  final String status; // "queued" | "processing" | "done" | "failed"
+  final String? error;
+
+  const RenditionEntry({required this.status, this.error});
+
+  factory RenditionEntry.fromJson(Map<String, dynamic> json) =>
+      RenditionEntry(status: json['status'] as String, error: json['error'] as String?);
+}
+
 class CatalogVideo {
   final String id;
   final String parentFolderId;
@@ -44,6 +56,7 @@ class CatalogVideo {
   final double? introStart;
   final double? introEnd;
   final double? outroStart;
+  final Map<String, RenditionEntry> renditions;
 
   const CatalogVideo({
     required this.id,
@@ -56,6 +69,7 @@ class CatalogVideo {
     this.introStart,
     this.introEnd,
     this.outroStart,
+    this.renditions = const {},
   });
 
   // Mirrors apps/backend/src/lib/drive.ts's isMkv() — Drive's own detector reports plain
@@ -73,6 +87,9 @@ class CatalogVideo {
     introStart: (json['introStart'] as num?)?.toDouble(),
     introEnd: (json['introEnd'] as num?)?.toDouble(),
     outroStart: (json['outroStart'] as num?)?.toDouble(),
+    renditions: (json['renditions'] as Map<String, dynamic>? ?? const {}).map(
+      (key, value) => MapEntry(key, RenditionEntry.fromJson(value as Map<String, dynamic>)),
+    ),
   );
 }
 

@@ -1,10 +1,10 @@
 import { google, drive_v3 } from "googleapis";
 import { spawn } from "node:child_process";
 import type { Readable } from "node:stream";
-import { writeFile, unlink } from "node:fs/promises";
+import { writeFile, unlink, mkdir, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { env } from "../config/env";
 import { videoBitrateKbpsFor, audioBitrateKbpsFor } from "./qualityLadder";
 
@@ -207,7 +207,7 @@ export async function streamFile(fileId: string, range: string | null) {
   return res;
 }
 
-export type RemuxOptions = { audioIndex?: number | null; audioDelayMs?: number; targetHeight?: number | null };
+export type RemuxOptions = { audioIndex?: number | null; audioDelayMs?: number };
 
 /**
  * Remuxes a non-natively-playable container (e.g. MKV) into fragmented MP4 on the fly via ffmpeg.
@@ -215,11 +215,9 @@ export type RemuxOptions = { audioIndex?: number | null; audioDelayMs?: number; 
  * Node) so its own demuxer can issue Range requests and seek near `startSeconds` via input-level
  * `-ss` — this is what makes scrubbing possible despite the output being a live, moov-less stream
  * with no byte-range/duration info of its own. Audio is transcoded to AAC since browsers can't
- * decode the AC3/DTS/etc. tracks common in MKV rips. Video is stream-copied (no re-encode) unless
- * `targetHeight` is given (see routes/stream.ts's `h` query param), in which case it's re-encoded
- * and downscaled instead — this is also how a quality *below* a video's native/raw resolution gets
- * served, not just non-natively-playable containers; see stream.ts for when this path is entered
- * either way.
+ * decode the AC3/DTS/etc. tracks common in MKV rips. Video is always stream-copied (no re-encode) —
+ * adjustable-quality playback below source resolution is served from a pre-generated rendition file
+ * instead (see lib/renditions.ts / routes/stream.ts's `h` param), not by re-encoding here.
  *
  * `audioIndex` (an absolute ffprobe stream index, from `probeStreams`) selects a non-default audio
  * track — omitted, this falls back to ffmpeg's own "first audio stream" shorthand. `audioDelayMs`
@@ -231,24 +229,11 @@ export async function remuxToMp4(
   fileId: string,
   startSeconds: number,
   signal: AbortSignal,
-  { audioIndex = null, audioDelayMs = 0, targetHeight = null }: RemuxOptions = {},
+  { audioIndex = null, audioDelayMs = 0 }: RemuxOptions = {},
 ): Promise<Readable> {
   const accessToken = await getDriveAccessToken();
   const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
   const audioMapArg = audioIndex != null ? `0:${audioIndex}` : "0:a:0";
-
-  const videoArgs =
-    targetHeight != null
-      ? [
-          "-c:v", "libx264",
-          "-preset", "veryfast",
-          "-vf", `scale=-2:${targetHeight}`,
-          "-b:v", `${videoBitrateKbpsFor(targetHeight)}k`,
-          "-maxrate", `${Math.round(videoBitrateKbpsFor(targetHeight) * 1.5)}k`,
-          "-bufsize", `${videoBitrateKbpsFor(targetHeight) * 2}k`,
-          "-pix_fmt", "yuv420p",
-        ]
-      : ["-c:v", "copy"];
 
   const args = [
     "-headers", `Authorization: Bearer ${accessToken}\r\n`,
@@ -256,9 +241,9 @@ export async function remuxToMp4(
     "-i", mediaUrl,
     "-map", "0:v:0",
     "-map", audioMapArg,
-    ...videoArgs,
+    "-c:v", "copy",
     "-c:a", "aac",
-    "-b:a", `${audioBitrateKbpsFor(targetHeight ?? 1080)}k`,
+    "-b:a", "192k",
     // Downmix to stereo: ffmpeg's native AAC encoder can't reliably encode >2 channels (hit
     // live: "Unsupported channel layout '6 channels'" on a 5.1 AC3/EAC3 source track, common in
     // MKV rips) — browsers don't render surround differently from stereo, so this is a pure
@@ -282,6 +267,70 @@ export async function remuxToMp4(
   ffmpeg.stderr.on("data", (chunk) => process.stderr.write(`[ffmpeg ${chunk}`));
 
   return ffmpeg.stdout;
+}
+
+/**
+ * Encodes one full, permanent quality rendition of a Drive video to `destPath` — used by
+ * lib/renditionQueue.ts, not per-request. Unlike `remuxToMp4` (a live, seek-on-request, pipe-to-
+ * stdout stream with no real duration/Range of its own), this writes a real on-disk MP4 with
+ * `-movflags +faststart` so routes/stream.ts can serve it later with genuine Range support, same as
+ * a natively-playable passthrough file. A `preset` of "medium" (vs. `remuxToMp4`'s "veryfast") is
+ * fine here since this only ever runs once per video/height, not on the latency-sensitive request
+ * path. Only the default video/audio track are muxed (no embedded subtitles) — same tradeoff
+ * `remuxToMp4` already makes; a video's admin-curated subtitleSets are a separate, unaffected
+ * mechanism. Writes to a temp file alongside the destination first, then renames into place, so a
+ * request that races a still-in-progress generation can never see a truncated/partial file.
+ */
+export async function generateRenditionFile(fileId: string, targetHeight: number, destPath: string): Promise<void> {
+  await mkdir(dirname(destPath), { recursive: true });
+  const tempPath = `${destPath}.tmp-${randomUUID()}`;
+
+  const inputArgs = await sourceInputArgs({ type: "drive", fileId });
+  const videoBitrate = videoBitrateKbpsFor(targetHeight);
+  const args = [
+    ...inputArgs,
+    "-map", "0:v:0",
+    "-map", "0:a:0",
+    "-c:v", "libx264",
+    "-preset", "medium",
+    "-vf", `scale=-2:${targetHeight}`,
+    "-b:v", `${videoBitrate}k`,
+    "-maxrate", `${Math.round(videoBitrate * 1.5)}k`,
+    "-bufsize", `${videoBitrate * 2}k`,
+    "-pix_fmt", "yuv420p",
+    "-c:a", "aac",
+    "-b:a", `${audioBitrateKbpsFor(targetHeight)}k`,
+    "-ac", "2",
+    "-movflags", "+faststart",
+    "-f", "mp4",
+    "-y",
+    tempPath,
+  ];
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const ffmpeg = spawn(env.ffmpegPath, args);
+      const stderrTail: string[] = [];
+      ffmpeg.stderr.on("data", (chunk: Buffer) => {
+        process.stderr.write(`[ffmpeg-rendition ${chunk}`);
+        stderrTail.push(chunk.toString("utf-8"));
+        if (stderrTail.length > 20) stderrTail.shift();
+      });
+      ffmpeg.on("error", (err) => reject(friendlyBinaryError(err, "ffmpeg")));
+      ffmpeg.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          const detail = stderrTail.join("").trim().split("\n").slice(-5).join(" | ");
+          reject(new Error(`ffmpeg rendition generation failed (exit ${code})${detail ? `: ${detail}` : ""}`));
+        }
+      });
+    });
+    await rename(tempPath, destPath);
+  } catch (error) {
+    await unlink(tempPath).catch(() => {});
+    throw error;
+  }
 }
 
 function isEnoent(err: unknown): boolean {

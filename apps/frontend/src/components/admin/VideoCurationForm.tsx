@@ -6,10 +6,32 @@ import {
   useSaveVideo,
   useToggleVideoPublish,
   useUploadSubtitle,
+  useGenerateRenditions,
   type SubtitleSetOption,
 } from "../../hooks/useAdminCatalog";
+import type { CatalogVideoRenditions } from "../../lib/types";
 
 type Status = "pending" | "curated" | "published";
+
+// Fixed, non-negotiable policy — mirrors apps/backend/src/lib/qualityLadder.ts's QUALITY_LADDER.
+// Admin has no per-tier picker; "Generate renditions" always targets whichever of these apply to
+// this video's source resolution.
+const RENDITION_HEIGHTS = [480, 720, 1080] as const;
+
+function renditionStatusLabel(status: string): string {
+  switch (status) {
+    case "queued":
+      return "Queued";
+    case "processing":
+      return "Generating…";
+    case "done":
+      return "Ready";
+    case "failed":
+      return "Failed";
+    default:
+      return status;
+  }
+}
 
 function formatTime(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
@@ -36,6 +58,7 @@ export default function VideoCurationForm({
   initialSubtitleSetIds,
   subtitleSetOptions,
   status,
+  renditions,
 }: {
   fileId: string;
   driveName: string;
@@ -46,6 +69,7 @@ export default function VideoCurationForm({
   initialSubtitleSetIds: string[];
   subtitleSetOptions: SubtitleSetOption[];
   status: Status;
+  renditions: CatalogVideoRenditions;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const uploadFileRef = useRef<HTMLInputElement>(null);
@@ -63,6 +87,11 @@ export default function VideoCurationForm({
   const saveMutation = useSaveVideo(fileId);
   const publishMutation = useToggleVideoPublish(fileId);
   const uploadMutation = useUploadSubtitle(fileId);
+  const renditionsMutation = useGenerateRenditions(fileId);
+
+  const renditionsInFlight = RENDITION_HEIGHTS.some(
+    (h) => renditions[String(h)]?.status === "queued" || renditions[String(h)]?.status === "processing",
+  );
 
   const captureTime = () => videoRef.current?.currentTime ?? 0;
 
@@ -179,6 +208,47 @@ export default function VideoCurationForm({
               Set from preview
             </button>
           </div>
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-sm font-medium text-white/90">Quality renditions</p>
+          <p className="mb-2 text-xs text-text-tertiary">
+            Pre-generates 480p/720p/1080p versions (whichever are below this video's own resolution)
+            so viewers can switch quality without a live re-encode. Runs in the background, one at a
+            time — this page updates automatically while a rendition is generating.
+          </p>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {RENDITION_HEIGHTS.map((h) => {
+              const entry = renditions[String(h)];
+              if (!entry) return null;
+              const color =
+                entry.status === "done"
+                  ? "border-live text-live"
+                  : entry.status === "failed"
+                    ? "border-red-400 text-red-400"
+                    : "border-divider text-white/90";
+              return (
+                <span
+                  key={h}
+                  title={entry.error ?? undefined}
+                  className={`rounded-md border px-2.5 py-1 text-xs ${color}`}
+                >
+                  {h}p — {renditionStatusLabel(entry.status)}
+                </span>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => renditionsMutation.mutate()}
+            disabled={renditionsMutation.isPending || renditionsInFlight}
+            className={timeButton}
+          >
+            {renditionsInFlight ? "Generating…" : "Generate renditions"}
+          </button>
+          {renditionsMutation.error && (
+            <p className="mt-2 text-xs text-red-400">{renditionsMutation.error.message}</p>
+          )}
         </div>
 
         <div>

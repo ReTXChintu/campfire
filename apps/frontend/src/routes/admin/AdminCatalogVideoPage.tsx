@@ -52,6 +52,7 @@ export default function AdminCatalogVideoPage() {
         initialSubtitleSetIds={video.subtitleSetIds ?? []}
         subtitleSetOptions={subtitleSetOptions}
         status={video.status}
+        renditions={video.renditions ?? {}}
       />
     </div>
   );

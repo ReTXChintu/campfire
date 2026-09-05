@@ -1,6 +1,13 @@
 import express, { Router } from "express";
 import { requireAdmin } from "../../middleware/auth";
-import { getCatalogVideo, curateVideo, publishVideo, unpublishVideo, addSubtitleSetId } from "../../lib/catalogVideos";
+import {
+  getCatalogVideo,
+  curateVideo,
+  publishVideo,
+  unpublishVideo,
+  addSubtitleSetId,
+  queueRenditions,
+} from "../../lib/catalogVideos";
 import { getCatalogFolder } from "../../lib/catalogFolders";
 import {
   getSubtitleSet,
@@ -10,7 +17,8 @@ import {
   listSubtitleSetsByIds,
   createAndLinkSubtitleSet,
 } from "../../lib/subtitleSets";
-import { convertSrtTextToVtt } from "../../lib/drive";
+import { convertSrtTextToVtt, probeStreams } from "../../lib/drive";
+import { storableTiersFor } from "../../lib/qualityLadder";
 
 const router = Router();
 
@@ -116,6 +124,36 @@ router.post("/:fileId/unpublish", requireAdmin, async (req, res) => {
     return;
   }
   res.json({ ok: true });
+});
+
+// Queues generation for every tier this video's resolution can support that isn't already "done"
+// (re-queues "failed" ones too — a retry) — 480p/720p/1080p is a fixed, non-negotiable policy (see
+// lib/qualityLadder.ts), so there's no per-tier picker on the admin side, just one button.
+router.post("/:fileId/renditions", requireAdmin, async (req, res) => {
+  const { fileId } = req.params;
+  const video = await getCatalogVideo(fileId);
+  if (!video) {
+    res.status(404).json({ error: "Video not found" });
+    return;
+  }
+
+  const probe = await probeStreams(fileId).catch(() => null);
+  const sourceHeight = probe?.videoTrack?.height ?? null;
+  const tiers = storableTiersFor(sourceHeight);
+  const toQueue = tiers.filter((t) => video.renditions?.[String(t.height)]?.status !== "done").map((t) => t.height);
+
+  if (toQueue.length === 0) {
+    res.status(400).json({
+      error:
+        tiers.length === 0
+          ? "This video's resolution is too low for any stored quality tier below Original."
+          : "All available quality tiers are already generated.",
+    });
+    return;
+  }
+
+  await queueRenditions(fileId, toQueue);
+  res.json({ queued: toQueue });
 });
 
 const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024; // subtitle files are plain text — a few KB to low MB at most

@@ -50,6 +50,10 @@ class AdminCatalogService {
     return ApiClient.post('/api/admin/catalog/video/$fileId/${publish ? 'publish' : 'unpublish'}');
   }
 
+  static Future<void> generateRenditions(String fileId) {
+    return ApiClient.post('/api/admin/catalog/video/$fileId/renditions');
+  }
+
   static Future<String> uploadSubtitle(
     String fileId, {
     required String label,

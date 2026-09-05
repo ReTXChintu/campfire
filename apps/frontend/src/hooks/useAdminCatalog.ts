@@ -50,6 +50,14 @@ export function useAdminVideo(fileId: string) {
   return useQuery({
     queryKey: ["admin-video", fileId],
     queryFn: () => apiGet<AdminVideoDetail>(`/api/admin/catalog/video/${fileId}`),
+    // Poll while any rendition is still being generated, so the status chips (and eventually the
+    // "Generate renditions" button re-enabling) update without a manual refresh — matches the
+    // Converter tab's polling pattern for the same reason (background ffmpeg work, no websocket).
+    refetchInterval: (query) => {
+      const renditions = query.state.data?.video.renditions;
+      const inFlight = renditions && Object.values(renditions).some((r) => r?.status === "queued" || r?.status === "processing");
+      return inFlight ? 3000 : false;
+    },
   });
 }
 
@@ -109,6 +117,14 @@ export function useToggleVideoPublish(fileId: string) {
   return useMutation({
     mutationFn: (action: "publish" | "unpublish") =>
       apiPost(`/api/admin/catalog/video/${fileId}/${action}`),
+    onSuccess: invalidate,
+  });
+}
+
+export function useGenerateRenditions(fileId: string) {
+  const invalidate = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: () => apiPost<{ queued: number[] }>(`/api/admin/catalog/video/${fileId}/renditions`),
     onSuccess: invalidate,
   });
 }

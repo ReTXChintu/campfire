@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../models/admin_catalog.dart';
 import '../../services/admin_catalog_service.dart';
@@ -17,6 +19,7 @@ class AdminCatalogVideoPage extends StatefulWidget {
 
 class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
   late Future<AdminVideoDetail> _future;
+  Timer? _pollTimer;
 
   @override
   void initState() {
@@ -24,7 +27,27 @@ class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
     _future = AdminCatalogService.fetchVideo(widget.fileId);
   }
 
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
   void _reload() => setState(() => _future = AdminCatalogService.fetchVideo(widget.fileId));
+
+  // Mirrors useAdminVideo's refetchInterval on the web — keeps polling while any rendition
+  // tier is still being generated in the background, so the status chips update on their own.
+  void _scheduleRenditionPollIfNeeded(Map<String, RenditionEntry> renditions) {
+    final inFlight = renditions.values.any((r) => r.status == 'queued' || r.status == 'processing');
+    if (!inFlight) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+      return;
+    }
+    _pollTimer ??= Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _reload();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +67,9 @@ class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
           final data = snapshot.data!;
           final title = data.video.title ?? data.video.driveName;
           final parentTitle = data.parentFolder?.title ?? data.parentFolder?.driveName;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _scheduleRenditionPollIfNeeded(data.video.renditions);
+          });
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -72,6 +98,7 @@ class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
                       initialSubtitleSetIds: data.video.subtitleSetIds,
                       subtitleSetOptions: data.subtitleSetOptions,
                       status: data.video.status,
+                      renditions: data.video.renditions,
                       onChanged: _reload,
                     ),
                   ],

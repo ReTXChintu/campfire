@@ -1,6 +1,17 @@
 import { getDb } from "./mongodb";
+import type { RenditionHeight } from "./qualityLadder";
 
 export type CatalogVideoStatus = "pending" | "curated" | "published";
+
+export type RenditionStatus = "queued" | "processing" | "done" | "failed";
+export type RenditionEntry = {
+  status: RenditionStatus;
+  error: string | null;
+  generatedAt: Date | null;
+};
+// Keyed by height as a string ("480" | "720" | "1080") — Mongo/JSON object keys are always
+// strings, and this is looked up dynamically (by requested height) far more often than iterated.
+export type CatalogVideoRenditions = Partial<Record<string, RenditionEntry>>;
 
 export type CatalogVideo = {
   _id: string; // Drive file id
@@ -15,6 +26,7 @@ export type CatalogVideo = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  renditions: CatalogVideoRenditions;
   createdAt: Date;
   curatedAt: Date | null;
   curatedBy: string | null;
@@ -108,6 +120,7 @@ export async function upsertScannedVideo(input: {
         introStart: null,
         introEnd: null,
         outroStart: null,
+        renditions: {},
         createdAt: now,
         curatedAt: null,
         curatedBy: null,
@@ -181,4 +194,49 @@ export async function unpublishVideo(fileId: string): Promise<{ matched: boolean
     { $set: { status: "curated", updatedAt: new Date() } },
   );
   return { matched: res.matchedCount > 0 };
+}
+
+/** Marks the given heights "queued" for this video, ready for renditionQueue.ts to pick up.
+ * Re-queuing a height that's already "done"/"failed" clears the old result — a fresh generation. */
+export async function queueRenditions(fileId: string, heights: RenditionHeight[]): Promise<void> {
+  const col = await collection();
+  const set: Record<string, RenditionEntry> = {};
+  for (const height of heights) {
+    set[`renditions.${height}`] = { status: "queued", error: null, generatedAt: null };
+  }
+  await col.updateOne({ _id: fileId }, { $set: set });
+}
+
+/** Atomically claims one queued rendition job across the whole catalog (checked height-by-height,
+ * so all videos' 480p jobs drain before any 720p job starts — fine for personal-library scale,
+ * simpler than a fair global ordering). Returns null once nothing is queued. */
+export async function claimNextQueuedRendition(
+  heights: readonly RenditionHeight[],
+): Promise<{ fileId: string; height: RenditionHeight } | null> {
+  const col = await collection();
+  for (const height of heights) {
+    const doc = await col.findOneAndUpdate(
+      { [`renditions.${height}.status`]: "queued" },
+      { $set: { [`renditions.${height}.status`]: "processing" } },
+      { returnDocument: "after" },
+    );
+    if (doc) return { fileId: doc._id, height };
+  }
+  return null;
+}
+
+export async function markRenditionDone(fileId: string, height: RenditionHeight): Promise<void> {
+  const col = await collection();
+  await col.updateOne(
+    { _id: fileId },
+    { $set: { [`renditions.${height}`]: { status: "done", error: null, generatedAt: new Date() } } },
+  );
+}
+
+export async function markRenditionFailed(fileId: string, height: RenditionHeight, error: string): Promise<void> {
+  const col = await collection();
+  await col.updateOne(
+    { _id: fileId },
+    { $set: { [`renditions.${height}`]: { status: "failed", error, generatedAt: null } } },
+  );
 }

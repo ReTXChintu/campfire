@@ -27,6 +27,25 @@ String _trackSummary(List<SubtitleTrackInfo> tracks) {
   return tracks.map((t) => t.language ?? t.title ?? 'Track ${t.index}').join(', ');
 }
 
+// Fixed, non-negotiable policy — mirrors apps/backend/src/lib/qualityLadder.ts's QUALITY_LADDER
+// and apps/frontend/src/components/admin/VideoCurationForm.tsx's RENDITION_HEIGHTS.
+const List<int> _renditionHeights = [480, 720, 1080];
+
+String _renditionStatusLabel(String status) {
+  switch (status) {
+    case 'queued':
+      return 'Queued';
+    case 'processing':
+      return 'Generating…';
+    case 'done':
+      return 'Ready';
+    case 'failed':
+      return 'Failed';
+    default:
+      return status;
+  }
+}
+
 /// Mirrors apps/frontend/src/components/admin/VideoCurationForm.tsx — same two-column layout
 /// (preview + capture-time buttons on the left, fields/subtitles/save/publish on the right) and
 /// the same five admin endpoints, just re-hosted in Flutter for the desktop admin panel.
@@ -41,6 +60,7 @@ class AdminVideoCurationForm extends StatefulWidget {
   final List<String> initialSubtitleSetIds;
   final List<SubtitleSetOption> subtitleSetOptions;
   final String status;
+  final Map<String, RenditionEntry> renditions;
   final VoidCallback onChanged;
 
   const AdminVideoCurationForm({
@@ -55,6 +75,7 @@ class AdminVideoCurationForm extends StatefulWidget {
     required this.initialSubtitleSetIds,
     required this.subtitleSetOptions,
     required this.status,
+    required this.renditions,
     required this.onChanged,
   });
 
@@ -86,8 +107,10 @@ class _AdminVideoCurationFormState extends State<AdminVideoCurationForm> {
   bool _publishing = false;
   bool _uploading = false;
   bool _saved = false;
+  bool _generatingRenditions = false;
   String? _error;
   String? _previewError;
+  String? _renditionsError;
 
   @override
   void initState() {
@@ -191,6 +214,28 @@ class _AdminVideoCurationFormState extends State<AdminVideoCurationForm> {
       setState(() => _error = e is ApiException ? e.message : 'Failed — please try again.');
     } finally {
       if (mounted) setState(() => _publishing = false);
+    }
+  }
+
+  bool get _renditionsInFlight => _renditionHeights.any((h) {
+    final entry = widget.renditions[h.toString()];
+    return entry?.status == 'queued' || entry?.status == 'processing';
+  });
+
+  Future<void> _generateRenditions() async {
+    setState(() {
+      _generatingRenditions = true;
+      _renditionsError = null;
+    });
+    try {
+      await AdminCatalogService.generateRenditions(widget.fileId);
+      if (!mounted) return;
+      widget.onChanged();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _renditionsError = e is ApiException ? e.message : 'Failed — please try again.');
+    } finally {
+      if (mounted) setState(() => _generatingRenditions = false);
     }
   }
 
@@ -319,6 +364,54 @@ class _AdminVideoCurationFormState extends State<AdminVideoCurationForm> {
         const Text('Next Episode prompt start', style: TextStyle(color: AppColors.foreground, fontWeight: FontWeight.w500)),
         const SizedBox(height: 6),
         _timeCaptureRow('Start (s)', _outroStartController),
+        const SizedBox(height: 20),
+
+        const Text('Quality renditions', style: TextStyle(color: AppColors.foreground, fontWeight: FontWeight.w500)),
+        const SizedBox(height: 6),
+        const Text(
+          "Pre-generates 480p/720p/1080p versions (whichever are below this video's own "
+          'resolution) so viewers can switch quality without a live re-encode. Runs in the '
+          'background, one at a time.',
+          style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final h in _renditionHeights)
+              if (widget.renditions[h.toString()] != null)
+                Builder(builder: (context) {
+                  final entry = widget.renditions[h.toString()]!;
+                  final color = entry.status == 'done'
+                      ? AppColors.live
+                      : entry.status == 'failed'
+                          ? const Color(0xFFF87171)
+                          : AppColors.foreground;
+                  return Tooltip(
+                    message: entry.error ?? '',
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: color),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text('${h}p — ${_renditionStatusLabel(entry.status)}', style: TextStyle(color: color, fontSize: 12)),
+                    ),
+                  );
+                }),
+          ],
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: _generatingRenditions || _renditionsInFlight ? null : _generateRenditions,
+          child: Text(_renditionsInFlight ? 'Generating…' : 'Generate renditions'),
+        ),
+        if (_renditionsError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_renditionsError!, style: const TextStyle(color: Color(0xFFF87171), fontSize: 13)),
+          ),
         const SizedBox(height: 20),
 
         const Text('Subtitles', style: TextStyle(color: AppColors.foreground, fontWeight: FontWeight.w500)),
