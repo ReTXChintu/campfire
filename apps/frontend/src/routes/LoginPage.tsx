@@ -56,9 +56,7 @@ export default function LoginPage() {
       />
       <div className="relative flex w-full max-w-sm flex-col items-center gap-8 rounded-2xl border border-divider bg-surface/60 px-10 py-14 shadow-2xl shadow-black/50 backdrop-blur">
         <div className="flex flex-col items-center gap-2">
-          <h1 className="flex items-center gap-0.5 font-display text-6xl tracking-wide text-white">
-            CAMPFIRE<span className="text-accent">•</span>
-          </h1>
+          <img src="/full_logo.png" alt="Campfire" className="h-32 w-auto" />
           <p className="text-sm text-text-secondary">Your library, ready to watch.</p>
         </div>
 

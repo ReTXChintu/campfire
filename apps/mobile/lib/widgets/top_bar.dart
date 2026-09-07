@@ -21,12 +21,7 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
     return AppBar(
       automaticallyImplyLeading: showBack,
       titleSpacing: showBack ? 0 : 16,
-      title: RichText(
-        text: TextSpan(
-          style: AppTheme.display(fontSize: 24),
-          children: const [TextSpan(text: 'CAMPFIRE'), TextSpan(text: '•', style: TextStyle(color: AppColors.accent))],
-        ),
-      ),
+      title: Image.asset('assets/images/logo.png', height: 32),
       actions: [
         PopupMenuButton<String>(
           icon: Container(

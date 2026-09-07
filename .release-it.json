@@ -5,10 +5,10 @@
     "requireCleanWorkingDir": true,
     "requireBranch": "main",
     "requireUpstream": false,
-    "push": false
+    "push": true
   },
   "github": {
-    "release": false
+    "release": true
   },
   "npm": {
     "publish": false

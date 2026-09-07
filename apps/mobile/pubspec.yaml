@@ -64,6 +64,20 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# App/launcher icon generation — run `dart run flutter_launcher_icons` after changing
+# assets/images/logo.png to regenerate Android mipmaps and the Windows .ico.
+flutter_launcher_icons:
+  image_path: "assets/images/logo.png"
+  android: true
+  min_sdk_android: 21
+  adaptive_icon_background: "#0A0B0F"
+  adaptive_icon_foreground: "assets/images/logo.png"
+  windows:
+    generate: true
+    image_path: "assets/images/logo.png"
+    icon_size: 256
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -75,6 +89,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/images/logo.png
+    - assets/images/full_logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

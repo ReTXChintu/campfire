@@ -63,15 +63,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                RichText(
-                  text: TextSpan(
-                    style: AppTheme.display(fontSize: 56),
-                    children: const [
-                      TextSpan(text: 'CAMPFIRE'),
-                      TextSpan(text: '•', style: TextStyle(color: AppColors.accent)),
-                    ],
-                  ),
-                ),
+                Image.asset('assets/images/full_logo.png', height: 160),
                 const SizedBox(height: 8),
                 const Text('Your library, ready to watch.', style: TextStyle(color: AppColors.textSecondary)),
                 const SizedBox(height: 32),
