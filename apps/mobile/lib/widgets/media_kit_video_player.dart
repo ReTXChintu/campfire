@@ -226,15 +226,22 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final resumeSeconds =
         (!video.initialCompleted && video.initialPositionSeconds > 5) ? video.initialPositionSeconds : 0.0;
     final needsResumeSeek = resumeSeconds > 0 && _streamIsSeekable;
+    // Media's `start:` tells mpv to begin playback already at this offset, instead of opening at 0
+    // and correcting with a seek() afterward — Player.open() defaults to play:true, so a manual
+    // post-open seek races already-started playback (loses that race often enough on a slow
+    // connection, exactly the case that matters most for MKVs streamed live from Drive) rather than
+    // reliably landing before the viewer notices. `start:` avoids the race entirely.
     if (needsResumeSeek) _resumeSeekComplete = false;
-    await _player.open(Media(_streamUri(restartOffsetSeconds: resumeSeconds).toString()));
+    await _player.open(
+      Media(
+        _streamUri(restartOffsetSeconds: resumeSeconds).toString(),
+        start: needsResumeSeek ? Duration(milliseconds: (resumeSeconds * 1000).round()) : null,
+      ),
+    );
     await _player.setRate(_speed);
     // Embedded subtitles default off, matching the native-mode player's default (no track
     // pre-selected) rather than libmpv's own default-flag-driven auto-selection.
     await _player.setSubtitleTrack(SubtitleTrack.no());
-    if (needsResumeSeek) {
-      await _player.seek(Duration(milliseconds: (resumeSeconds * 1000).round()));
-    }
     _resumeSeekComplete = true;
   }
 
@@ -344,15 +351,16 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   Future<void> _reopenAt(double seconds) async {
     setState(() => _isBuffering = true);
     final needsSeek = seconds > 0 && _streamIsSeekable;
+    // See _bootstrap's identical comment: Media's `start:` tells mpv to begin already at this
+    // offset, avoiding the race a post-open seek() has against Player.open()'s default play:true.
     if (needsSeek) _resumeSeekComplete = false;
-    await _player.open(Media(_streamUri(restartOffsetSeconds: seconds).toString()));
+    await _player.open(
+      Media(
+        _streamUri(restartOffsetSeconds: seconds).toString(),
+        start: needsSeek ? Duration(milliseconds: (seconds * 1000).round()) : null,
+      ),
+    );
     await _player.setRate(_speed);
-    // A seekable target (passthrough or a specific quality tier) has no `t=` URL param to resume
-    // at (see _streamUri) — a plain post-open seek works fine, unlike the reload-based approach
-    // true restart mode needs.
-    if (needsSeek) {
-      await _player.seek(Duration(milliseconds: (seconds * 1000).round()));
-    }
     _resumeSeekComplete = true;
   }
 
