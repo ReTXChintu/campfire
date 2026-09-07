@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getProgress, upsertProgress } from "../lib/progress";
+import { getProgress, upsertProgress, type SubtitleSource } from "../lib/progress";
 import { requireAuth } from "../middleware/auth";
 
 const router = Router();
@@ -16,11 +16,24 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 router.post("/", requireAuth, async (req, res) => {
-  const { fileId, parentFolderId, positionSeconds, durationSeconds } = req.body as {
+  const {
+    fileId,
+    parentFolderId,
+    positionSeconds,
+    durationSeconds,
+    subtitleSource,
+    subtitleIndex,
+    audioLanguage,
+    audioTitle,
+  } = req.body as {
     fileId?: string;
     parentFolderId?: string;
     positionSeconds?: number;
     durationSeconds?: number;
+    subtitleSource?: SubtitleSource;
+    subtitleIndex?: number | null;
+    audioLanguage?: string | null;
+    audioTitle?: string | null;
   };
 
   if (
@@ -32,6 +45,10 @@ router.post("/", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Invalid payload" });
     return;
   }
+  if (subtitleSource !== undefined && !["off", "external", "restart"].includes(subtitleSource)) {
+    res.status(400).json({ error: "Invalid subtitleSource" });
+    return;
+  }
 
   await upsertProgress({
     userId: req.authUser!.userId,
@@ -39,6 +56,10 @@ router.post("/", requireAuth, async (req, res) => {
     parentFolderId,
     positionSeconds,
     durationSeconds,
+    subtitleSource,
+    subtitleIndex,
+    audioLanguage,
+    audioTitle,
   });
 
   res.json({ ok: true });

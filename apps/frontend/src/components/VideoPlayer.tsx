@@ -44,6 +44,10 @@ type Props = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  initialSubtitleSource: "off" | "external" | "restart" | null;
+  initialSubtitleIndex: number | null;
+  initialAudioLanguage: string | null;
+  initialAudioTitle: string | null;
   watchPartySync?: {
     enabled: boolean;
     isHost: boolean;
@@ -134,6 +138,10 @@ export default function VideoPlayer({
   introStart,
   introEnd,
   outroStart,
+  initialSubtitleSource,
+  initialSubtitleIndex,
+  initialAudioLanguage,
+  initialAudioTitle,
   watchPartySync,
 }: Props) {
   const isNative = seekMode === "native";
@@ -197,13 +205,31 @@ export default function VideoPlayer({
   // restart-mode only
   const [audioIndex, setAudioIndex] = useState<number | null>(null);
   const [audioDelayMs, setAudioDelayMs] = useState(0);
-  const [restartSubtitleIndex, setRestartSubtitleIndex] = useState<number | null>(null);
+  const [restartSubtitleIndex, setRestartSubtitleIndex] = useState<number | null>(
+    initialSubtitleSource === "restart" ? initialSubtitleIndex : null,
+  );
   const [subtitleDelayMs, setSubtitleDelayMs] = useState(0);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
 
   // native-mode only
-  const [nativeSubtitleIndex, setNativeSubtitleIndex] = useState<number | null>(null);
+  const [nativeSubtitleIndex, setNativeSubtitleIndex] = useState<number | null>(
+    initialSubtitleSource === "external" ? initialSubtitleIndex : null,
+  );
   const [nativeDuration, setNativeDuration] = useState<number | null>(null);
+
+  // Remembered audio-track preference (see apps/backend/src/lib/progress.ts) — restart-mode only,
+  // same as audioIndex itself. Matched against `probe.audioTracks` by language+title once probe
+  // resolves (see the effect below), since a raw index isn't known until then. Kept as refs (not
+  // state) because they're read-once inputs to that effect, not values the UI itself renders.
+  const audioPreferenceRef = useRef({ language: initialAudioLanguage, title: initialAudioTitle });
+  const audioPreferenceAppliedRef = useRef(initialAudioLanguage == null && initialAudioTitle == null);
+  // Whether there's a subtitle/audio preference worth sending on the next (periodic, position-
+  // only) progress save — true from mount if one was already loaded (so periodic saves keep
+  // confirming it, harmlessly), and set true the moment the user explicitly changes either this
+  // session. An explicit change also force-saves immediately with fresh values (see
+  // changeAudioTrack/changeSubtitleTrack/the native subtitle picker) rather than waiting on this.
+  const subtitleTouchedRef = useRef(initialSubtitleSource != null);
+  const audioTouchedRef = useRef(initialAudioLanguage != null || initialAudioTitle != null);
 
   const [speed, setSpeed] = useState(1);
   const [timeDisplayMode, setTimeDisplayMode] = useState<"total" | "remaining">("total");
@@ -273,6 +299,36 @@ export default function VideoPlayer({
 
   useEffect(() => clearHideTimer, [clearHideTimer]);
 
+  // Subtitle/audio fields for a progress-save call, built from current state — used by the
+  // periodic/position-only save path and goToNext. An explicit track change instead force-saves
+  // immediately with fresh values of its own (React state hasn't re-rendered with the new value
+  // yet at the point a change handler runs), see changeAudioTrack/changeSubtitleTrack/the native
+  // subtitle picker's onSelect. Omitting a field (vs. sending null) leaves it untouched server-side
+  // (see apps/backend/src/lib/progress.ts) — that's why untouched preferences are left out here.
+  const trackPreferenceFields = useCallback(() => {
+    const fields: {
+      subtitleSource?: "off" | "external" | "restart";
+      subtitleIndex?: number | null;
+      audioLanguage?: string | null;
+      audioTitle?: string | null;
+    } = {};
+    if (subtitleTouchedRef.current) {
+      if (isNative) {
+        fields.subtitleSource = nativeSubtitleIndex != null ? "external" : "off";
+        fields.subtitleIndex = nativeSubtitleIndex;
+      } else {
+        fields.subtitleSource = restartSubtitleIndex != null ? "restart" : "off";
+        fields.subtitleIndex = restartSubtitleIndex;
+      }
+    }
+    if (audioTouchedRef.current && !isNative) {
+      const track = audioIndex != null ? probe?.audioTracks.find((t) => t.index === audioIndex) : null;
+      fields.audioLanguage = track?.language ?? null;
+      fields.audioTitle = track?.title ?? null;
+    }
+    return fields;
+  }, [isNative, nativeSubtitleIndex, restartSubtitleIndex, audioIndex, probe]);
+
   const goToNext = useCallback(() => {
     const video = videoRef.current;
     const positionSeconds = effectiveDuration ?? (video ? getAbsolutePosition(video) : 0);
@@ -281,11 +337,12 @@ export default function VideoPlayer({
       parentFolderId,
       positionSeconds,
       durationSeconds: effectiveDuration ?? 0,
+      ...trackPreferenceFields(),
     }).catch(() => {});
     if (nextFileId) {
       navigate(`/watch/${nextFileId}`);
     }
-  }, [fileId, parentFolderId, nextFileId, effectiveDuration, getAbsolutePosition, navigate]);
+  }, [fileId, parentFolderId, nextFileId, effectiveDuration, getAbsolutePosition, navigate, trackPreferenceFields]);
 
   // Static, fully-loaded VTT text (not seek-position-dependent like the restart-mode subtitle
   // fetch) — build blob URLs once per subtitles prop change. Only relevant for native mode
@@ -329,13 +386,24 @@ export default function VideoPlayer({
     let cancelled = false;
     apiGet<ProbeResult>(`/api/probe/${fileId}`)
       .then((data) => {
-        if (!cancelled) setProbe(data);
+        if (cancelled) return;
+        setProbe(data);
+        // Restart-mode audio track switching only (native content has no audio-track picker) —
+        // match the remembered preference by language+title against this file's real ffprobe
+        // stream list, now that it's known. Runs once per mount; a later reload (quality change,
+        // skip) reuses whatever `audioIndex` is already set to, same as a manual pick would.
+        if (!isNative && !audioPreferenceAppliedRef.current) {
+          audioPreferenceAppliedRef.current = true;
+          const { language, title } = audioPreferenceRef.current;
+          const match = data.audioTracks.find((t) => t.language === language && t.title === title);
+          if (match) setAudioIndex(match.index);
+        }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [fileId]);
+  }, [fileId, isNative]);
 
   const src = useMemo(() => {
     if (!mediaToken) return undefined;
@@ -362,6 +430,7 @@ export default function VideoPlayer({
         parentFolderId,
         positionSeconds,
         durationSeconds: effectiveDuration ?? 0,
+        ...trackPreferenceFields(),
       }).catch(() => {});
     };
 
@@ -476,6 +545,7 @@ export default function VideoPlayer({
     scheduleHide,
     clearHideTimer,
     goToNext,
+    trackPreferenceFields,
     introStart,
     introEnd,
     outroStart,
@@ -742,9 +812,32 @@ export default function VideoPlayer({
     };
   }, [qualitySelection, probe, autoResolvedHeight, applyAutoChange]);
 
+  const changeNativeSubtitle = (index: number | null) => {
+    setNativeSubtitleIndex(index);
+    subtitleTouchedRef.current = true;
+    apiPost("/api/progress", {
+      fileId,
+      parentFolderId,
+      positionSeconds: currentAbsoluteSeconds(),
+      durationSeconds: effectiveDuration ?? 0,
+      subtitleSource: index != null ? "external" : "off",
+      subtitleIndex: index,
+    }).catch(() => {});
+  };
+
   const changeAudioTrack = (index: number | null) => {
     setBaseOffsetSeconds(currentAbsoluteSeconds());
     setAudioIndex(index);
+    audioTouchedRef.current = true;
+    const track = index != null ? probe?.audioTracks.find((t) => t.index === index) : null;
+    apiPost("/api/progress", {
+      fileId,
+      parentFolderId,
+      positionSeconds: currentAbsoluteSeconds(),
+      durationSeconds: effectiveDuration ?? 0,
+      audioLanguage: track?.language ?? null,
+      audioTitle: track?.title ?? null,
+    }).catch(() => {});
   };
 
   const commitAudioDelay = (ms: number) => {
@@ -770,6 +863,15 @@ export default function VideoPlayer({
     setBaseOffsetSeconds(currentAbsoluteSeconds());
     setRestartSubtitleIndex(index);
     appliedSubtitleDelayRef.current = 0; // fresh cues load unshifted; reapplied in handleSubtitleTrackLoad
+    subtitleTouchedRef.current = true;
+    apiPost("/api/progress", {
+      fileId,
+      parentFolderId,
+      positionSeconds: currentAbsoluteSeconds(),
+      durationSeconds: effectiveDuration ?? 0,
+      subtitleSource: index != null ? "restart" : "off",
+      subtitleIndex: index,
+    }).catch(() => {});
   };
 
   const handleSubtitleTrackLoad = () => {
@@ -921,7 +1023,7 @@ export default function VideoPlayer({
         <SubtitleMenu
           tracks={subtitleUrls.map((s) => ({ index: s.index, label: s.label }))}
           selectedIndex={nativeSubtitleIndex}
-          onSelect={setNativeSubtitleIndex}
+          onSelect={changeNativeSubtitle}
           open={settingsOpen}
           onClose={closePanels}
           availableQualities={probe?.availableQualities ?? []}

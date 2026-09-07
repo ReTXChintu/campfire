@@ -1,5 +1,12 @@
 import { getDb } from "./mongodb";
 
+// Which array a saved subtitleIndex indexes into — "external" is video.subtitles (the
+// admin-curated SubtitleSet list, the same identifier space on all three players/every seekMode);
+// "restart" is a raw ffprobe stream index, only meaningful for the live-extracted-on-seek
+// subtitle path non-native/non-MKV content uses (see routes/subtitle.ts). "off" is an explicit
+// choice to disable subtitles, distinct from having no saved preference at all (absent field).
+export type SubtitleSource = "off" | "external" | "restart";
+
 export type WatchProgress = {
   userId: string;
   fileId: string;
@@ -7,6 +14,15 @@ export type WatchProgress = {
   positionSeconds: number;
   durationSeconds: number;
   completed: boolean;
+  // Remembered track choices — undefined/absent means "no preference recorded yet", not "off".
+  // Audio is matched by language+title (not a raw index) since the identifier space genuinely
+  // differs by player: web/CampfireVideoPlayer's restart-mode audio is a raw ffprobe stream index,
+  // while MediaKitVideoPlayer's is mpv's own track id — language+title is the only representation
+  // both can look themselves up by.
+  subtitleSource?: SubtitleSource;
+  subtitleIndex?: number | null;
+  audioLanguage?: string | null;
+  audioTitle?: string | null;
   updatedAt: Date;
 };
 
@@ -50,23 +66,34 @@ export async function upsertProgress(input: {
   parentFolderId: string;
   positionSeconds: number;
   durationSeconds: number;
+  subtitleSource?: SubtitleSource;
+  subtitleIndex?: number | null;
+  audioLanguage?: string | null;
+  audioTitle?: string | null;
 }) {
   const col = await collection();
   const completed =
     input.durationSeconds > 0 &&
     input.positionSeconds >= input.durationSeconds * COMPLETED_THRESHOLD;
 
+  const set: Record<string, unknown> = {
+    parentFolderId: input.parentFolderId,
+    positionSeconds: input.positionSeconds,
+    durationSeconds: input.durationSeconds,
+    completed,
+    updatedAt: new Date(),
+  };
+  // Only touch track-preference fields when the caller actually sent them — an older client, or a
+  // save that genuinely has nothing new to say about tracks, shouldn't silently erase a
+  // previously-saved preference by omission.
+  if (input.subtitleSource !== undefined) set.subtitleSource = input.subtitleSource;
+  if (input.subtitleIndex !== undefined) set.subtitleIndex = input.subtitleIndex;
+  if (input.audioLanguage !== undefined) set.audioLanguage = input.audioLanguage;
+  if (input.audioTitle !== undefined) set.audioTitle = input.audioTitle;
+
   await col.updateOne(
     { userId: input.userId, fileId: input.fileId },
-    {
-      $set: {
-        parentFolderId: input.parentFolderId,
-        positionSeconds: input.positionSeconds,
-        durationSeconds: input.durationSeconds,
-        completed,
-        updatedAt: new Date(),
-      },
-    },
+    { $set: set },
     { upsert: true },
   );
 }

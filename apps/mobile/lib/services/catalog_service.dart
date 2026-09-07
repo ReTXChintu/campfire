@@ -1,6 +1,12 @@
 import '../models/catalog.dart';
 import 'api_client.dart';
 
+// Sentinel distinguishing "caller didn't pass this argument at all" from "caller explicitly
+// passed null" — saveProgress needs the difference (null still means an intentional value: "off"
+// for subtitleIndex/"no title" for audioTitle) but Dart has no built-in way to detect an omitted
+// default value at the call site.
+const Object unsetProgressField = Object();
+
 class CatalogService {
   CatalogService._();
 
@@ -30,12 +36,23 @@ class CatalogService {
     required String parentFolderId,
     required double positionSeconds,
     required double durationSeconds,
+    // Omitted (not just null) fields are left untouched server-side — only pass these when this
+    // save actually has something to say about tracks (see apps/backend/src/lib/progress.ts).
+    String? subtitleSource,
+    Object? subtitleIndex = unsetProgressField,
+    Object? audioLanguage = unsetProgressField,
+    Object? audioTitle = unsetProgressField,
   }) {
-    return ApiClient.post('/api/progress', {
+    final body = <String, dynamic>{
       'fileId': fileId,
       'parentFolderId': parentFolderId,
       'positionSeconds': positionSeconds,
       'durationSeconds': durationSeconds,
-    });
+    };
+    if (subtitleSource != null) body['subtitleSource'] = subtitleSource;
+    if (!identical(subtitleIndex, unsetProgressField)) body['subtitleIndex'] = subtitleIndex;
+    if (!identical(audioLanguage, unsetProgressField)) body['audioLanguage'] = audioLanguage;
+    if (!identical(audioTitle, unsetProgressField)) body['audioTitle'] = audioTitle;
+    return ApiClient.post('/api/progress', body);
   }
 }

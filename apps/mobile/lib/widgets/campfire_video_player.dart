@@ -77,7 +77,21 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   int? _subtitleIndex; // index into widget.video.subtitles
   final Map<int, List<VttCue>> _parsedCues = {};
 
+  // Remembered-preference state, saved to the backend on every progress save (see
+  // apps/backend/src/lib/progress.ts) and reapplied on future opens of this video, on any
+  // player/platform. This player's subtitle picker only ever offers `video.subtitles` entries
+  // (native mode only — restart-mode subtitles aren't supported here at all, see the README), so
+  // subtitleSource is always "external" or "off", never "restart". Audio is matched by
+  // language+title (an absolute ffprobe stream index isn't stable across players — MediaKit uses
+  // mpv's own track ids instead).
+  String? _subtitlePreferenceSource; // "off" | "external" | null (nothing to save yet)
+  int? _subtitlePreferenceIndex;
+  String? _audioPreferenceLanguage;
+  String? _audioPreferenceTitle;
+  bool _hasAudioPreference = false; // distinguishes "no preference" from "prefers null/null"
+
   String? _mediaToken;
+  Offset? _doubleTapLocalPosition;
 
   // "auto" | "original" | "<height>" — mirrors QualitySelection on web (Dart has no union types).
   String _qualitySelection = 'auto';
@@ -123,6 +137,24 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       _baseOffsetSeconds = video.initialPositionSeconds;
     }
 
+    // Seed remembered track preferences from the last time this video was watched (by this user,
+    // any player/platform — see apps/backend/src/lib/progress.ts). Subtitle applies immediately
+    // (this player's subtitle rendering is a pure Flutter-side overlay reading `_subtitleIndex`,
+    // no player-level call needed); audio needs probe data to resolve a language+title match to
+    // an ffprobe stream index, so that happens once probe resolves below.
+    _subtitlePreferenceSource = video.initialSubtitleSource == 'off' || video.initialSubtitleSource == 'external'
+        ? video.initialSubtitleSource
+        : null;
+    _subtitlePreferenceIndex = video.initialSubtitleIndex;
+    if (_subtitlePreferenceSource == 'external' && _subtitlePreferenceIndex != null) {
+      _subtitleIndex = _subtitlePreferenceIndex;
+    }
+    if (video.initialAudioLanguage != null || video.initialAudioTitle != null) {
+      _hasAudioPreference = true;
+      _audioPreferenceLanguage = video.initialAudioLanguage;
+      _audioPreferenceTitle = video.initialAudioTitle;
+    }
+
     // Probed for every video now (not just restart mode) — the quality menu needs
     // sourceHeight/availableQualities regardless of seekMode.
     CatalogService.fetchProbe(video.fileId)
@@ -130,6 +162,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
           if (!mounted) return;
           setState(() => _probe = probe);
           _maybeSeedAutoQuality(probe);
+          _maybeApplyAudioPreference(probe);
         })
         .catchError((_) {});
 
@@ -153,6 +186,22 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     if (!mounted || _qualitySelection != 'auto' || _autoResolvedHeight != null) return;
     if (remembered != null && heights.contains(remembered)) {
       _applyAutoChange(remembered);
+    }
+  }
+
+  // Restart-mode audio track switching only (native mode has no audio-track picker on this
+  // player) — matches the remembered preference by language+title against this file's real
+  // ffprobe stream list, then reloads at the current position with that track selected. Runs once,
+  // as soon as probe resolves; there's no later reopen that could need a repeat of this the way
+  // MediaKitVideoPlayer's auto-quality reopens do, since this player's own quality/skip reloads
+  // reuse whatever `_audioIndex` is already set to (see _currentUri/_reload).
+  void _maybeApplyAudioPreference(ProbeResult probe) {
+    if (!_hasAudioPreference || video.isNative || _audioIndex != null) return;
+    for (final t in probe.audioTracks) {
+      if (t.language == _audioPreferenceLanguage && t.title == _audioPreferenceTitle) {
+        _reload(seekTo: _absolutePosition.inSeconds.toDouble(), audioIndex: t.index);
+        return;
+      }
     }
   }
 
@@ -385,6 +434,10 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       parentFolderId: video.parentFolderId,
       positionSeconds: _absolutePosition.inMilliseconds / 1000,
       durationSeconds: (duration?.inMilliseconds ?? 0) / 1000,
+      subtitleSource: _subtitlePreferenceSource,
+      subtitleIndex: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceIndex,
+      audioLanguage: _hasAudioPreference ? _audioPreferenceLanguage : unsetProgressField,
+      audioTitle: _hasAudioPreference ? _audioPreferenceTitle : unsetProgressField,
     ).catchError((_) {});
   }
 
@@ -425,6 +478,21 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       controller.play();
     }
     _showControls();
+  }
+
+  // Left third: -10s, middle third: play/pause, right third: +10s — same layout as most
+  // streaming apps' double-tap gesture. _skip/_togglePlay already call _showControls().
+  void _handleDoubleTap() {
+    final pos = _doubleTapLocalPosition;
+    if (pos == null) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (pos.dx < width / 3) {
+      _skip(-_skipSeconds);
+    } else if (pos.dx > width * 2 / 3) {
+      _skip(_skipSeconds);
+    } else {
+      _togglePlay();
+    }
   }
 
   void _skip(int deltaSeconds) {
@@ -522,8 +590,19 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
         video.nextFileId != null;
     final subtitleText = _currentSubtitleText();
 
-    return GestureDetector(
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
+          _togglePlay();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
       onTap: _showControls,
+      onDoubleTapDown: (details) => _doubleTapLocalPosition = details.localPosition,
+      onDoubleTap: _handleDoubleTap,
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
@@ -598,49 +677,55 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                 child: _pillButton('Next Episode ›', _goToNext),
               ),
 
-            // Top bar
-            AnimatedOpacity(
-              opacity: _controlsVisible ? 1 : 0,
-              duration: const Duration(milliseconds: 200),
-              child: IgnorePointer(
-                ignoring: !_controlsVisible,
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.8),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () {
-                          if (context.canPop()) {
-                            context.pop();
-                          } else {
-                            context.go(video.backHref);
-                          }
-                        },
+            // Top bar — Align pins it to the top; without it, StackFit.expand stretches this
+            // Container to fill the whole stack and the Row inside ends up vertically centered
+            // in the entire video area instead of pinned to the top.
+            Align(
+              alignment: Alignment.topCenter,
+              child: AnimatedOpacity(
+                opacity: _controlsVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !_controlsVisible,
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.8),
+                          Colors.transparent,
+                        ],
                       ),
-                      Expanded(
-                        child: Text(
-                          video.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          onPressed: () {
+                            if (context.canPop()) {
+                              context.pop();
+                            } else {
+                              context.go(video.backHref);
+                            }
+                          },
+                        ),
+                        Expanded(
+                          child: Text(
+                            video.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -882,6 +967,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -1000,7 +1086,12 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
         groupValue: _subtitleIndex,
         title: const Text('Off', style: TextStyle(color: Colors.white70)),
         activeColor: AppColors.accent,
-        onChanged: (value) => setState(() => _subtitleIndex = value),
+        onChanged: (value) => setState(() {
+          _subtitleIndex = value;
+          _subtitlePreferenceSource = 'off';
+          _subtitlePreferenceIndex = null;
+          _saveProgress(force: true);
+        }),
       ),
       ...video.subtitles.map((s) {
         final label = s.language ?? s.title ?? 'Track ${s.index}';
@@ -1009,7 +1100,12 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
           groupValue: _subtitleIndex,
           title: Text(label, style: const TextStyle(color: Colors.white70)),
           activeColor: AppColors.accent,
-          onChanged: (value) => setState(() => _subtitleIndex = value),
+          onChanged: (value) => setState(() {
+            _subtitleIndex = value;
+            _subtitlePreferenceSource = 'external';
+            _subtitlePreferenceIndex = value;
+            _saveProgress(force: true);
+          }),
         );
       }),
     ]);
@@ -1028,11 +1124,16 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
           activeColor: AppColors.accent,
           onChanged: (value) {
             _closePanels();
-            if (value != null)
+            if (value != null) {
+              _hasAudioPreference = true;
+              _audioPreferenceLanguage = t.language;
+              _audioPreferenceTitle = t.title;
               _reload(
                 seekTo: _absolutePosition.inSeconds.toDouble(),
                 audioIndex: value,
               );
+              _saveProgress(force: true);
+            }
           },
         );
       }),

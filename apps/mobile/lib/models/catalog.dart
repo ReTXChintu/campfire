@@ -283,6 +283,16 @@ class VideoResponse {
   final double? introStart;
   final double? introEnd;
   final double? outroStart;
+  // Remembered track choices (see apps/backend/src/lib/progress.ts) — null means "no preference
+  // recorded yet", not "off". initialSubtitleSource "off"|"external"|"restart"|null;
+  // initialSubtitleIndex only meaningful when source is "external" (an index into `subtitles`
+  // above) or "restart" (a raw ffprobe stream index — MediaKitVideoPlayer never has this source,
+  // since it doesn't use restart-mode subtitle extraction). Audio is matched by language+title
+  // rather than a raw index since the identifier space differs by player (see progress.ts).
+  final String? initialSubtitleSource;
+  final int? initialSubtitleIndex;
+  final String? initialAudioLanguage;
+  final String? initialAudioTitle;
 
   const VideoResponse({
     required this.fileId,
@@ -301,6 +311,10 @@ class VideoResponse {
     this.introStart,
     this.introEnd,
     this.outroStart,
+    this.initialSubtitleSource,
+    this.initialSubtitleIndex,
+    this.initialAudioLanguage,
+    this.initialAudioTitle,
   });
 
   bool get isNative => seekMode == 'native';
@@ -325,5 +339,9 @@ class VideoResponse {
     introStart: (json['introStart'] as num?)?.toDouble(),
     introEnd: (json['introEnd'] as num?)?.toDouble(),
     outroStart: (json['outroStart'] as num?)?.toDouble(),
+    initialSubtitleSource: json['initialSubtitleSource'] as String?,
+    initialSubtitleIndex: json['initialSubtitleIndex'] as int?,
+    initialAudioLanguage: json['initialAudioLanguage'] as String?,
+    initialAudioTitle: json['initialAudioTitle'] as String?,
   );
 }

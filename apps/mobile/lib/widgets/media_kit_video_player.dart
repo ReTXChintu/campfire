@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -63,7 +64,17 @@ class MediaKitVideoPlayer extends StatefulWidget {
 }
 
 class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsBindingObserver {
-  late final Player _player = Player();
+  // libass off (the package default) means mpv's own subtitle renderer never runs — fine for
+  // text-based tracks (SRT/ASS/SSA/mov_text/WebVTT, which media_kit renders via a Flutter-side
+  // text overlay instead) but silently blind to image-based ones (DVD/PGS subtitles, common in
+  // rips from this era) since those need mpv to actually blit a bitmap onto the frame; there's no
+  // text for the Flutter overlay to show. Enabled on Windows, where it needs no bundled font
+  // (fontconfig handles fallback); Android needs `libassAndroidFont` set to a bundled .ttf asset
+  // for this to work there too — not done yet, so image-based subtitle tracks still won't render
+  // on Android specifically.
+  late final Player _player = Player(
+    configuration: PlayerConfiguration(libass: Platform.isWindows),
+  );
   late final VideoController _controller = VideoController(_player);
   final List<StreamSubscription> _subs = [];
 
@@ -87,6 +98,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   bool _resumeSeekComplete = true;
   String? _mediaToken;
   String? _errorMessage;
+  Offset? _doubleTapLocalPosition;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -104,6 +116,18 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // VTT text and reapplies correctly on any file; an embedded-track id only carries over if the
   // newly-opened file happens to have a matching track (harmless no-op otherwise, same as before).
   SubtitleTrack _selectedSubtitleTrack = SubtitleTrack.no();
+
+  // Remembered-preference state, saved to the backend on every progress save (see
+  // apps/backend/src/lib/progress.ts) and reapplied on future opens of this video. Subtitle is
+  // only tracked when it maps to a `video.subtitles` entry — an embedded-track pick (see
+  // _selectedSubtitleTrack's own comment) has no portable identifier worth persisting, so picking
+  // one just leaves these fields (and thus the saved preference) unchanged. Audio is matched by
+  // language+title rather than mpv's own track id, which isn't stable/portable across opens.
+  String? _subtitlePreferenceSource; // "off" | "external" | null (nothing to save yet)
+  int? _subtitlePreferenceIndex;
+  String? _audioPreferenceLanguage;
+  String? _audioPreferenceTitle;
+  bool _hasAudioPreference = false; // distinguishes "no preference" from "prefers null/null"
 
   // "auto" | "original" | "<height>" — mirrors QualitySelection on web (Dart has no union types).
   String _qualitySelection = 'auto';
@@ -149,6 +173,29 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _enterImmersiveLandscape();
+
+    // Seed remembered track preferences from the last time this video was watched (by this user,
+    // any player/platform — see apps/backend/src/lib/progress.ts). Subtitle is applied directly
+    // below since it only needs `video.subtitles` (already in hand); audio needs `_tracks.audio`,
+    // which only exists once the player has actually opened something, so that match happens in
+    // the tracks listener instead (see _maybeApplyAudioPreference).
+    _subtitlePreferenceSource = video.initialSubtitleSource == 'off' || video.initialSubtitleSource == 'external'
+        ? video.initialSubtitleSource
+        : null;
+    _subtitlePreferenceIndex = video.initialSubtitleIndex;
+    if (video.initialAudioLanguage != null || video.initialAudioTitle != null) {
+      _hasAudioPreference = true;
+      _audioPreferenceLanguage = video.initialAudioLanguage;
+      _audioPreferenceTitle = video.initialAudioTitle;
+    }
+    if (_subtitlePreferenceSource == 'external' &&
+        _subtitlePreferenceIndex != null &&
+        _subtitlePreferenceIndex! >= 0 &&
+        _subtitlePreferenceIndex! < video.subtitles.length) {
+      final s = video.subtitles[_subtitlePreferenceIndex!];
+      _selectedSubtitleTrack = SubtitleTrack.data(s.vtt, title: s.title, language: s.language);
+    }
+
     _subs.addAll([
       _player.stream.position.listen((p) {
         if (!mounted) return;
@@ -174,7 +221,9 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         }
       }),
       _player.stream.tracks.listen((t) {
-        if (mounted) setState(() => _tracks = t);
+        if (!mounted) return;
+        setState(() => _tracks = t);
+        _maybeApplyAudioPreference();
       }),
       _player.stream.track.listen((t) {
         if (mounted) setState(() => _track = t);
@@ -311,6 +360,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       parentFolderId: video.parentFolderId,
       positionSeconds: _position.inMilliseconds / 1000,
       durationSeconds: _effectiveDuration.inMilliseconds / 1000,
+      subtitleSource: _subtitlePreferenceSource,
+      subtitleIndex: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceIndex,
+      audioLanguage: _hasAudioPreference ? _audioPreferenceLanguage : unsetProgressField,
+      audioTitle: _hasAudioPreference ? _audioPreferenceTitle : unsetProgressField,
     ).catchError((_) {});
   }
 
@@ -357,6 +410,21 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       _player.play();
     }
     _showControls();
+  }
+
+  // Left third: -10s, middle third: play/pause, right third: +10s — same layout as most
+  // streaming apps' double-tap gesture. _skip/_togglePlay already call _showControls().
+  void _handleDoubleTap() {
+    final pos = _doubleTapLocalPosition;
+    if (pos == null) return;
+    final width = MediaQuery.sizeOf(context).width;
+    if (pos.dx < width / 3) {
+      _skip(-_skipSeconds);
+    } else if (pos.dx > width * 2 / 3) {
+      _skip(_skipSeconds);
+    } else {
+      _togglePlay();
+    }
   }
 
   Future<void> _reopenAt(double seconds) async {
@@ -517,8 +585,19 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final realAudioTrackCount = _tracks.audio.length - 2;
     final hasSubtitles = video.subtitles.isNotEmpty || _tracks.subtitle.length > 2;
 
-    return GestureDetector(
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
+          _togglePlay();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
       onTap: _showControls,
+      onDoubleTapDown: (details) => _doubleTapLocalPosition = details.localPosition,
+      onDoubleTap: _handleDoubleTap,
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
@@ -569,42 +648,48 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
             if (showNext)
               Positioned(right: 12, bottom: 90, child: _pillButton('Next Episode ›', _goToNext)),
 
-            // Top bar
-            AnimatedOpacity(
-              opacity: _controlsVisible ? 1 : 0,
-              duration: const Duration(milliseconds: 200),
-              child: IgnorePointer(
-                ignoring: !_controlsVisible,
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.black.withValues(alpha: 0.8), Colors.transparent],
+            // Top bar — Align pins it to the top; without it, StackFit.expand stretches this
+            // Container to fill the whole stack and the Row inside ends up vertically centered
+            // in the entire video area instead of pinned to the top.
+            Align(
+              alignment: Alignment.topCenter,
+              child: AnimatedOpacity(
+                opacity: _controlsVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: !_controlsVisible,
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.black.withValues(alpha: 0.8), Colors.transparent],
+                      ),
                     ),
-                  ),
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () {
-                          if (context.canPop()) {
-                            context.pop();
-                          } else {
-                            context.go(video.backHref);
-                          }
-                        },
-                      ),
-                      Expanded(
-                        child: Text(
-                          video.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.white),
+                          onPressed: () {
+                            if (context.canPop()) {
+                              context.pop();
+                            } else {
+                              context.go(video.backHref);
+                            }
+                          },
                         ),
-                      ),
-                    ],
+                        Expanded(
+                          child: Text(
+                            video.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -780,6 +865,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -895,6 +981,9 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         onChanged: (_) {
           _selectedSubtitleTrack = SubtitleTrack.no();
           _player.setSubtitleTrack(_selectedSubtitleTrack);
+          _subtitlePreferenceSource = 'off';
+          _subtitlePreferenceIndex = null;
+          _saveProgress(force: true);
           _closePanels();
         },
       ),
@@ -908,6 +997,9 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           onChanged: (_) {
             _selectedSubtitleTrack = entry.track;
             _player.setSubtitleTrack(_selectedSubtitleTrack);
+            _subtitlePreferenceSource = 'external';
+            _subtitlePreferenceIndex = entry.subtitle.index;
+            _saveProgress(force: true);
             _closePanels();
           },
         );
@@ -920,6 +1012,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           title: Text(label, style: const TextStyle(color: Colors.white70)),
           activeColor: AppColors.accent,
           onChanged: (_) {
+            // Embedded tracks have no identifier worth persisting (mpv's own id isn't stable/
+            // portable across opens or players) — leaves any existing saved preference untouched.
             _selectedSubtitleTrack = t;
             _player.setSubtitleTrack(_selectedSubtitleTrack);
             _closePanels();
@@ -942,10 +1036,36 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           activeColor: AppColors.accent,
           onChanged: (_) {
             _player.setAudioTrack(t);
+            // "Default" clears any remembered override (language/title both null still counts as
+            // a real, explicit preference — see _hasAudioPreference); a specific track remembers
+            // its language+title, the only identifier stable enough to look up again on any player.
+            _hasAudioPreference = true;
+            _audioPreferenceLanguage = t.id == 'auto' ? null : t.language;
+            _audioPreferenceTitle = t.id == 'auto' ? null : t.title;
+            _saveProgress(force: true);
             _closePanels();
           },
         );
       }).toList(),
     );
+  }
+
+  // Reapplies the remembered audio-track preference (see _hasAudioPreference) whenever the track
+  // list updates — covers both the initial open and every reopen (quality change, auto-quality
+  // step). mpv's own track ids aren't stable across opens, so matching is by language+title, the
+  // only identifier that survives a reopen (or even a different player/platform, since the
+  // preference is saved server-side keyed by those same two fields).
+  void _maybeApplyAudioPreference() {
+    if (!_hasAudioPreference) return;
+    if (_track.audio.language == _audioPreferenceLanguage && _track.audio.title == _audioPreferenceTitle) {
+      return; // already matches — avoid re-issuing setAudioTrack on every unrelated track update
+    }
+    for (final t in _tracks.audio) {
+      if (t.id == 'no') continue;
+      if (t.language == _audioPreferenceLanguage && t.title == _audioPreferenceTitle) {
+        _player.setAudioTrack(t);
+        return;
+      }
+    }
   }
 }

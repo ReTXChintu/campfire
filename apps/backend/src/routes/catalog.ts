@@ -234,6 +234,12 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     progressByFileId,
     initialPositionSeconds: progress?.positionSeconds ?? 0,
     initialCompleted: progress?.completed ?? false,
+    // Remembered track choices (see lib/progress.ts) — undefined/absent on `progress` itself
+    // (never saved) collapses to null here, meaning "no preference, use default behavior".
+    initialSubtitleSource: progress?.subtitleSource ?? null,
+    initialSubtitleIndex: progress?.subtitleIndex ?? null,
+    initialAudioLanguage: progress?.audioLanguage ?? null,
+    initialAudioTitle: progress?.audioTitle ?? null,
     seekMode,
     durationSeconds: video.durationSeconds,
     subtitles,

@@ -499,6 +499,10 @@ export default function WatchPage() {
           introStart={video.introStart}
           introEnd={video.introEnd}
           outroStart={video.outroStart}
+          initialSubtitleSource={video.initialSubtitleSource}
+          initialSubtitleIndex={video.initialSubtitleIndex}
+          initialAudioLanguage={video.initialAudioLanguage}
+          initialAudioTitle={video.initialAudioTitle}
           watchPartySync={watchPartySyncProp}
         />
       )}

@@ -121,6 +121,16 @@ export type VideoResponse = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  // Remembered track choices (see apps/backend/src/lib/progress.ts) — null means "no preference
+  // recorded yet", not "off". initialSubtitleIndex is only meaningful when the source is
+  // "external" (an index into `subtitles` above) or "restart" (a raw ffprobe stream index, used
+  // by the live-extracted-on-seek subtitle path non-native content uses). Audio is matched by
+  // language+title rather than a raw index, since the identifier space isn't portable across
+  // seekModes/players.
+  initialSubtitleSource: "off" | "external" | "restart" | null;
+  initialSubtitleIndex: number | null;
+  initialAudioLanguage: string | null;
+  initialAudioTitle: string | null;
 };
 
 export type WatchParty = {
