@@ -95,6 +95,16 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   Track _track = const Track();
   ProbeResult? _probe; // now fetched for every video — see _bootstrap — not just restart mode.
 
+  // The user's actual subtitle choice, independent of the player-internal `_track.subtitle` state
+  // that `_player.open()` resets on every reopen (quality change, auto-quality step, any restart-
+  // mode skip/seek). Re-applied after every reopen in `_reopenAt` — without this, picking a
+  // subtitle track "worked" only until the next reopen (which can happen automatically, seconds
+  // later, via Auto-quality's remembered-ceiling seed) silently reset it back to none. A
+  // SubtitleTrack.data(...) selection (the common case here — see video.subtitles) carries its own
+  // VTT text and reapplies correctly on any file; an embedded-track id only carries over if the
+  // newly-opened file happens to have a matching track (harmless no-op otherwise, same as before).
+  SubtitleTrack _selectedSubtitleTrack = SubtitleTrack.no();
+
   // "auto" | "original" | "<height>" — mirrors QualitySelection on web (Dart has no union types).
   String _qualitySelection = 'auto';
   int? _autoResolvedHeight;
@@ -239,9 +249,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       ),
     );
     await _player.setRate(_speed);
-    // Embedded subtitles default off, matching the native-mode player's default (no track
-    // pre-selected) rather than libmpv's own default-flag-driven auto-selection.
-    await _player.setSubtitleTrack(SubtitleTrack.no());
+    // Defaults to SubtitleTrack.no() (see _selectedSubtitleTrack's initializer) rather than
+    // libmpv's own default-flag-driven auto-selection — matching the native-mode player's default
+    // of no track pre-selected.
+    await _player.setSubtitleTrack(_selectedSubtitleTrack);
     _resumeSeekComplete = true;
   }
 
@@ -361,6 +372,9 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       ),
     );
     await _player.setRate(_speed);
+    // Reopening resets mpv's own subtitle selection — re-apply whatever the user actually picked
+    // (see _selectedSubtitleTrack) rather than silently dropping back to none.
+    await _player.setSubtitleTrack(_selectedSubtitleTrack);
     _resumeSeekComplete = true;
   }
 
@@ -879,7 +893,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         title: const Text('Off', style: TextStyle(color: Colors.white70)),
         activeColor: AppColors.accent,
         onChanged: (_) {
-          _player.setSubtitleTrack(SubtitleTrack.no());
+          _selectedSubtitleTrack = SubtitleTrack.no();
+          _player.setSubtitleTrack(_selectedSubtitleTrack);
           _closePanels();
         },
       ),
@@ -891,7 +906,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           title: Text(label, style: const TextStyle(color: Colors.white70)),
           activeColor: AppColors.accent,
           onChanged: (_) {
-            _player.setSubtitleTrack(entry.track);
+            _selectedSubtitleTrack = entry.track;
+            _player.setSubtitleTrack(_selectedSubtitleTrack);
             _closePanels();
           },
         );
@@ -904,7 +920,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           title: Text(label, style: const TextStyle(color: Colors.white70)),
           activeColor: AppColors.accent,
           onChanged: (_) {
-            _player.setSubtitleTrack(t);
+            _selectedSubtitleTrack = t;
+            _player.setSubtitleTrack(_selectedSubtitleTrack);
             _closePanels();
           },
         );
