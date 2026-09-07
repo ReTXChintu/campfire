@@ -21,8 +21,8 @@ env:
   # setting an API_URL repository variable (Settings -> Secrets and variables -> Actions ->
   # Variables) if the backend's address ever changes — no workflow edit needed.
   API_URL: ${{ vars.API_URL || 'http://187.127.179.114:50001' }}
-  APK_NAME: app-release.apk
-  WINDOWS_INSTALLER_NAME: CampfireSetup.exe
+  APK_NAME: Campfire.apk
+  WINDOWS_INSTALLER_NAME: Campfire.exe
 
 jobs:
   build-android:
@@ -46,9 +46,17 @@ jobs:
         working-directory: apps/mobile
         run: flutter pub get
 
+      # Baked into the app itself (apps/mobile/lib/config.dart) so it's visible in-app (top bar /
+      # login screen) — read from pubspec.yaml, the single source of truth `npm run release` keeps
+      # in sync across all three apps.
+      - name: Determine app version
+        run: |
+          version=$(grep -oP '^version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' apps/mobile/pubspec.yaml || echo "0.0.0")
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+
       - name: Build APK
         working-directory: apps/mobile
-        run: flutter build apk --release --dart-define=API_URL=${{ env.API_URL }}
+        run: flutter build apk --release --dart-define=API_URL=${{ env.API_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
 
       - name: Stage artifact under its fixed deploy name
         run: cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk ${{ env.APK_NAME }}
@@ -73,13 +81,9 @@ jobs:
         working-directory: apps/mobile
         run: flutter pub get
 
-      - name: Build Windows release
-        working-directory: apps/mobile
-        run: flutter build windows --release --dart-define=API_URL=${{ env.API_URL }}
-
-      # AppVersion for the installer's Setup/uninstall entry — read from pubspec.yaml (already the
-      # single source of truth, kept in sync by `npm run release` — see scripts/sync-mobile-version.mjs)
-      # rather than duplicating a version bump here.
+      # Read from pubspec.yaml (the single source of truth, kept in sync by `npm run release` —
+      # see scripts/sync-mobile-version.mjs). Used both for the installer's Setup/uninstall entry
+      # below and baked into the app itself (apps/mobile/lib/config.dart) so it's visible in-app.
       - name: Determine app version
         shell: pwsh
         run: |
@@ -90,6 +94,10 @@ jobs:
             $version = "0.0.0"
           }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build Windows release
+        working-directory: apps/mobile
+        run: flutter build windows --release --dart-define=API_URL=${{ env.API_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
@@ -150,6 +158,10 @@ jobs:
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             nvm use node
             cd /opt/var/campfire
+            # One-time cleanup: these builds used to ship under different filenames
+            # (app-release.apk / CampfireSetup.exe) — remove the stale copies so an old download
+            # link never keeps serving an outdated build.
+            rm -f apps/frontend/public/app-release.apk apps/frontend/public/CampfireSetup.exe
             git pull
             npm install
             npm run build

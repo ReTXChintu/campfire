@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../config.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 
@@ -128,6 +129,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: const TextStyle(color: AppColors.textSecondary),
                   ),
                 ),
+                const SizedBox(height: 24),
+                Text('v$appVersion', style: const TextStyle(color: AppColors.textTertiary, fontSize: 11)),
               ],
             ),
           ),

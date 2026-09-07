@@ -27,8 +27,11 @@ export default function TopBar() {
 
   return (
     <header className="sticky top-0 z-30 flex items-center justify-between border-b border-divider bg-black/80 px-4 py-4 backdrop-blur-md sm:px-6">
-      <Link to="/" className="flex items-center gap-0.5 font-display text-3xl tracking-wide text-white">
-        CAMPFIRE<span className="text-accent">•</span>
+      <Link to="/" className="flex items-baseline gap-2">
+        <span className="flex items-center gap-0.5 font-display text-3xl tracking-wide text-white">
+          CAMPFIRE<span className="text-accent">•</span>
+        </span>
+        <span className="text-[10px] text-text-tertiary">v{__APP_VERSION__}</span>
       </Link>
       {user && (
         <div className="flex items-center gap-5 text-sm text-text-secondary">
