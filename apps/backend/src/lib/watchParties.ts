@@ -134,6 +134,17 @@ export async function updateWatchPartyState(
   return col.findOne({ code: normalized });
 }
 
+/** Keeps `hostParticipantIdentity` pointing at whatever identity the host's current *main* device
+ * session actually holds. Identity used to be minted once at party creation and reused forever
+ * (`host-${randomUUID()}`); it's now `${role}-${userId}-${deviceId}` — a real per-device value
+ * computed in routes/watchParties.ts's join-token handler — so this field has to be updated
+ * whenever the host's main device (re)joins, or web's existing `handleDataReceived` identity
+ * check (which still trusts this field) would never match a real sender again. */
+export async function updateHostParticipantIdentity(code: string, participantIdentity: string): Promise<void> {
+  const col = await collection();
+  await col.updateOne({ code: normalizeCode(code), endedAt: null }, { $set: { hostParticipantIdentity: participantIdentity } });
+}
+
 export async function endWatchParty(code: string): Promise<WatchPartyDoc | null> {
   const col = await collection();
   const now = new Date();

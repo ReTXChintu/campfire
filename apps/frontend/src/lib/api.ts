@@ -46,10 +46,10 @@ export function apiPost<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
-export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+export function apiPatch<T>(path: string, body: unknown, extraHeaders?: Record<string, string>): Promise<T> {
   return request<T>(path, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...extraHeaders },
     body: JSON.stringify(body),
   });
 }

@@ -149,13 +149,41 @@ export type WatchParty = {
   endedAt: string | null;
 };
 
+export type WatchPartyClientKind = "web" | "windows" | "android" | "ios";
+export type WatchPartyDeviceRole = "main" | "companion";
+
+export type WatchPartyExistingSessionInfo = {
+  deviceLabel: string;
+  clientKind: WatchPartyClientKind;
+};
+
 export type WatchPartyJoinTokenResponse = {
   serverUrl: string;
   participantToken: string;
   participantIdentity: string;
   participantName: string;
   isHost: boolean;
+  deviceRole: WatchPartyDeviceRole;
+  canControlPlayback: boolean;
   party: WatchParty;
+};
+
+// join-token doesn't always succeed outright — if this user already has another active device in
+// this party, it instead asks the caller to confirm (or, for a mobile+mobile pairing, to pick
+// which device is main) before actually joining. See apps/backend/src/routes/watchParties.ts.
+export type WatchPartyJoinTokenResult =
+  | ({ requiresConfirmation?: false; requiresRoleChoice?: false } & WatchPartyJoinTokenResponse)
+  | { requiresConfirmation: true; requiresRoleChoice?: false; existingSession: WatchPartyExistingSessionInfo }
+  | { requiresConfirmation?: false; requiresRoleChoice: true; existingSession: WatchPartyExistingSessionInfo };
+
+export type WatchPartyParticipant = {
+  userId: string;
+  deviceId: string;
+  deviceLabel: string;
+  clientKind: WatchPartyClientKind;
+  role: "host" | "guest";
+  deviceRole: WatchPartyDeviceRole;
+  canControlPlayback: boolean;
 };
 
 export type WatchPartySyncState = {

@@ -7,6 +7,8 @@ import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
 import WatchPartyChat from "../components/WatchPartyChat";
 import { useVideo } from "../hooks/useCatalog";
 import {
+  leaveWatchParty,
+  sendWatchPartyHeartbeat,
   useCreateWatchParty,
   useEndWatchParty,
   useJoinWatchPartyToken,
@@ -14,7 +16,8 @@ import {
   useWatchParty,
 } from "../hooks/useWatchParty";
 import { useAuth } from "../lib/auth";
-import type { WatchParty, WatchPartySyncState } from "../lib/types";
+import { getDeviceId } from "../lib/deviceId";
+import type { WatchParty, WatchPartyJoinTokenResponse, WatchPartySyncState } from "../lib/types";
 import NotFoundPage from "./NotFoundPage";
 
 type PartyParticipant = {
@@ -77,15 +80,38 @@ export default function WatchPage() {
   // "you were disconnected" notice right after the user chose to leave.
   const intentionalDisconnectRef = useRef(false);
 
+  // Answers to the "you're already watching on {device} — join from this device too?" /
+  // "which device is main?" prompts join-token can respond with instead of joining outright (see
+  // apps/backend/src/routes/watchParties.ts) — reset whenever the party being joined changes, so
+  // a stale confirmation never silently carries over to a different party.
+  const [joinConfirmed, setJoinConfirmed] = useState(false);
+  const [joinChosenMainDeviceId, setJoinChosenMainDeviceId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setJoinConfirmed(false);
+    setJoinChosenMainDeviceId(undefined);
+  }, [partyId]);
+
   const { data: video, isLoading, error } = useVideo(fileId!);
   const watchParty = useWatchParty(partyId);
   const createWatchParty = useCreateWatchParty();
-  const joinWatchPartyToken = useJoinWatchPartyToken(partyId);
+  const joinWatchPartyToken = useJoinWatchPartyToken(partyId, {
+    confirmed: joinConfirmed,
+    chosenMainDeviceId: joinChosenMainDeviceId,
+  });
   const updateWatchPartyState = useUpdateWatchPartyState(partyId);
   const endWatchParty = useEndWatchParty(partyId);
 
-  const party = watchParty.data ?? joinWatchPartyToken.data?.party ?? null;
-  const isHost = joinWatchPartyToken.data?.isHost ?? (party?.hostUserId === user?.userId);
+  const tokenResult = joinWatchPartyToken.data;
+  const needsConfirmation = tokenResult?.requiresConfirmation === true;
+  const needsRoleChoice = tokenResult?.requiresRoleChoice === true;
+  const joinedTokenData: WatchPartyJoinTokenResponse | undefined =
+    tokenResult && !tokenResult.requiresConfirmation && !tokenResult.requiresRoleChoice ? tokenResult : undefined;
+
+  const party = watchParty.data ?? joinedTokenData?.party ?? null;
+  const deviceRole = joinedTokenData?.deviceRole ?? "main";
+  // A companion device never holds playback control, even the host's own — so `isHost` here means
+  // specifically "this session may control playback," not just "this account owns the party."
+  const isHost = (joinedTokenData?.isHost ?? party?.hostUserId === user?.userId) && deviceRole === "main";
   const syncEnabled = !!partyId && video?.seekMode === "native";
 
   const syncParticipants = useCallback((nextRoom: Room | null, hostIdentity: string | null) => {
@@ -125,7 +151,7 @@ export default function WatchPage() {
   }, [isHost, party]);
 
   useEffect(() => {
-    const tokenData = joinWatchPartyToken.data;
+    const tokenData = joinedTokenData;
     if (!tokenData?.serverUrl || !tokenData.participantToken || !partyId) return;
 
     let cancelled = false;
@@ -174,6 +200,12 @@ export default function WatchPage() {
     nextRoom.on(RoomEvent.LocalTrackUnpublished, handleParticipantsChanged);
     nextRoom.on(RoomEvent.DataReceived, handleDataReceived);
 
+    // Lets the backend's read-time staleness filter (~45s) know this device is still around —
+    // without it, a session with no clean "leave" (killed tab, dropped network) would never
+    // disappear from the participant roster / multi-device "is this user already connected"
+    // check. See apps/backend/src/lib/watchPartySessions.ts.
+    const heartbeatInterval = setInterval(() => sendWatchPartyHeartbeat(partyId), 20_000);
+
     void nextRoom
       .connect(tokenData.serverUrl, tokenData.participantToken)
       .then(() => {
@@ -192,6 +224,8 @@ export default function WatchPage() {
 
     return () => {
       cancelled = true;
+      clearInterval(heartbeatInterval);
+      leaveWatchParty(partyId);
       nextRoom.removeAllListeners();
       nextRoom.disconnect();
       if (roomRef.current === nextRoom) roomRef.current = null;
@@ -201,7 +235,7 @@ export default function WatchPage() {
       setAudioReady(false);
       setMicEnabled(false);
     };
-  }, [joinWatchPartyToken.data, partyId, syncParticipants, setSearchParams]);
+  }, [joinedTokenData, partyId, syncParticipants, setSearchParams]);
 
   const inviteLink = useMemo(() => {
     if (!party || typeof window === "undefined") return null;
@@ -334,6 +368,64 @@ export default function WatchPage() {
                 >
                   Dismiss
                 </button>
+              </div>
+            )}
+            {needsConfirmation && tokenResult && "existingSession" in tokenResult && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white/85">
+                <span>
+                  You're already watching this party on <strong>{tokenResult.existingSession.deviceLabel}</strong>. Join
+                  from this device too?
+                </span>
+                <div className="ml-auto flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleLeaveParty}
+                    className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10"
+                  >
+                    No
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJoinConfirmed(true)}
+                    className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-white/90"
+                  >
+                    Join anyway
+                  </button>
+                </div>
+              </div>
+            )}
+            {needsRoleChoice && tokenResult && "existingSession" in tokenResult && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white/85">
+                <span>
+                  Which device should be the main screen (plays the movie, controls playback)? Your other device
+                  becomes a voice/video/chat companion.
+                </span>
+                <div className="ml-auto flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJoinConfirmed(true);
+                      setJoinChosenMainDeviceId(getDeviceId());
+                    }}
+                    className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-white/90"
+                  >
+                    This device
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJoinConfirmed(true);
+                      // Any id other than this device's own — the backend only checks
+                      // `chosenMainDeviceId === deviceId` (this device) vs. "anything else" (the
+                      // other device), so a sentinel is enough; it never needs to actually match
+                      // the other device's real id.
+                      setJoinChosenMainDeviceId("other");
+                    }}
+                    className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10"
+                  >
+                    {tokenResult.existingSession.deviceLabel}
+                  </button>
+                </div>
               </div>
             )}
           </div>
