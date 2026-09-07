@@ -77,6 +77,14 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   Timer? _hideTimer;
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
   double _speed = 1;
+
+  // True while opening/seeking to a resume position (mount, or a quality-change reopen) is still
+  // in flight. media_kit's position stream starts emitting ticks as soon as a Media is opened —
+  // well before the compensating seek below actually lands — so without this guard, an early tick
+  // reporting ~0 could get saved and clobber a correct previously-saved progress value. Saves are
+  // suppressed (not deferred) while this is false; the next real tick after the seek lands reports
+  // the true position and resumes saving normally.
+  bool _resumeSeekComplete = true;
   String? _mediaToken;
   String? _errorMessage;
 
@@ -107,9 +115,15 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   List<int> get _ladderHeights => (_probe?.availableQualities ?? const []).map((q) => q.height).toList();
 
   // True only for real Range-seekable byte passthrough — native/raw content at its own source
-  // resolution. Anything downscaled is a live re-encode with no more byte-range seeking than
-  // restart mode already has, so it has to be treated the same way mechanically.
+  // resolution.
   bool get _usingPassthrough => (video.isNative || video.isRaw) && _effectiveHeight == null;
+
+  // True for passthrough OR any specific quality tier — every tier the quality menu offers is a
+  // pre-generated file with real Range support of its own (see lib/renditions.ts on the backend),
+  // not a live re-encode, so it's just as directly seekable as passthrough. Only true restart mode
+  // (a non-native/non-raw format at Original, no rendition involved — the live ffmpeg remux) has
+  // no real seeking and needs the reload-at-`t=` trick instead.
+  bool get _streamIsSeekable => _usingPassthrough || _effectiveHeight != null;
 
   Duration get _effectiveDuration {
     if (_duration > Duration.zero) return _duration;
@@ -183,7 +197,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       // applies at Original quality — a genuine downscale always needs decoding regardless of
       // container, so it can't stay on the raw byte-passthrough path.
       params['raw'] = '1';
-    } else if (!_usingPassthrough && restartOffsetSeconds > 0) {
+    } else if (!_streamIsSeekable && restartOffsetSeconds > 0) {
       params['t'] = restartOffsetSeconds.floor().toString();
     }
     final base = '$apiBaseUrl/api/stream/${video.fileId}';
@@ -211,14 +225,17 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
 
     final resumeSeconds =
         (!video.initialCompleted && video.initialPositionSeconds > 5) ? video.initialPositionSeconds : 0.0;
+    final needsResumeSeek = resumeSeconds > 0 && _streamIsSeekable;
+    if (needsResumeSeek) _resumeSeekComplete = false;
     await _player.open(Media(_streamUri(restartOffsetSeconds: resumeSeconds).toString()));
     await _player.setRate(_speed);
     // Embedded subtitles default off, matching the native-mode player's default (no track
     // pre-selected) rather than libmpv's own default-flag-driven auto-selection.
     await _player.setSubtitleTrack(SubtitleTrack.no());
-    if (resumeSeconds > 0 && _usingPassthrough) {
+    if (needsResumeSeek) {
       await _player.seek(Duration(milliseconds: (resumeSeconds * 1000).round()));
     }
+    _resumeSeekComplete = true;
   }
 
   // Seeds Auto's starting tier from this device's last learned ceiling once probe resolves (so a
@@ -263,6 +280,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   void _saveProgress({bool force = false}) {
+    // Never save while a resume/quality-change seek is still in flight — _position briefly reports
+    // wherever the newly-opened stream started (usually ~0), not the real position, and saving it
+    // would silently overwrite correct previously-saved progress. Better to skip this save entirely
+    // than clobber good data; the next tick after the seek lands saves the true position instead.
+    if (!_resumeSeekComplete) return;
     final now = DateTime.now();
     if (!force && now.difference(_lastSave) < const Duration(seconds: 2)) return;
     _lastSave = now;
@@ -321,18 +343,21 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
 
   Future<void> _reopenAt(double seconds) async {
     setState(() => _isBuffering = true);
+    final needsSeek = seconds > 0 && _streamIsSeekable;
+    if (needsSeek) _resumeSeekComplete = false;
     await _player.open(Media(_streamUri(restartOffsetSeconds: seconds).toString()));
     await _player.setRate(_speed);
-    // Passthrough targets have no `t=` URL param to resume at (see _streamUri) — real Range
-    // seeking means a plain post-open seek works fine, unlike the reload-based approach every
-    // other case needs.
-    if (_usingPassthrough && seconds > 0) {
+    // A seekable target (passthrough or a specific quality tier) has no `t=` URL param to resume
+    // at (see _streamUri) — a plain post-open seek works fine, unlike the reload-based approach
+    // true restart mode needs.
+    if (needsSeek) {
       await _player.seek(Duration(milliseconds: (seconds * 1000).round()));
     }
+    _resumeSeekComplete = true;
   }
 
   void _skip(int deltaSeconds) {
-    if (_usingPassthrough) {
+    if (_streamIsSeekable) {
       var target = _position + Duration(seconds: deltaSeconds);
       if (target < Duration.zero) target = Duration.zero;
       final duration = _effectiveDuration;
@@ -346,7 +371,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   void _seekTo(double seconds) {
-    if (_usingPassthrough) {
+    if (_streamIsSeekable) {
       _player.seek(Duration(milliseconds: (seconds * 1000).round()));
     } else {
       _reopenAt(seconds);

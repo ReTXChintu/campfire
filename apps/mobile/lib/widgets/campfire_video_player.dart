@@ -104,6 +104,13 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   // watch_screen.dart), so unlike MediaKitVideoPlayer this only ever checks video.isNative.
   bool get _usingPassthrough => video.isNative && _effectiveHeight == null;
 
+  // True for passthrough OR any specific quality tier — every tier the quality menu offers is a
+  // pre-generated file with real Range support of its own (see lib/renditions.ts on the backend),
+  // not a live re-encode, so it's just as directly seekable as passthrough. Only true restart mode
+  // (a non-native format at Original, no rendition involved — the live ffmpeg remux) has no real
+  // seeking and needs the reload-at-`t=` trick instead.
+  bool get _streamIsSeekable => _usingPassthrough || _effectiveHeight != null;
+
   @override
   void initState() {
     super.initState();
@@ -187,7 +194,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     };
     final height = _effectiveHeight;
     if (height != null) params['h'] = height.toString();
-    if (!_usingPassthrough) {
+    if (!_streamIsSeekable) {
       if (_baseOffsetSeconds > 0)
         params['t'] = _baseOffsetSeconds.floor().toString();
       if (!video.isNative && _audioIndex != null) params['audio'] = _audioIndex.toString();
@@ -213,12 +220,12 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     }
     controller.addListener(_onTick);
     controller.setPlaybackSpeed(_speed);
-    // Passthrough has no `t=` URL param to resume at (see _currentUri) — real Range seeking means
-    // a plain post-initialize seek works fine, same trick the original mount-time resume already
-    // used, now also reused when a quality change lands back on Original mid-session (in which
-    // case `_baseOffsetSeconds`, set by `_reload`'s `seekTo`, carries the position instead of
-    // `video.initialPositionSeconds`).
-    if (_usingPassthrough) {
+    // A seekable resource (passthrough or a specific quality tier) has no `t=` URL param to resume
+    // at (see _currentUri) — real Range seeking means a plain post-initialize seek works fine, same
+    // trick the original mount-time resume already used, now also reused when a quality change
+    // lands on such a resource mid-session (in which case `_baseOffsetSeconds`, set by `_reload`'s
+    // `seekTo`, carries the position instead of `video.initialPositionSeconds`).
+    if (_streamIsSeekable) {
       final resumeSeconds = _baseOffsetSeconds > 0
           ? _baseOffsetSeconds
           : (!video.initialCompleted && video.initialPositionSeconds > 5 ? video.initialPositionSeconds : 0);
@@ -312,7 +319,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
 
   Duration get _absolutePosition {
     final local = _controller?.value.position ?? Duration.zero;
-    if (_usingPassthrough) return local;
+    if (_streamIsSeekable) return local;
     return Duration(seconds: _baseOffsetSeconds.floor()) + local;
   }
 
@@ -423,7 +430,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   void _skip(int deltaSeconds) {
     final controller = _controller;
     if (controller == null) return;
-    if (_usingPassthrough) {
+    if (_streamIsSeekable) {
       final duration = controller.value.duration;
       var target = controller.value.position + Duration(seconds: deltaSeconds);
       if (target < Duration.zero) target = Duration.zero;
@@ -441,7 +448,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   }
 
   void _seekTo(double seconds) {
-    if (_usingPassthrough) {
+    if (_streamIsSeekable) {
       _controller?.seekTo(Duration(milliseconds: (seconds * 1000).round()));
     } else {
       _reload(seekTo: seconds);

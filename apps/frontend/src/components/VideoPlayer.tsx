@@ -148,12 +148,15 @@ export default function VideoPlayer({
   const appliedSubtitleDelayRef = useRef(0);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applyingInboundSyncRef = useRef(false);
-  // Set when a quality change is about to land on the zero-transcode passthrough path (Original,
-  // on native content) — the native <video> has no `t=` URL param to resume at, so the position
-  // captured at switch time has to be re-applied manually once the reloaded element's metadata is
-  // ready (see handleLoadedMetadata below). Unused for every other transition, which resumes via
-  // the `t=` param the same way restart-mode audio/subtitle switches already do.
-  const pendingPassthroughSeekRef = useRef<number | null>(null);
+  // Set when a quality change is about to land on a resource with real Range/seek support of its
+  // own — either the zero-transcode passthrough path (Original, on native content) or a specific
+  // quality tier (a pre-generated rendition file, see lib/renditions.ts on the backend). Neither
+  // has a `t=` URL param to resume at (a rendition file's `h=` branch in routes/stream.ts ignores
+  // `t` entirely, same as passthrough always has), so the position captured at switch time has to
+  // be re-applied manually once the reloaded element's metadata is ready (see handleLoadedMetadata
+  // below). Unused for the one remaining case (true restart mode: a non-native container at
+  // Original, no rendition involved), which still resumes via the `t=` param.
+  const pendingSeekRef = useRef<number | null>(null);
   const navigate = useNavigate();
 
   const { data: mediaToken } = useMediaToken(fileId);
@@ -169,9 +172,14 @@ export default function VideoPlayer({
         ? null
         : qualitySelection;
   // True only for real Range-seekable byte passthrough — native content at its own source
-  // resolution. Anything downscaled (any seekMode) is a live re-encode with no more byte-range
-  // seeking than restart mode already has, so it has to be treated the same way mechanically.
+  // resolution.
   const usingPassthrough = isNative && effectiveHeight == null;
+  // True for passthrough OR any specific quality tier — every tier the quality menu offers is a
+  // pre-generated file with real Range support of its own (see lib/renditions.ts on the backend),
+  // not a live re-encode, so it's just as directly seekable as passthrough. Only true restart mode
+  // (a non-native container at Original, no rendition involved — the live ffmpeg remux) has no
+  // real seeking and needs the reload-at-`t=` trick instead.
+  const streamIsSeekable = usingPassthrough || effectiveHeight != null;
 
   const [baseOffsetSeconds, setBaseOffsetSeconds] = useState(
     !usingPassthrough && !initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS
@@ -334,7 +342,7 @@ export default function VideoPlayer({
     const params = new URLSearchParams();
     params.set("token", mediaToken);
     if (effectiveHeight != null) params.set("h", String(effectiveHeight));
-    if (!usingPassthrough) {
+    if (!streamIsSeekable) {
       if (baseOffsetSeconds > 0) params.set("t", String(Math.floor(baseOffsetSeconds)));
       if (!isNative) {
         if (audioIndex != null) params.set("audio", String(audioIndex));
@@ -342,7 +350,7 @@ export default function VideoPlayer({
       }
     }
     return `${API_URL}/api/stream/${fileId}?${params.toString()}`;
-  }, [usingPassthrough, isNative, fileId, baseOffsetSeconds, audioIndex, audioDelayMs, effectiveHeight, mediaToken]);
+  }, [streamIsSeekable, isNative, fileId, baseOffsetSeconds, audioIndex, audioDelayMs, effectiveHeight, mediaToken]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -413,20 +421,20 @@ export default function VideoPlayer({
     };
     const handleCanPlay = () => setIsBuffering(false);
 
-    // Passthrough only: the static byte stream always starts serving from byte 0, so resuming
-    // means seeking forward once real metadata is available (unlike restart mode/any downscaled
-    // quality, which starts the live stream at the right offset from its very first byte via `t`
-    // in the src itself). A pending quality-switch-triggered seek (see changeQuality) takes
+    // Any seekable resource (passthrough or a specific quality tier) always starts serving from
+    // byte 0, so resuming means seeking forward once real metadata is available (unlike true
+    // restart mode, which starts the live stream at the right offset from its very first byte via
+    // `t` in the src itself). A pending quality-switch-triggered seek (see changeQuality) takes
     // priority over the original server-provided resume position — it means the viewer already had
     // a newer position mid-session.
     const handleLoadedMetadata = () => {
-      if (!usingPassthrough) return;
+      if (!streamIsSeekable) return;
       setNativeDuration(video.duration || null);
-      const pendingSeek = pendingPassthroughSeekRef.current;
+      const pendingSeek = pendingSeekRef.current;
       if (pendingSeek != null) {
-        pendingPassthroughSeekRef.current = null;
+        pendingSeekRef.current = null;
         video.currentTime = pendingSeek;
-      } else if (!initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS) {
+      } else if (usingPassthrough && !initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS) {
         video.currentTime = initialPositionSeconds;
       }
     };
@@ -461,6 +469,7 @@ export default function VideoPlayer({
     nextFileId,
     effectiveDuration,
     usingPassthrough,
+    streamIsSeekable,
     initialCompleted,
     initialPositionSeconds,
     getAbsolutePosition,
@@ -594,7 +603,7 @@ export default function VideoPlayer({
 
   const commitSeek = () => {
     if (scrubValue == null || locked) return;
-    if (usingPassthrough) {
+    if (streamIsSeekable) {
       if (videoRef.current) videoRef.current.currentTime = scrubValue;
       emitWatchPartyState({ positionSeconds: scrubValue });
     } else {
@@ -606,12 +615,12 @@ export default function VideoPlayer({
   const changeQuality = (value: QualitySelection) => {
     const nextEffectiveHeight =
       value === "auto" ? autoResolvedHeight : value === "original" ? null : value;
-    const nextUsingPassthrough = isNative && nextEffectiveHeight == null;
+    const nextStreamIsSeekable = nextEffectiveHeight != null || (isNative && nextEffectiveHeight == null);
     const position = currentAbsoluteSeconds();
-    if (nextUsingPassthrough) {
-      // No `t=` param exists on the passthrough path to resume at — re-apply the position by hand
+    if (nextStreamIsSeekable) {
+      // No `t=` param exists on a seekable resource to resume at — re-apply the position by hand
       // once the reloaded element's metadata is ready (see handleLoadedMetadata).
-      pendingPassthroughSeekRef.current = position;
+      pendingSeekRef.current = position;
     } else {
       setBaseOffsetSeconds(position);
     }
@@ -622,10 +631,10 @@ export default function VideoPlayer({
   // manual pick (changeQuality above) — the only difference is who decided the target height.
   const applyAutoChange = useCallback(
     (newHeight: number | null) => {
-      const nextUsingPassthrough = isNative && newHeight == null;
+      const nextStreamIsSeekable = newHeight != null || isNative;
       const position = currentAbsoluteSeconds();
-      if (nextUsingPassthrough) {
-        pendingPassthroughSeekRef.current = position;
+      if (nextStreamIsSeekable) {
+        pendingSeekRef.current = position;
       } else {
         setBaseOffsetSeconds(position);
       }
@@ -783,7 +792,7 @@ export default function VideoPlayer({
     if (locked) return;
     const video = videoRef.current;
     if (!video) return;
-    if (usingPassthrough) {
+    if (streamIsSeekable) {
       const target = Math.min(
         Math.max(0, video.currentTime + deltaSeconds),
         effectiveDuration ?? Number.POSITIVE_INFINITY,
@@ -878,7 +887,7 @@ export default function VideoPlayer({
           type="button"
           onClick={() => {
             if (introEnd == null) return;
-            if (usingPassthrough) {
+            if (streamIsSeekable) {
               if (videoRef.current) videoRef.current.currentTime = introEnd;
             } else {
               setBaseOffsetSeconds(introEnd);
