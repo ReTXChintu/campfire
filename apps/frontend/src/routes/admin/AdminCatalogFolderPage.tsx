@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router-dom";
 import { useAdminFolder } from "../../hooks/useAdminCatalog";
 import AdminNav from "../../components/admin/AdminNav";
 import FolderTitleForm from "../../components/admin/FolderTitleForm";
+import FolderPublishRule from "../../components/admin/FolderPublishRule";
 import CatalogChildrenList from "../../components/admin/CatalogChildrenList";
 import NotFoundPage from "../NotFoundPage";
 
@@ -49,6 +50,15 @@ export default function AdminCatalogFolderPage() {
         driveName={folder.driveName}
         status={folder.status}
       />
+
+      {childVideos.length > 0 && (
+        <FolderPublishRule
+          folderId={folderId!}
+          childVideos={childVideos}
+          initialRule={folder.publishRule}
+          folderStatus={folder.status}
+        />
+      )}
 
       <h2 className="mb-1 text-lg font-bold text-white">Contents</h2>
       <CatalogChildrenList folders={childFolders} videos={childVideos} />

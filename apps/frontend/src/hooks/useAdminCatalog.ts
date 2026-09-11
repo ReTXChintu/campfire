@@ -129,6 +129,37 @@ export function useGenerateRenditions(fileId: string) {
   });
 }
 
+export type ApplyPublishRuleResult = { ok: true; updated: number; skippedTitle: number; skippedIntro: number };
+
+export function useApplyFolderPublishRule(folderId: string) {
+  const invalidate = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: (rule: { namePattern: string; padding: number; introStart: number | null; introEnd: number | null; order: string[] }) =>
+      apiPost<ApplyPublishRuleResult>(`/api/admin/catalog/folder/${folderId}/publish-rule/apply`, rule),
+    onSuccess: invalidate,
+  });
+}
+
+export function useBulkPublishFolder(folderId: string) {
+  const invalidate = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: () =>
+      apiPost<{ ok: true; publishedVideos: number; folderPublished: boolean }>(
+        `/api/admin/catalog/folder/${folderId}/publish-rule/publish-all`,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useResetVideoOverride(fileId: string) {
+  const invalidate = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: (field: "title" | "intro") =>
+      apiPost(`/api/admin/catalog/video/${fileId}/reset-override`, { field }),
+    onSuccess: invalidate,
+  });
+}
+
 export function useUploadSubtitle(fileId: string) {
   const invalidate = useInvalidateCatalog();
   return useMutation({

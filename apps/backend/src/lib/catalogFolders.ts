@@ -2,6 +2,13 @@ import { getDb } from "./mongodb";
 
 export type CatalogFolderStatus = "pending" | "curated" | "published";
 
+export type CatalogFolderPublishRule = {
+  namePattern: string; // free text containing a literal "{n}" token, e.g. "S1E{n}: Show Name"
+  padding: number; // 0 = no padding, else zero-pad width for {n}
+  introStart: number | null;
+  introEnd: number | null;
+};
+
 export type CatalogFolder = {
   _id: string; // Drive folder id
   parentFolderId: string; // Drive parent folder id; env.driveRootFolderId for a top-level series
@@ -9,6 +16,10 @@ export type CatalogFolder = {
   thumbnailFileId: string | null; // Drive file id of a "thumbnail.*" image in this folder — refreshed every scan
   status: CatalogFolderStatus;
   title: string | null;
+  // Last-used batch-publish rule for this folder's direct child videos (naming pattern, episode
+  // order source, default intro-skip) — see routes/admin/catalogFolder.ts's publish-rule routes.
+  // Independent of `status`/curation: saved purely so reopening the folder pre-fills the form.
+  publishRule: CatalogFolderPublishRule | null;
   createdAt: Date;
   curatedAt: Date | null;
   curatedBy: string | null;
@@ -88,6 +99,7 @@ export async function upsertScannedFolder(input: {
         thumbnailFileId: null,
         status: "pending" as const,
         title: null,
+        publishRule: null,
         createdAt: now,
         curatedAt: null,
         curatedBy: null,
@@ -131,6 +143,15 @@ export async function curateFolder(
     { _id: folderId, status: "pending" },
     { $set: { status: "curated", curatedAt: new Date() } },
   );
+}
+
+/** Saves/overwrites this folder's batch-publish rule, independent of curation status. */
+export async function setFolderPublishRule(
+  folderId: string,
+  rule: CatalogFolderPublishRule,
+): Promise<void> {
+  const col = await collection();
+  await col.updateOne({ _id: folderId }, { $set: { publishRule: rule, updatedAt: new Date() } });
 }
 
 export async function publishFolder(folderId: string): Promise<{ matched: boolean }> {

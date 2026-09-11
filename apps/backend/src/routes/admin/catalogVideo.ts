@@ -7,6 +7,7 @@ import {
   unpublishVideo,
   addSubtitleSetId,
   queueRenditions,
+  resetVideoOverride,
 } from "../../lib/catalogVideos";
 import { getCatalogFolder } from "../../lib/catalogFolders";
 import {
@@ -113,6 +114,24 @@ router.post("/:fileId/publish", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "Video must be curated (title set) before it can be published" });
     return;
   }
+  res.json({ ok: true });
+});
+
+// Clears an admin's earlier manual edit so the parent folder's publish-rule can drive this field
+// again on its next apply (the value itself doesn't change until that next apply runs).
+router.post("/:fileId/reset-override", requireAdmin, async (req, res) => {
+  const { fileId } = req.params;
+  const { field } = req.body as { field?: "title" | "intro" };
+  if (field !== "title" && field !== "intro") {
+    res.status(400).json({ error: "field must be 'title' or 'intro'" });
+    return;
+  }
+  const video = await getCatalogVideo(fileId);
+  if (!video) {
+    res.status(404).json({ error: "Video not found" });
+    return;
+  }
+  await resetVideoOverride(fileId, field);
   res.json({ ok: true });
 });
 

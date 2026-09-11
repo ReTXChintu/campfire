@@ -16,3 +16,15 @@ export type CatalogListItem = CatalogVideoListItem | CatalogFolderListItem;
 export function naturalSort<T extends { name: string }>(items: T[]): T[] {
   return [...items].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
+
+/** Episode order within a single folder: items with an explicit `episodeOrder` (set by that
+ * folder's publish-rule apply, or manual drag-reorder) sort by it ascending; anything without one
+ * falls back to naturalSort and is appended after. Videos-only — folders/seasons never carry
+ * episodeOrder, so those listings stay on plain naturalSort. */
+export function orderEpisodes<T extends { name: string; episodeOrder: number | null }>(items: T[]): T[] {
+  const ordered = items
+    .filter((item) => item.episodeOrder != null)
+    .sort((a, b) => a.episodeOrder! - b.episodeOrder!);
+  const unordered = naturalSort(items.filter((item) => item.episodeOrder == null));
+  return [...ordered, ...unordered];
+}

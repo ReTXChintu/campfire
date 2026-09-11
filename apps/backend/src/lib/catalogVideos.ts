@@ -26,6 +26,16 @@ export type CatalogVideo = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  // 1-based position within parentFolderId, set by a folder's publish-rule apply (or manual
+  // drag-reorder) — null means "not yet ordered", falls back to naturalSort (see
+  // lib/catalogListItem.ts's orderEpisodes).
+  episodeOrder: number | null;
+  // Set whenever an admin edits the corresponding field(s) directly via this video's own curation
+  // page (PATCH /:fileId below) — a folder's publish-rule apply always skips a field once its flag
+  // is true, so a manual edit "sticks" across rule reapplies. outroStart has no rule/override
+  // concept at all; it's always purely manual.
+  titleOverridden: boolean;
+  introOverridden: boolean; // covers introStart + introEnd together
   renditions: CatalogVideoRenditions;
   createdAt: Date;
   curatedAt: Date | null;
@@ -120,6 +130,9 @@ export async function upsertScannedVideo(input: {
         introStart: null,
         introEnd: null,
         outroStart: null,
+        episodeOrder: null,
+        titleOverridden: false,
+        introOverridden: false,
         renditions: {},
         createdAt: now,
         curatedAt: null,
@@ -131,9 +144,11 @@ export async function upsertScannedVideo(input: {
   return { upsertedCount: res.upsertedCount };
 }
 
-/** Saves curated metadata. Only advances status out of "pending" — editing an already
- * curated/published video's details never silently changes its publish state; that's a deliberate
- * separate action (see publishVideo/unpublishVideo). */
+/** Saves curated metadata from this video's own curation page — the manual-edit path, so it always
+ * marks title/intro as admin-overridden (see the `titleOverridden`/`introOverridden` field docs on
+ * CatalogVideo) so a folder-level publish-rule reapply never clobbers it. Only advances status out
+ * of "pending" — editing an already curated/published video's details never silently changes its
+ * publish state; that's a deliberate separate action (see publishVideo/unpublishVideo). */
 export async function curateVideo(
   fileId: string,
   update: {
@@ -156,6 +171,8 @@ export async function curateVideo(
         introEnd: update.introEnd,
         outroStart: update.outroStart,
         curatedBy: update.curatedBy,
+        titleOverridden: true,
+        introOverridden: true,
         updatedAt: new Date(),
       },
     },
@@ -166,6 +183,49 @@ export async function curateVideo(
     { _id: fileId, status: "pending" },
     { $set: { status: "curated", curatedAt: new Date() } },
   );
+}
+
+/** One video's slice of a folder's publish-rule apply — always sets episodeOrder; sets
+ * title/introStart/introEnd only when the corresponding override flag is false (see the field docs
+ * on CatalogVideo). Same "advance out of pending once" status semantics as curateVideo, since
+ * setting a title for the first time is still what makes a video curated, whether it came from a
+ * manual edit or a rule. Returns which fields were actually written, for the endpoint's summary. */
+export async function applyRuleToVideo(
+  fileId: string,
+  update: { episodeOrder: number; title: string | null; introStart: number | null; introEnd: number | null },
+): Promise<{ titleApplied: boolean; introApplied: boolean }> {
+  const col = await collection();
+  const video = await col.findOne({ _id: fileId });
+  if (!video) return { titleApplied: false, introApplied: false };
+
+  const titleApplied = !video.titleOverridden && update.title != null;
+  const introApplied = !video.introOverridden;
+
+  const set: Record<string, unknown> = { episodeOrder: update.episodeOrder, updatedAt: new Date() };
+  if (titleApplied) set.title = update.title;
+  if (introApplied) {
+    set.introStart = update.introStart;
+    set.introEnd = update.introEnd;
+  }
+  await col.updateOne({ _id: fileId }, { $set: set });
+
+  if (titleApplied) {
+    // Same promotion rule as curateVideo: only the first title save advances "pending" → "curated".
+    await col.updateOne(
+      { _id: fileId, status: "pending" },
+      { $set: { status: "curated", curatedAt: new Date() } },
+    );
+  }
+
+  return { titleApplied, introApplied };
+}
+
+/** Clears one override flag (from the video's own curation page's "Reset to folder rule" link) — the
+ * field's value itself is refreshed the next time the parent folder's rule is (re-)applied, not here. */
+export async function resetVideoOverride(fileId: string, field: "title" | "intro"): Promise<void> {
+  const col = await collection();
+  const key = field === "title" ? "titleOverridden" : "introOverridden";
+  await col.updateOne({ _id: fileId }, { $set: { [key]: false, updatedAt: new Date() } });
 }
 
 /** Appends one subtitleSetId to a video's linked list (used by the direct-upload endpoint, which

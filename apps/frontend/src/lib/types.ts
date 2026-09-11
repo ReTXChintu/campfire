@@ -31,6 +31,14 @@ export type ConvertedSubtitle = {
 };
 
 export type CatalogFolderStatus = "pending" | "curated" | "published";
+
+export type CatalogFolderPublishRule = {
+  namePattern: string;
+  padding: number;
+  introStart: number | null;
+  introEnd: number | null;
+};
+
 export type CatalogFolder = {
   _id: string;
   parentFolderId: string;
@@ -38,6 +46,7 @@ export type CatalogFolder = {
   thumbnailFileId: string | null;
   status: CatalogFolderStatus;
   title: string | null;
+  publishRule: CatalogFolderPublishRule | null;
   createdAt: string;
   curatedAt: string | null;
   curatedBy: string | null;
@@ -64,6 +73,9 @@ export type CatalogVideo = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  episodeOrder: number | null;
+  titleOverridden: boolean;
+  introOverridden: boolean;
   renditions: CatalogVideoRenditions;
   createdAt: string;
   curatedAt: string | null;

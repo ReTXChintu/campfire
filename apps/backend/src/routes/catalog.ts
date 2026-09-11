@@ -13,7 +13,7 @@ import {
 } from "../lib/catalogVideos";
 import { getProgress, getProgressForFolder, getRecentInProgress } from "../lib/progress";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
-import { naturalSort, type CatalogListItem } from "../lib/catalogListItem";
+import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 
 const router = Router();
 
@@ -68,8 +68,12 @@ router.get("/library", requireAuth, async (req, res) => {
   if (hero.kind === "video") {
     heroPlayHref = `/watch/${hero.id}`;
   } else {
-    const episodesInFolder = naturalSort(
-      (await listPublishedVideosByParent(hero.id)).map((v) => ({ id: v._id, name: v.title! })),
+    const episodesInFolder = orderEpisodes(
+      (await listPublishedVideosByParent(hero.id)).map((v) => ({
+        id: v._id,
+        name: v.title!,
+        episodeOrder: v.episodeOrder,
+      })),
     );
     heroPlayHref = episodesInFolder[0] ? `/watch/${episodesInFolder[0].id}` : `/folder/${hero.id}`;
   }
@@ -152,11 +156,23 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
     getProgressForFolder(req.authUser!.userId, folderId),
   ]);
 
-  const seasonItems = naturalSort(
-    seasonVideoDocs.map((v) => ({ kind: "video" as const, id: v._id, name: v.title!, mimeType: v.mimeType })),
+  const seasonItems = orderEpisodes(
+    seasonVideoDocs.map((v) => ({
+      kind: "video" as const,
+      id: v._id,
+      name: v.title!,
+      mimeType: v.mimeType,
+      episodeOrder: v.episodeOrder,
+    })),
   );
-  const specialItems = naturalSort(
-    specialVideoDocs.map((v) => ({ kind: "video" as const, id: v._id, name: v.title!, mimeType: v.mimeType })),
+  const specialItems = orderEpisodes(
+    specialVideoDocs.map((v) => ({
+      kind: "video" as const,
+      id: v._id,
+      name: v.title!,
+      mimeType: v.mimeType,
+      episodeOrder: v.episodeOrder,
+    })),
   );
 
   res.json({
@@ -199,7 +215,9 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
       listPublishedVideosByParent(parentFolderId),
       getProgressForFolder(req.authUser!.userId, parentFolderId),
     ]);
-    const episodeList = naturalSort(episodeDocs.map((e) => ({ id: e._id, name: e.title! })));
+    const episodeList = orderEpisodes(
+      episodeDocs.map((e) => ({ id: e._id, name: e.title!, episodeOrder: e.episodeOrder })),
+    );
     const index = episodeList.findIndex((e) => e.id === fileId);
     nextFileId = index >= 0 ? (episodeList[index + 1]?.id ?? null) : null;
     previousFileId = index >= 0 ? (episodeList[index - 1]?.id ?? null) : null;

@@ -53,6 +53,8 @@ export default function AdminCatalogVideoPage() {
         subtitleSetOptions={subtitleSetOptions}
         status={video.status}
         renditions={video.renditions ?? {}}
+        titleOverridden={video.titleOverridden}
+        introOverridden={video.introOverridden}
       />
     </div>
   );

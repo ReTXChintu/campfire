@@ -7,6 +7,7 @@ import {
   useToggleVideoPublish,
   useUploadSubtitle,
   useGenerateRenditions,
+  useResetVideoOverride,
   type SubtitleSetOption,
 } from "../../hooks/useAdminCatalog";
 import type { CatalogVideoRenditions } from "../../lib/types";
@@ -59,6 +60,8 @@ export default function VideoCurationForm({
   subtitleSetOptions,
   status,
   renditions,
+  titleOverridden,
+  introOverridden,
 }: {
   fileId: string;
   driveName: string;
@@ -70,6 +73,11 @@ export default function VideoCurationForm({
   subtitleSetOptions: SubtitleSetOption[];
   status: Status;
   renditions: CatalogVideoRenditions;
+  // Whether this video's title / intro-skip window has been manually edited here before, which
+  // makes its parent folder's publish-rule skip that field on future applies — see
+  // FolderPublishRule.tsx and lib/catalogVideos.ts's applyRuleToVideo.
+  titleOverridden: boolean;
+  introOverridden: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const uploadFileRef = useRef<HTMLInputElement>(null);
@@ -88,6 +96,7 @@ export default function VideoCurationForm({
   const publishMutation = useToggleVideoPublish(fileId);
   const uploadMutation = useUploadSubtitle(fileId);
   const renditionsMutation = useGenerateRenditions(fileId);
+  const resetOverrideMutation = useResetVideoOverride(fileId);
 
   const renditionsInFlight = RENDITION_HEIGHTS.some(
     (h) => renditions[String(h)]?.status === "queued" || renditions[String(h)]?.status === "processing",
@@ -154,7 +163,22 @@ export default function VideoCurationForm({
       <div className="flex flex-col gap-6">
         <div>
           <p className="mb-2 text-xs text-text-tertiary">Drive name: {driveName}</p>
-          <label className="mb-1.5 block text-sm font-medium text-white/90">Title</label>
+          <div className="mb-1.5 flex items-center gap-2">
+            <label className="block text-sm font-medium text-white/90">Title</label>
+            {titleOverridden && (
+              <>
+                <span className="text-xs text-amber">Overridden — folder rule skips this</span>
+                <button
+                  type="button"
+                  onClick={() => resetOverrideMutation.mutate("title")}
+                  disabled={resetOverrideMutation.isPending}
+                  className="text-xs text-text-secondary underline transition hover:text-white disabled:opacity-50"
+                >
+                  Reset to folder rule
+                </button>
+              </>
+            )}
+          </div>
           <input
             type="text"
             value={title}
@@ -164,7 +188,22 @@ export default function VideoCurationForm({
         </div>
 
         <div>
-          <p className="mb-1.5 text-sm font-medium text-white/90">Skip Intro window</p>
+          <div className="mb-1.5 flex items-center gap-2">
+            <p className="text-sm font-medium text-white/90">Skip Intro window</p>
+            {introOverridden && (
+              <>
+                <span className="text-xs text-amber">Overridden — folder rule skips this</span>
+                <button
+                  type="button"
+                  onClick={() => resetOverrideMutation.mutate("intro")}
+                  disabled={resetOverrideMutation.isPending}
+                  className="text-xs text-text-secondary underline transition hover:text-white disabled:opacity-50"
+                >
+                  Reset to folder rule
+                </button>
+              </>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <input
               type="number"
