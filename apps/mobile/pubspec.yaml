@@ -93,6 +93,11 @@ flutter:
   assets:
     - assets/images/logo.png
     - assets/images/full_logo.png
+    # Noto Sans (SIL OFL 1.1, freely bundleable) — used only as media_kit's libassAndroidFont, so
+    # mpv's own subtitle renderer has a font to draw with on Android (see
+    # media_kit_video_player.dart's Player configuration). Not registered as an app font family;
+    # nothing in the UI itself uses it.
+    - assets/fonts/NotoSans-Regular.ttf
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -13,6 +13,9 @@ import '../services/quality_prefs_service.dart';
 import '../theme/app_theme.dart';
 import 'episodes_panel.dart';
 
+// TEMP diagnostic logging — remove once the Android resume/subtitle investigation is done.
+void _dbg(String msg) => debugPrint('[MKV ${DateTime.now().toIso8601String().substring(11, 23)}] $msg');
+
 const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 const _hideControlsDelay = Duration(seconds: 3);
 const _saveInterval = Duration(seconds: 10);
@@ -68,12 +71,18 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // text-based tracks (SRT/ASS/SSA/mov_text/WebVTT, which media_kit renders via a Flutter-side
   // text overlay instead) but silently blind to image-based ones (DVD/PGS subtitles, common in
   // rips from this era) since those need mpv to actually blit a bitmap onto the frame; there's no
-  // text for the Flutter overlay to show. Enabled on Windows, where it needs no bundled font
-  // (fontconfig handles fallback); Android needs `libassAndroidFont` set to a bundled .ttf asset
-  // for this to work there too — not done yet, so image-based subtitle tracks still won't render
-  // on Android specifically.
+  // text for the Flutter overlay to show. Windows needs no bundled font (fontconfig handles
+  // fallback); Android can't pick up system fonts for libass at all, so it needs an explicit
+  // bundled .ttf (assets/fonts/NotoSans-Regular.ttf, SIL OFL-licensed) plus the font's actual
+  // family name for mpv's `sub-font` option to reference.
   late final Player _player = Player(
-    configuration: PlayerConfiguration(libass: Platform.isWindows),
+    configuration: Platform.isAndroid
+        ? const PlayerConfiguration(
+            libass: true,
+            libassAndroidFont: 'assets/fonts/NotoSans-Regular.ttf',
+            libassAndroidFontName: 'Noto Sans',
+          )
+        : PlayerConfiguration(libass: Platform.isWindows),
   );
   late final VideoController _controller = VideoController(_player);
   final List<StreamSubscription> _subs = [];
@@ -99,6 +108,17 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   String? _mediaToken;
   String? _errorMessage;
   Offset? _doubleTapLocalPosition;
+
+  // Completes on the first `position` stream tick after the *current* open/reopen — distinct from
+  // `_resumeSeekComplete` (which flips true as soon as the open()/setSubtitleTrack() await chain
+  // finishes, well before the position stream has actually caught up to a `start:`-seeded resume
+  // on a slow connection: confirmed live on Android, several seconds behind). Anything that reopens
+  // the stream automatically (not from a direct user action — currently only
+  // _maybeSeedAutoQuality's remembered-ceiling seed) must wait on this before capturing "the
+  // current position to preserve", or it captures a stale ~0 and the reopen silently resets
+  // playback to the start right after a correct resume just landed.
+  Completer<void> _firstPositionTickCompleter = Completer<void>();
+  bool _sawFirstPositionTick = false;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -199,11 +219,21 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     _subs.addAll([
       _player.stream.position.listen((p) {
         if (!mounted) return;
+        if ((p - _position).abs() > const Duration(seconds: 2)) {
+          _dbg('position JUMP: $_position -> $p (resumeSeekComplete=$_resumeSeekComplete)');
+        }
+        if (!_sawFirstPositionTick) {
+          _sawFirstPositionTick = true;
+          if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
+        }
         setState(() => _position = p);
         _maybeSave();
         _maybeAutoAdvance();
       }),
       _player.stream.duration.listen((d) {
+        if (_duration == Duration.zero && d > Duration.zero) {
+          _dbg('duration first ready: $d (at position=${_player.state.position})');
+        }
         if (mounted) setState(() => _duration = d);
       }),
       _player.stream.playing.listen((p) {
@@ -211,6 +241,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       }),
       _player.stream.buffering.listen((b) {
         if (!mounted) return;
+        _dbg('buffering=$b position=${_player.state.position}');
         setState(() => _isBuffering = b);
         if (_qualitySelection == 'auto') {
           if (b) {
@@ -222,10 +253,12 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       }),
       _player.stream.tracks.listen((t) {
         if (!mounted) return;
+        _dbg('tracks updated: subtitle=${t.subtitle.map((s) => '${s.id}:${s.title ?? s.language ?? "?"}').toList()}');
         setState(() => _tracks = t);
         _maybeApplyAudioPreference();
       }),
       _player.stream.track.listen((t) {
+        _dbg('active track changed: subtitle.id=${t.subtitle.id} title=${t.subtitle.title}');
         if (mounted) setState(() => _track = t);
       }),
       _player.stream.completed.listen((completed) {
@@ -234,6 +267,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       // Without this, a failed open (bad URL, network error, unsupported codec, ...) just leaves
       // the buffering spinner spinning forever with nothing in the UI explaining why.
       _player.stream.error.listen((message) {
+        _dbg('player ERROR: $message');
         if (mounted) setState(() => _errorMessage = message);
       }),
     ]);
@@ -285,24 +319,33 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final resumeSeconds =
         (!video.initialCompleted && video.initialPositionSeconds > 5) ? video.initialPositionSeconds : 0.0;
     final needsResumeSeek = resumeSeconds > 0 && _streamIsSeekable;
+    _dbg(
+      'bootstrap: initialPositionSeconds=${video.initialPositionSeconds} completed=${video.initialCompleted} '
+      'resumeSeconds=$resumeSeconds needsResumeSeek=$needsResumeSeek streamIsSeekable=$_streamIsSeekable '
+      'isRaw=${video.isRaw} usingPassthrough=$_usingPassthrough uri=${_streamUri(restartOffsetSeconds: resumeSeconds)}',
+    );
     // Media's `start:` tells mpv to begin playback already at this offset, instead of opening at 0
     // and correcting with a seek() afterward — Player.open() defaults to play:true, so a manual
     // post-open seek races already-started playback (loses that race often enough on a slow
     // connection, exactly the case that matters most for MKVs streamed live from Drive) rather than
     // reliably landing before the viewer notices. `start:` avoids the race entirely.
     if (needsResumeSeek) _resumeSeekComplete = false;
+    _firstPositionTickCompleter = Completer<void>();
+    _sawFirstPositionTick = false;
     await _player.open(
       Media(
         _streamUri(restartOffsetSeconds: resumeSeconds).toString(),
         start: needsResumeSeek ? Duration(milliseconds: (resumeSeconds * 1000).round()) : null,
       ),
     );
+    _dbg('bootstrap: open() returned, player.state.position=${_player.state.position} duration=${_player.state.duration}');
     await _player.setRate(_speed);
     // Defaults to SubtitleTrack.no() (see _selectedSubtitleTrack's initializer) rather than
     // libmpv's own default-flag-driven auto-selection — matching the native-mode player's default
     // of no track pre-selected.
     await _player.setSubtitleTrack(_selectedSubtitleTrack);
     _resumeSeekComplete = true;
+    _dbg('bootstrap: done, resumeSeekComplete=true, player.state.position=${_player.state.position}');
   }
 
   // Seeds Auto's starting tier from this device's last learned ceiling once probe resolves (so a
@@ -314,6 +357,14 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     if (_qualitySelection != 'auto' || _autoResolvedHeight != null) return;
     final heights = probe.availableQualities.map((q) => q.height).toList();
     final remembered = await QualityPrefsService.getCeiling();
+    // Never reopen (which captures "the current position" via _applyAutoChange/_reopenAt) before
+    // the initial resume-seeded open has actually landed a real position tick — probe resolving
+    // (which triggers this) races the bootstrap open independently, and on a slow connection can
+    // easily finish first, capturing a stale ~0 and silently resetting a correct resume back to
+    // the start seconds after it landed. Confirmed live on Android.
+    _dbg('maybeSeedAutoQuality: remembered=$remembered heights=$heights waiting for first position tick...');
+    await _firstPositionTickCompleter.future;
+    _dbg('maybeSeedAutoQuality: first tick landed, position=$_position — proceeding');
     if (!mounted || _qualitySelection != 'auto' || _autoResolvedHeight != null) return;
     if (remembered != null && heights.contains(remembered)) {
       _applyAutoChange(remembered);
@@ -330,6 +381,9 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     }
     _saveProgress(force: true);
     _restoreSystemChrome();
+    // Release anything still awaiting the first tick (e.g. _maybeSeedAutoQuality) rather than
+    // leaving it dangling forever on a video that never got a chance to play.
+    if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
     _player.dispose();
     super.dispose();
   }
@@ -433,6 +487,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     // See _bootstrap's identical comment: Media's `start:` tells mpv to begin already at this
     // offset, avoiding the race a post-open seek() has against Player.open()'s default play:true.
     if (needsSeek) _resumeSeekComplete = false;
+    _firstPositionTickCompleter = Completer<void>();
+    _sawFirstPositionTick = false;
     await _player.open(
       Media(
         _streamUri(restartOffsetSeconds: seconds).toString(),
