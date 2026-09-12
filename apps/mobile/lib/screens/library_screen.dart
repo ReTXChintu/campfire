@@ -6,6 +6,7 @@ import '../widgets/folder_card.dart';
 import '../widgets/hero_banner.dart';
 import '../widgets/rail.dart';
 import '../widgets/top_bar.dart';
+import '../widgets/update_banner.dart';
 import '../widgets/video_card.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -53,6 +54,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             return ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
+                const UpdateBanner(),
                 if (data.hero != null)
                   HeroBanner(
                     title: data.hero!.title,

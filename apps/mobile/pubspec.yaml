@@ -61,6 +61,10 @@ dependencies:
   # doesn't request these itself, only declares that the app may need to.
   permission_handler: ^11.3.1
 
+  # Opens the update-banner's download link in the system browser — see
+  # lib/widgets/update_banner.dart.
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
