@@ -32,6 +32,16 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# Newer MSVC toolsets (VS 17.14/18.6+) turn <experimental/coroutine> usage into a hard compile
+# error (C2338/STL1011) instead of a warning — several plugins still using the pre-C++20
+# experimental coroutine TS via cppwinrt (permission_handler_windows as of 0.2.2; possibly others
+# pulled in transitively) hit this and fail the whole Windows build. Must be set here, before
+# add_subdirectory(flutter) below, so it's inherited by every plugin subdirectory the generated
+# plugin build rules add afterward — those .vcxproj files aren't ours to patch directly. Drop this
+# once every plugin in use has migrated to <coroutine> (see
+# https://github.com/microsoft/cppwinrt/issues/1520, https://github.com/flutter/flutter/issues/186452).
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
