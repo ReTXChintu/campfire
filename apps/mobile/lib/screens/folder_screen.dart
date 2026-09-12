@@ -80,7 +80,7 @@ class _FolderScreenState extends State<FolderScreen> {
               ),
               const SizedBox(height: 16),
               if (data.isSeries) ...[
-                VideoGrid(items: data.seasonItems, progressByFileId: progressByFileId),
+                VideoGrid(items: data.seasonItems, progressByFileId: progressByFileId, autofocusFirstItem: true),
                 if (data.specialItems.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   const Text('Specials', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
@@ -88,7 +88,7 @@ class _FolderScreenState extends State<FolderScreen> {
                   VideoGrid(items: data.specialItems, progressByFileId: progressByFileId),
                 ],
               ] else
-                VideoGrid(items: data.items, progressByFileId: progressByFileId),
+                VideoGrid(items: data.items, progressByFileId: progressByFileId, autofocusFirstItem: true),
             ],
           );
         },

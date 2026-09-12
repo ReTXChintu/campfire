@@ -3,14 +3,18 @@ import 'package:go_router/go_router.dart';
 import '../models/catalog.dart';
 import '../theme/app_theme.dart';
 import 'authed_network_image.dart';
+import 'tv_focusable.dart';
 
 class FolderCard extends StatelessWidget {
   final CatalogFolderItem item;
-  const FolderCard({super.key, required this.item});
+  final bool autofocus;
+  const FolderCard({super.key, required this.item, this.autofocus = false});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TvFocusable(
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(8),
       onTap: () => context.push('/folder/${item.id}'),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),

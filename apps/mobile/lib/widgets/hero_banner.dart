@@ -72,6 +72,9 @@ class HeroBanner extends StatelessWidget {
                 Row(
                   children: [
                     ElevatedButton.icon(
+                      // Gives the home screen an initial D-pad focus target on Android TV —
+                      // without this, the first remote press has nothing to move focus from.
+                      autofocus: true,
                       onPressed: () => context.push(playHref),
                       icon: const Icon(Icons.play_arrow, size: 20),
                       label: const Text('Play'),

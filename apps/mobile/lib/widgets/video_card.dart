@@ -3,12 +3,14 @@ import 'package:go_router/go_router.dart';
 import '../models/catalog.dart';
 import '../theme/app_theme.dart';
 import 'authed_network_image.dart';
+import 'tv_focusable.dart';
 
 class VideoCard extends StatelessWidget {
   final CatalogVideoItem item;
   final WatchProgress? progress;
+  final bool autofocus;
 
-  const VideoCard({super.key, required this.item, this.progress});
+  const VideoCard({super.key, required this.item, this.progress, this.autofocus = false});
 
   @override
   Widget build(BuildContext context) {
@@ -16,7 +18,9 @@ class VideoCard extends StatelessWidget {
         ? (progress!.positionSeconds / progress!.durationSeconds).clamp(0.0, 1.0)
         : 0.0;
 
-    return GestureDetector(
+    return TvFocusable(
+      autofocus: autofocus,
+      borderRadius: BorderRadius.circular(8),
       onTap: () => context.push('/watch/${item.id}'),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),

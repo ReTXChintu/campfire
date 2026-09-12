@@ -7,8 +7,17 @@ import 'video_card.dart';
 class VideoGrid extends StatelessWidget {
   final List<CatalogListItem> items;
   final Map<String, WatchProgress> progressByFileId;
+  // Gives the first tile initial D-pad focus (Android TV) — without something focused when the
+  // screen loads, the first remote press has no current focus to move from. Off by default since
+  // multiple VideoGrids can appear on one screen (e.g. FolderScreen's season grid + specials).
+  final bool autofocusFirstItem;
 
-  const VideoGrid({super.key, required this.items, this.progressByFileId = const {}});
+  const VideoGrid({
+    super.key,
+    required this.items,
+    this.progressByFileId = const {},
+    this.autofocusFirstItem = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -34,9 +43,11 @@ class VideoGrid extends StatelessWidget {
       ),
       itemBuilder: (context, index) {
         final item = items[index];
+        final autofocus = autofocusFirstItem && index == 0;
         return switch (item) {
-          CatalogFolderItem folder => FolderCard(item: folder),
-          CatalogVideoItem video => VideoCard(item: video, progress: progressByFileId[video.id]),
+          CatalogFolderItem folder => FolderCard(item: folder, autofocus: autofocus),
+          CatalogVideoItem video =>
+            VideoCard(item: video, progress: progressByFileId[video.id], autofocus: autofocus),
         };
       },
     );
