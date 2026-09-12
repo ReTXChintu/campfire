@@ -1,23 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { RoomAudioRenderer, RoomContext } from "@livekit/components-react";
 import { ConnectionState, Room, RoomEvent, type Participant } from "livekit-client";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import VideoPlayer from "../components/VideoPlayer";
 import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
 import WatchPartyChat from "../components/WatchPartyChat";
+import WatchPartyVideoGrid from "../components/WatchPartyVideoGrid";
 import { useVideo } from "../hooks/useCatalog";
 import {
   leaveWatchParty,
   sendWatchPartyHeartbeat,
   useCreateWatchParty,
   useEndWatchParty,
+  useGrantWatchPartyControl,
   useJoinWatchPartyToken,
   useUpdateWatchPartyState,
   useWatchParty,
+  useWatchPartyParticipants,
 } from "../hooks/useWatchParty";
 import { useAuth } from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
-import type { WatchParty, WatchPartyJoinTokenResponse, WatchPartySyncState } from "../lib/types";
+import type {
+  WatchParty,
+  WatchPartyJoinTokenResponse,
+  WatchPartyParticipant,
+  WatchPartySyncState,
+} from "../lib/types";
 import NotFoundPage from "./NotFoundPage";
 
 type PartyParticipant = {
@@ -62,6 +71,7 @@ function isSyncState(value: unknown): value is WatchPartySyncState {
 
 export default function WatchPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user } = useAuth();
   const { fileId } = useParams<{ fileId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -74,6 +84,7 @@ export default function WatchPage() {
   const [incomingSyncState, setIncomingSyncState] = useState<WatchPartySyncState | null>(null);
   const [audioReady, setAudioReady] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
   const [partyNotice, setPartyNotice] = useState<string | null>(null);
   // Set right before we ourselves clear `party` from the URL (leave/end), so the room's
   // resulting Disconnected transition isn't mistaken for a kick/network drop and doesn't pop the
@@ -114,6 +125,44 @@ export default function WatchPage() {
   const isHost = (joinedTokenData?.isHost ?? party?.hostUserId === user?.userId) && deviceRole === "main";
   const syncEnabled = !!partyId && video?.seekMode === "native";
 
+  // Backend-authoritative roster (who's allowed to do what), kept live via the "watch-party-control"
+  // data-channel push (see handleDataReceived below) with this query's own refetch as a fallback —
+  // separate from `participants` above, which is purely LiveKit's own room presence and only knows
+  // display names/local-ness, not userId/deviceId/grant state.
+  const watchPartyParticipants = useWatchPartyParticipants(partyId);
+  const grantControl = useGrantWatchPartyControl(partyId);
+  const backendParticipantsData = watchPartyParticipants.data;
+  const backendParticipants = useMemo(() => backendParticipantsData ?? [], [backendParticipantsData]);
+  const backendByIdentity = useMemo(() => {
+    const map = new Map<string, WatchPartyParticipant>();
+    for (const p of backendParticipants) map.set(`${p.role}-${p.userId}-${p.deviceId}`, p);
+    return map;
+  }, [backendParticipants]);
+  // A "main" device with canControlPlayback — true for the host's main device and for any guest's
+  // main device the host has granted control to; never true for a companion device.
+  const controllerIdentities = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of backendParticipants) {
+      if (p.deviceRole === "main" && p.canControlPlayback) set.add(`${p.role}-${p.userId}-${p.deviceId}`);
+    }
+    return set;
+  }, [backendParticipants]);
+  // Falls back to the join-token response's own snapshot until the roster query has data (a brief
+  // window right after connecting), so a host isn't momentarily shown as locked out of their own
+  // party's controls.
+  const canControlPlayback = !joinedTokenData
+    ? false
+    : watchPartyParticipants.data
+      ? controllerIdentities.has(joinedTokenData.participantIdentity)
+      : joinedTokenData.canControlPlayback;
+  // handleDataReceived (inside the room-connect effect below) needs the *current* controller set,
+  // but that effect only re-runs when the room itself changes — not on every roster update — so it
+  // reads this ref instead of closing over the (necessarily stale) value from when it was created.
+  const controllerIdentitiesRef = useRef(controllerIdentities);
+  useEffect(() => {
+    controllerIdentitiesRef.current = controllerIdentities;
+  }, [controllerIdentities]);
+
   const syncParticipants = useCallback((nextRoom: Room | null, hostIdentity: string | null) => {
     if (!nextRoom) {
       setParticipants([]);
@@ -146,9 +195,9 @@ export default function WatchPage() {
   }, [fileId, navigate, party, partyId]);
 
   useEffect(() => {
-    if (!party || isHost) return;
+    if (!party || canControlPlayback) return;
     setIncomingSyncState(toSyncState(party));
-  }, [isHost, party]);
+  }, [canControlPlayback, party]);
 
   useEffect(() => {
     const tokenData = joinedTokenData;
@@ -162,14 +211,30 @@ export default function WatchPage() {
     setParticipants([]);
     setAudioReady(false);
     setMicEnabled(false);
+    setCameraEnabled(false);
     setPartyNotice(null);
 
     const handleParticipantsChanged = () => {
       syncParticipants(nextRoom, tokenData.party.hostParticipantIdentity);
     };
 
-    const handleDataReceived = (payload: Uint8Array, participant?: Participant) => {
-      if (!participant || participant.identity !== tokenData.party.hostParticipantIdentity) return;
+    const handleDataReceived = (payload: Uint8Array, participant?: Participant, _kind?: unknown, topic?: string) => {
+      // Host-broadcast roster update (see routes/watchParties.ts's control-grant route) — applies
+      // regardless of sender identity, since it's sent server-side, not from a participant.
+      if (topic === "watch-party-control") {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(payload)) as { participants?: WatchPartyParticipant[] };
+          if (parsed.participants) {
+            queryClient.setQueryData(["watch-party-participants", partyId], parsed.participants);
+          }
+        } catch {
+          // Ignore malformed payloads.
+        }
+        return;
+      }
+      // Sync-state broadcasts a granted guest sends now look identical to a host's — accept from
+      // any current controller, not just the party's fixed host identity.
+      if (!participant || !controllerIdentitiesRef.current.has(participant.identity)) return;
       try {
         const parsed = JSON.parse(new TextDecoder().decode(payload));
         if (isSyncState(parsed)) setIncomingSyncState(parsed);
@@ -212,7 +277,7 @@ export default function WatchPage() {
         if (cancelled) return;
         setConnectionState(nextRoom.state);
         handleParticipantsChanged();
-        if (!tokenData.isHost) setIncomingSyncState(toSyncState(tokenData.party));
+        if (!tokenData.canControlPlayback) setIncomingSyncState(toSyncState(tokenData.party));
       })
       .catch((connectError) => {
         console.error("Failed to connect watch party room", connectError);
@@ -234,8 +299,9 @@ export default function WatchPage() {
       setConnectionState(ConnectionState.Disconnected);
       setAudioReady(false);
       setMicEnabled(false);
+      setCameraEnabled(false);
     };
-  }, [joinedTokenData, partyId, syncParticipants, setSearchParams]);
+  }, [joinedTokenData, partyId, syncParticipants, setSearchParams, queryClient]);
 
   const inviteLink = useMemo(() => {
     if (!party || typeof window === "undefined") return null;
@@ -282,6 +348,15 @@ export default function WatchPage() {
     syncParticipants(currentRoom, party?.hostParticipantIdentity ?? null);
   };
 
+  const handleToggleCamera = async () => {
+    const currentRoom = roomRef.current;
+    if (!currentRoom) return;
+    const nextValue = !cameraEnabled;
+    await currentRoom.localParticipant.setCameraEnabled(nextValue);
+    setCameraEnabled(nextValue);
+    syncParticipants(currentRoom, party?.hostParticipantIdentity ?? null);
+  };
+
   const handleEnablePartyAudio = async () => {
     const currentRoom = roomRef.current;
     if (!currentRoom) return;
@@ -291,7 +366,7 @@ export default function WatchPage() {
 
   const handlePartySyncState = useCallback(
     async (state: WatchPartySyncState) => {
-      if (!partyId || !isHost) return;
+      if (!partyId || !canControlPlayback) return;
       setIncomingSyncState(state);
       await updateWatchPartyState
         .mutateAsync({
@@ -306,7 +381,7 @@ export default function WatchPage() {
       const payload = new TextEncoder().encode(JSON.stringify(state));
       await currentRoom.localParticipant.publishData(payload, { reliable: true, topic: "watch-party-sync" });
     },
-    [isHost, partyId, updateWatchPartyState],
+    [canControlPlayback, partyId, updateWatchPartyState],
   );
 
   // A bad/expired party code 404s both queries — without this, the UI just sits on "Joining
@@ -318,12 +393,12 @@ export default function WatchPage() {
       partyId
         ? {
             enabled: syncEnabled,
-            isHost: !!isHost,
+            canControl: canControlPlayback,
             inboundState: incomingSyncState,
             onStateChange: handlePartySyncState,
           }
         : undefined,
-    [partyId, syncEnabled, isHost, incomingSyncState, handlePartySyncState],
+    [partyId, syncEnabled, canControlPlayback, incomingSyncState, handlePartySyncState],
   );
 
   if (isLoading) {
@@ -528,31 +603,71 @@ export default function WatchPage() {
                 >
                   {audioReady ? "Party Audio Ready" : "Enable Party Audio"}
                 </button>
+                <button
+                  type="button"
+                  onClick={handleToggleCamera}
+                  disabled={!room}
+                  className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {cameraEnabled ? "Turn Off Camera" : "Turn On Camera"}
+                </button>
               </div>
 
               <div className="space-y-2">
                 {participants.length === 0 ? (
                   <p className="text-sm text-white/45">Waiting for participants to join...</p>
                 ) : (
-                  participants.map((participant) => (
-                    <div
-                      key={participant.identity}
-                      className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-white">
-                          {participant.name}
-                          {participant.isLocal ? " (You)" : ""}
-                        </p>
-                        <p className="text-xs text-white/45">{participant.identity}</p>
+                  participants.map((participant) => {
+                    const backend = backendByIdentity.get(participant.identity);
+                    const hasControl = !!backend && backend.deviceRole === "main" && backend.canControlPlayback;
+                    // Host can grant/revoke any other main-device guest — never a companion device
+                    // (it can never hold control regardless, see setControlPermission server-side)
+                    // and never itself.
+                    const canGrantThisRow =
+                      isHost && !participant.isHost && backend && backend.deviceRole === "main";
+                    return (
+                      <div
+                        key={participant.identity}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-white/5 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-white">
+                            {participant.name}
+                            {participant.isLocal ? " (You)" : ""}
+                          </p>
+                          <p className="truncate text-xs text-white/45">{participant.identity}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {participant.isHost && (
+                            <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-xs font-semibold text-emerald-200">
+                              Host
+                            </span>
+                          )}
+                          {!participant.isHost && hasControl && (
+                            <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">
+                              Can control
+                            </span>
+                          )}
+                          {canGrantThisRow && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                grantControl.mutate({
+                                  userId: backend!.userId,
+                                  deviceId: backend!.deviceId,
+                                  grant: !backend!.canControlPlayback,
+                                })
+                              }
+                              disabled={grantControl.isPending}
+                              className="rounded-md border border-white/20 px-2 py-1 text-xs font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {backend!.canControlPlayback ? "Revoke control" : "Grant control"}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      {participant.isHost && (
-                        <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-xs font-semibold text-emerald-200">
-                          Host
-                        </span>
-                      )}
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -560,7 +675,10 @@ export default function WatchPage() {
             {room ? (
               <RoomContext.Provider value={room}>
                 <RoomAudioRenderer />
-                <WatchPartyChat />
+                <div className="flex flex-col gap-4">
+                  <WatchPartyVideoGrid />
+                  <WatchPartyChat />
+                </div>
               </RoomContext.Provider>
             ) : (
               <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-white/45">
