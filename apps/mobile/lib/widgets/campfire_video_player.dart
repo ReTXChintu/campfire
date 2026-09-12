@@ -5,10 +5,12 @@ import 'package:video_player/video_player.dart';
 import 'package:go_router/go_router.dart';
 import '../config.dart';
 import '../models/catalog.dart';
+import '../models/watch_party.dart';
 import '../services/catalog_service.dart';
 import '../services/media_token_service.dart';
 import '../services/quality_prefs_service.dart';
 import '../services/vtt_parser.dart';
+import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
 import 'episodes_panel.dart';
 
@@ -47,8 +49,11 @@ String _formatTime(Duration d) {
 /// subtitles (the common case — everything that's gone through the admin Converter) work fully.
 class CampfireVideoPlayer extends StatefulWidget {
   final VideoResponse video;
+  // Set by WatchScreen only while a watch party is active for this video — see
+  // watch_party_sync_controller.dart. Null means "no party", exactly like today.
+  final WatchPartySyncController? watchPartySync;
 
-  const CampfireVideoPlayer({super.key, required this.video});
+  const CampfireVideoPlayer({super.key, required this.video, this.watchPartySync});
 
   @override
   State<CampfireVideoPlayer> createState() => _CampfireVideoPlayerState();
@@ -92,6 +97,21 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
 
   String? _mediaToken;
   Offset? _doubleTapLocalPosition;
+
+  // Watch Party sync — see watch_party_sync_controller.dart. Set true for the duration of
+  // _applyInboundSyncState so the seek/play/pause calls it makes don't get re-broadcast as if they
+  // were a local user action (mirrors VideoPlayer.tsx's applyingInboundSyncRef).
+  bool _applyingInboundSync = false;
+
+  // Sync only ever applies to native-mode content (matches web's seekMode === "native" gate) — MKV
+  // never reaches this player at all, and "restart" mode's reload-at-t= seeking isn't precise
+  // enough for another device's position to mean much here.
+  bool get _syncEnabled => video.isNative && widget.watchPartySync != null;
+  // Anyone without playback control can't seek/skip/change speed during a synced party — those
+  // actions would silently desync them until the controller's next broadcast, with no indication
+  // anything "failed". Doesn't lock play/pause — pausing locally is harmless, it just won't stick
+  // once the next inbound sync arrives.
+  bool get _locked => _syncEnabled && !(widget.watchPartySync?.canControl ?? false);
 
   // "auto" | "original" | "<height>" — mirrors QualitySelection on web (Dart has no union types).
   String _qualitySelection = 'auto';
@@ -174,6 +194,63 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
 
     _bootstrap();
     _scheduleHide();
+    widget.watchPartySync?.addListener(_onSyncControllerChanged);
+  }
+
+  // Fires whenever the sync controller's enabled/canControl/inboundState changes — a new inbound
+  // state (from whoever currently holds control) gets applied here; canControl flipping (a
+  // grant/revoke) just needs a rebuild so the locked-out controls re-enable/disable.
+  void _onSyncControllerChanged() {
+    if (!mounted) return;
+    final sync = widget.watchPartySync;
+    if (sync != null && _syncEnabled && !sync.canControl) {
+      final state = sync.inboundState;
+      if (state != null) _applyInboundSyncState(state);
+    }
+    setState(() {});
+  }
+
+  void _applyInboundSyncState(WatchPartySyncState state) {
+    final controller = _controller;
+    if (controller == null) return;
+    final updatedAt = DateTime.tryParse(state.updatedAt) ?? DateTime.now();
+    final elapsedSeconds = DateTime.now().difference(updatedAt).inMilliseconds / 1000;
+    final targetSeconds = (state.positionSeconds + (state.playing ? elapsedSeconds * state.playbackRate : 0))
+        .clamp(0, double.infinity)
+        .toDouble();
+
+    _applyingInboundSync = true;
+    if (_speed != state.playbackRate) {
+      setState(() => _speed = state.playbackRate);
+      controller.setPlaybackSpeed(state.playbackRate);
+    }
+    _seekTo(targetSeconds);
+    if (state.playing) {
+      controller.play();
+    } else {
+      controller.pause();
+    }
+    // Cleared on the next microtask rather than immediately — _seekTo/controller.play() above may
+    // themselves be asynchronous (a restart-mode _reload), and the guard needs to still be up for
+    // any of their synchronous side effects this frame.
+    Future.microtask(() => _applyingInboundSync = false);
+  }
+
+  // Called from every user/self-driven playback action (_togglePlay/_seekTo/_skip/_cycleSpeed) —
+  // guarded so it's a no-op unless a party is active AND we currently hold control, and so
+  // _applyInboundSyncState's own calls into those same methods never get re-broadcast right back
+  // out (mirrors VideoPlayer.tsx's emitWatchPartyState + applyingInboundSyncRef pairing).
+  void _maybeBroadcastPartyState({double? positionSecondsOverride}) {
+    final sync = widget.watchPartySync;
+    if (sync == null || _applyingInboundSync || !_syncEnabled || !sync.canControl) return;
+    sync.broadcast(
+      WatchPartySyncState(
+        playing: _controller?.value.isPlaying ?? false,
+        positionSeconds: positionSecondsOverride ?? (_absolutePosition.inMilliseconds / 1000),
+        playbackRate: _speed,
+        updatedAt: DateTime.now().toIso8601String(),
+      ),
+    );
   }
 
   // Seeds Auto's starting tier from this device's last learned ceiling once probe resolves (so a
@@ -226,6 +303,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     _restoreSystemChrome();
     _controller?.removeListener(_onTick);
     _controller?.dispose();
+    widget.watchPartySync?.removeListener(_onSyncControllerChanged);
     super.dispose();
   }
 
@@ -478,6 +556,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       controller.play();
     }
     _showControls();
+    _maybeBroadcastPartyState();
   }
 
   // Left third: -10s, middle third: play/pause, right third: +10s — same layout as most
@@ -498,12 +577,14 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   void _skip(int deltaSeconds) {
     final controller = _controller;
     if (controller == null) return;
+    double targetSeconds;
     if (_streamIsSeekable) {
       final duration = controller.value.duration;
       var target = controller.value.position + Duration(seconds: deltaSeconds);
       if (target < Duration.zero) target = Duration.zero;
       if (duration > Duration.zero && target > duration) target = duration;
       controller.seekTo(target);
+      targetSeconds = target.inMilliseconds / 1000;
     } else {
       final target =
           (_baseOffsetSeconds +
@@ -511,8 +592,10 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                   deltaSeconds)
               .clamp(0, double.infinity);
       _reload(seekTo: target.toDouble());
+      targetSeconds = target.toDouble();
     }
     _showControls();
+    _maybeBroadcastPartyState(positionSecondsOverride: targetSeconds);
   }
 
   void _seekTo(double seconds) {
@@ -521,6 +604,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     } else {
       _reload(seekTo: seconds);
     }
+    _maybeBroadcastPartyState(positionSecondsOverride: seconds);
   }
 
   void _cycleSpeed() {
@@ -528,6 +612,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     final next = _speedOptions[(idx + 1) % _speedOptions.length];
     setState(() => _speed = next);
     _controller?.setPlaybackSpeed(next);
+    _maybeBroadcastPartyState();
   }
 
   /// Watching is always landscape + immersive (status/nav bars hidden) — entered as soon as this
@@ -789,10 +874,10 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                   max: (duration?.inMilliseconds ?? 0)
                                       .toDouble()
                                       .clamp(1, double.infinity),
-                                  onChanged: duration == null
+                                  onChanged: duration == null || _locked
                                       ? null
                                       : (value) => setState(() {}),
-                                  onChangeEnd: duration == null
+                                  onChangeEnd: duration == null || _locked
                                       ? null
                                       : (value) => _seekTo(value / 1000),
                                 ),
@@ -831,7 +916,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                     Icons.replay_10,
                                     color: Colors.white,
                                   ),
-                                  onPressed: () => _skip(-_skipSeconds),
+                                  onPressed: _locked ? null : () => _skip(-_skipSeconds),
+                                  tooltip: _locked ? "You don't have playback control in this watch party" : null,
                                 ),
                                 IconButton(
                                   icon: Icon(
@@ -848,7 +934,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                     Icons.forward_10,
                                     color: Colors.white,
                                   ),
-                                  onPressed: () => _skip(_skipSeconds),
+                                  onPressed: _locked ? null : () => _skip(_skipSeconds),
+                                  tooltip: _locked ? "You don't have playback control in this watch party" : null,
                                 ),
                                 IconButton(
                                   icon: const Icon(
@@ -866,11 +953,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                             Row(
                               children: [
                                 TextButton(
-                                  onPressed: _cycleSpeed,
+                                  onPressed: _locked ? null : _cycleSpeed,
                                   child: Text(
                                     '${_speed}x',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
+                                    style: TextStyle(
+                                      color: _locked ? Colors.white30 : Colors.white70,
                                       fontSize: 12,
                                     ),
                                   ),

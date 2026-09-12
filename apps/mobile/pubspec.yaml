@@ -54,6 +54,13 @@ dependencies:
   # .srt/.vtt file to upload, mirroring the web admin's <input type="file">.
   file_picker: ^8.1.6
 
+  # Watch Party (Android + Windows): voice/video calling + sync/chat data channel, joining the same
+  # LiveKit room apps/frontend/src/routes/WatchPage.tsx does. See lib/widgets/watch_party_overlay.dart.
+  livekit_client: ^2.8.1
+  # Runtime camera/mic permission prompts on Android — flutter_webrtc (a livekit_client dependency)
+  # doesn't request these itself, only declares that the app may need to.
+  permission_handler: ^11.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -5,6 +5,20 @@
          the OS level with no network access at all, while debug/profile builds work fine. -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- Watch Party voice/video calling (LiveKit/flutter_webrtc) — requested at runtime via
+         permission_handler before enabling the mic/camera, but still required here or the OS
+         refuses the request outright. Bluetooth-SCO headset mic routing needs the Bluetooth
+         permissions too; MODIFY_AUDIO_SETTINGS lets WebRTC switch audio routes (speaker/earpiece). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+
     <!-- Android TV: not required so the same APK still installs on phones/tablets
          (Play Store filtering only kicks in when required="true"); the LEANBACK_LAUNCHER
          category below is what actually gets the app listed on the TV home screen. -->

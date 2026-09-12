@@ -40,7 +40,10 @@ GoRouter buildRouter(AuthService auth) {
       ),
       GoRoute(
         path: '/watch/:fileId',
-        builder: (context, state) => WatchScreen(fileId: state.pathParameters['fileId']!),
+        builder: (context, state) => WatchScreen(
+          fileId: state.pathParameters['fileId']!,
+          partyId: state.uri.queryParameters['party'],
+        ),
       ),
       GoRoute(path: '/admin', builder: (context, state) => const AdminCatalogPage()),
       GoRoute(

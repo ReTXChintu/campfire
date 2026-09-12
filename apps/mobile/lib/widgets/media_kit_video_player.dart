@@ -7,9 +7,11 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../config.dart';
 import '../models/catalog.dart';
+import '../models/watch_party.dart';
 import '../services/catalog_service.dart';
 import '../services/media_token_service.dart';
 import '../services/quality_prefs_service.dart';
+import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
 import 'episodes_panel.dart';
 
@@ -59,8 +61,11 @@ String _formatTime(Duration d) {
 /// CampfireVideoPlayer's native-mode subtitle track list isn't reproduced here.
 class MediaKitVideoPlayer extends StatefulWidget {
   final VideoResponse video;
+  // Set by WatchScreen only while a watch party is active for this video — see
+  // watch_party_sync_controller.dart. Null means "no party", exactly like today.
+  final WatchPartySyncController? watchPartySync;
 
-  const MediaKitVideoPlayer({super.key, required this.video});
+  const MediaKitVideoPlayer({super.key, required this.video, this.watchPartySync});
 
   @override
   State<MediaKitVideoPlayer> createState() => _MediaKitVideoPlayerState();
@@ -119,6 +124,20 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // playback to the start right after a correct resume just landed.
   Completer<void> _firstPositionTickCompleter = Completer<void>();
   bool _sawFirstPositionTick = false;
+
+  // Watch Party sync — see watch_party_sync_controller.dart. Set true for the duration of
+  // _applyInboundSyncState so the seek/play/pause calls it makes don't get re-broadcast as if they
+  // were a local user action (mirrors VideoPlayer.tsx's applyingInboundSyncRef).
+  bool _applyingInboundSync = false;
+
+  // Sync only ever applies to native-mode content (matches web's seekMode === "native" gate) — MKV
+  // ("raw") and "restart" mode content never sync, same as web.
+  bool get _syncEnabled => video.isNative && widget.watchPartySync != null;
+  // Anyone without playback control can't seek/skip/change speed during a synced party — those
+  // actions would silently desync them until the controller's next broadcast, with no indication
+  // anything "failed". Doesn't lock play/pause — pausing locally is harmless, it just won't stick
+  // once the next inbound sync arrives.
+  bool get _locked => _syncEnabled && !(widget.watchPartySync?.canControl ?? false);
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -276,6 +295,61 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     });
     _bootstrap();
     _scheduleHide();
+    widget.watchPartySync?.addListener(_onSyncControllerChanged);
+  }
+
+  // Fires whenever the sync controller's enabled/canControl/inboundState changes — a new inbound
+  // state (from whoever currently holds control) gets applied here; canControl flipping (a
+  // grant/revoke) just needs a rebuild so the locked-out controls re-enable/disable.
+  void _onSyncControllerChanged() {
+    if (!mounted) return;
+    final sync = widget.watchPartySync;
+    if (sync != null && _syncEnabled && !sync.canControl) {
+      final state = sync.inboundState;
+      if (state != null) _applyInboundSyncState(state);
+    }
+    setState(() {});
+  }
+
+  void _applyInboundSyncState(WatchPartySyncState state) {
+    final updatedAt = DateTime.tryParse(state.updatedAt) ?? DateTime.now();
+    final elapsedSeconds = DateTime.now().difference(updatedAt).inMilliseconds / 1000;
+    final targetSeconds = (state.positionSeconds + (state.playing ? elapsedSeconds * state.playbackRate : 0))
+        .clamp(0, double.infinity)
+        .toDouble();
+
+    _applyingInboundSync = true;
+    if (_speed != state.playbackRate) {
+      setState(() => _speed = state.playbackRate);
+      _player.setRate(state.playbackRate);
+    }
+    _seekTo(targetSeconds);
+    if (state.playing) {
+      _player.play();
+    } else {
+      _player.pause();
+    }
+    // Cleared on the next microtask rather than immediately — _seekTo/_player.play() above may
+    // themselves be asynchronous (a restart-mode _reopenAt), and the guard needs to still be up for
+    // any of their synchronous side effects this frame.
+    Future.microtask(() => _applyingInboundSync = false);
+  }
+
+  // Called from every user/self-driven playback action (_togglePlay/_seekTo/_skip/_cycleSpeed) —
+  // guarded so it's a no-op unless a party is active AND we currently hold control, and so
+  // _applyInboundSyncState's own calls into those same methods never get re-broadcast right back
+  // out (mirrors VideoPlayer.tsx's emitWatchPartyState + applyingInboundSyncRef pairing).
+  void _maybeBroadcastPartyState({double? positionSecondsOverride}) {
+    final sync = widget.watchPartySync;
+    if (sync == null || _applyingInboundSync || !_syncEnabled || !sync.canControl) return;
+    sync.broadcast(
+      WatchPartySyncState(
+        playing: _playing,
+        positionSeconds: positionSecondsOverride ?? (_position.inMilliseconds / 1000),
+        playbackRate: _speed,
+        updatedAt: DateTime.now().toIso8601String(),
+      ),
+    );
   }
 
   Uri _streamUri({double restartOffsetSeconds = 0}) {
@@ -385,6 +459,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     // leaving it dangling forever on a video that never got a chance to play.
     if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
     _player.dispose();
+    widget.watchPartySync?.removeListener(_onSyncControllerChanged);
     super.dispose();
   }
 
@@ -464,6 +539,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       _player.play();
     }
     _showControls();
+    _maybeBroadcastPartyState();
   }
 
   // Left third: -10s, middle third: play/pause, right third: +10s — same layout as most
@@ -503,17 +579,21 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   void _skip(int deltaSeconds) {
+    double targetSeconds;
     if (_streamIsSeekable) {
       var target = _position + Duration(seconds: deltaSeconds);
       if (target < Duration.zero) target = Duration.zero;
       final duration = _effectiveDuration;
       if (duration > Duration.zero && target > duration) target = duration;
       _player.seek(target);
+      targetSeconds = target.inMilliseconds / 1000;
     } else {
       final target = (_position.inSeconds + deltaSeconds).clamp(0, 1 << 30).toDouble();
       _reopenAt(target);
+      targetSeconds = target;
     }
     _showControls();
+    _maybeBroadcastPartyState(positionSecondsOverride: targetSeconds);
   }
 
   void _seekTo(double seconds) {
@@ -522,6 +602,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     } else {
       _reopenAt(seconds);
     }
+    _maybeBroadcastPartyState(positionSecondsOverride: seconds);
   }
 
   void _changeQuality(String value) {
@@ -592,6 +673,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final next = _speedOptions[(idx + 1) % _speedOptions.length];
     setState(() => _speed = next);
     _player.setRate(next);
+    _maybeBroadcastPartyState();
   }
 
   Future<void> _enterImmersiveLandscape() async {
@@ -790,9 +872,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                       ? position.inMilliseconds.clamp(0, duration.inMilliseconds).toDouble()
                                       : 0,
                                   max: duration.inMilliseconds.toDouble().clamp(1, double.infinity),
-                                  onChanged: duration.inMilliseconds <= 0 ? null : (value) => setState(() {}),
-                                  onChangeEnd:
-                                      duration.inMilliseconds <= 0 ? null : (value) => _seekTo(value / 1000),
+                                  onChanged:
+                                      duration.inMilliseconds <= 0 || _locked ? null : (value) => setState(() {}),
+                                  onChangeEnd: duration.inMilliseconds <= 0 || _locked
+                                      ? null
+                                      : (value) => _seekTo(value / 1000),
                                 ),
                               ),
                             ),
@@ -816,7 +900,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.replay_10, color: Colors.white),
-                                  onPressed: () => _skip(-_skipSeconds),
+                                  onPressed: _locked ? null : () => _skip(-_skipSeconds),
+                                  tooltip: _locked ? "You don't have playback control in this watch party" : null,
                                 ),
                                 IconButton(
                                   icon: Icon(
@@ -828,7 +913,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.forward_10, color: Colors.white),
-                                  onPressed: () => _skip(_skipSeconds),
+                                  onPressed: _locked ? null : () => _skip(_skipSeconds),
+                                  tooltip: _locked ? "You don't have playback control in this watch party" : null,
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.skip_next, color: Colors.white),
@@ -841,10 +927,13 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                             Row(
                               children: [
                                 TextButton(
-                                  onPressed: _cycleSpeed,
+                                  onPressed: _locked ? null : _cycleSpeed,
                                   child: Text(
                                     '${_speed}x',
-                                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    style: TextStyle(
+                                      color: _locked ? Colors.white30 : Colors.white70,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                                 if (_ladderHeights.isNotEmpty)

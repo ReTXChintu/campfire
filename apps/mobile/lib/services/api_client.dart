@@ -22,19 +22,25 @@ class ApiClient {
   static const bool _apiLogsEnabled = bool.fromEnvironment('API_LOGS', defaultValue: kDebugMode);
   static const int _maxLogBodyLength = 1200;
 
-  static Future<Map<String, String>> _headers({bool json = false}) async {
+  static Future<Map<String, String>> _headers({bool json = false, Map<String, String>? extra}) async {
     final token = await TokenStore.read();
     return {
       if (token != null) 'Authorization': 'Bearer $token',
       if (json) 'Content-Type': 'application/json',
+      ...?extra,
     };
   }
 
   static Uri _uri(String path) => Uri.parse('$apiBaseUrl$path');
 
-  static Future<dynamic> _send(String method, String path, {Object? body}) async {
+  static Future<dynamic> _send(
+    String method,
+    String path, {
+    Object? body,
+    Map<String, String>? extraHeaders,
+  }) async {
     final uri = _uri(path);
-    final headers = await _headers(json: body != null);
+    final headers = await _headers(json: body != null, extra: extraHeaders);
     final stopwatch = Stopwatch()..start();
     _logRequest(method, uri, headers, body);
 
@@ -57,6 +63,9 @@ class ApiClient {
             headers: headers,
             body: body != null ? jsonEncode(body) : null,
           );
+          break;
+        case 'DELETE':
+          res = await http.delete(uri, headers: headers);
           break;
         default:
           throw UnsupportedError('Unsupported method $method');
@@ -186,12 +195,16 @@ class ApiClient {
     return _send('GET', path);
   }
 
-  static Future<dynamic> post(String path, [Object? body]) async {
-    return _send('POST', path, body: body);
+  static Future<dynamic> post(String path, [Object? body, Map<String, String>? headers]) async {
+    return _send('POST', path, body: body, extraHeaders: headers);
   }
 
-  static Future<dynamic> patch(String path, Object body) async {
-    return _send('PATCH', path, body: body);
+  static Future<dynamic> patch(String path, Object body, [Map<String, String>? headers]) async {
+    return _send('PATCH', path, body: body, extraHeaders: headers);
+  }
+
+  static Future<dynamic> delete(String path) async {
+    return _send('DELETE', path);
   }
 
   /// Mirrors apps/frontend/src/lib/api.ts's apiPostText — a POST with a raw text/plain body
