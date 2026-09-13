@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RoomAudioRenderer, RoomContext } from "@livekit/components-react";
 import { ConnectionState, Room, RoomEvent, type Participant } from "livekit-client";
@@ -87,6 +87,9 @@ export default function WatchPage() {
   const [micEnabled, setMicEnabled] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [partyNotice, setPartyNotice] = useState<string | null>(null);
+  // The party panel narrows the video (a docked side panel) instead of covering or stacking below
+  // it — see design.html's desktop layout. Collapsed to a thin edge pill, never persisted.
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
   // Set right before we ourselves clear `party` from the URL (leave/end), so the room's
   // resulting Disconnected transition isn't mistaken for a kick/network drop and doesn't pop the
   // "you were disconnected" notice right after the user chose to leave.
@@ -620,156 +623,242 @@ export default function WatchPage() {
           )}
         </div>
 
-        {partyId && !partyLoadFailed && (
-          <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-              <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-white/65">
-                <span>Connection: {connectionState}</span>
-                <span>•</span>
-                <span>{participants.length} participant{participants.length === 1 ? "" : "s"}</span>
-                {syncEnabled ? (
-                  <>
-                    <span>•</span>
-                    <span className="text-emerald-300">Playback sync enabled</span>
-                  </>
-                ) : (
-                  <>
-                    <span>•</span>
-                    <span className="text-amber-300">Playback sync requires converted/native video</span>
-                  </>
-                )}
-              </div>
+      </section>
 
-              <div className="mb-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleToggleMic}
-                  disabled={!room}
-                  className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {micEnabled ? "Mute Mic" : "Unmute Mic"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleEnablePartyAudio}
-                  disabled={!room}
-                  className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {audioReady ? "Party Audio Ready" : "Enable Party Audio"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleToggleCamera}
-                  disabled={!room}
-                  className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {cameraEnabled ? "Turn Off Camera" : "Turn On Camera"}
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {participants.length === 0 ? (
-                  <p className="text-sm text-white/45">Waiting for participants to join...</p>
-                ) : (
-                  participants.map((participant) => {
-                    const backend = backendByIdentity.get(participant.identity);
-                    const hasControl = !!backend && backend.deviceRole === "main" && backend.canControlPlayback;
-                    // Host can grant/revoke any other main-device guest — never a companion device
-                    // (it can never hold control regardless, see setControlPermission server-side)
-                    // and never itself.
-                    const canGrantThisRow =
-                      isHost && !participant.isHost && backend && backend.deviceRole === "main";
-                    return (
-                      <div
-                        key={participant.identity}
-                        className="flex items-center justify-between gap-2 rounded-lg bg-white/5 px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-white">
-                            {participant.name}
-                            {participant.isLocal ? " (You)" : ""}
-                          </p>
-                          <p className="truncate text-xs text-white/45">{participant.identity}</p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {participant.isHost && (
-                            <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-xs font-semibold text-emerald-200">
-                              Host
-                            </span>
-                          )}
-                          {!participant.isHost && hasControl && (
-                            <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">
-                              Can control
-                            </span>
-                          )}
-                          {canGrantThisRow && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                grantControl.mutate({
-                                  userId: backend!.userId,
-                                  deviceId: backend!.deviceId,
-                                  grant: !backend!.canControlPlayback,
-                                })
-                              }
-                              disabled={grantControl.isPending}
-                              className="rounded-md border border-white/20 px-2 py-1 text-xs font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              {backend!.canControlPlayback ? "Revoke control" : "Grant control"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            {room ? (
-              <RoomContext.Provider value={room}>
-                <RoomAudioRenderer />
-                <div className="flex flex-col gap-4">
-                  <WatchPartyVideoGrid />
-                  <WatchPartyChat />
-                </div>
-              </RoomContext.Provider>
+      <PartyRoomProvider room={partyId && !partyLoadFailed ? room : null}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="relative min-w-0 flex-1">
+            {video.seekMode === "raw" ? (
+              <DesktopAppRequiredNotice title={video.title ?? "This video"} />
             ) : (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-white/45">
-                Joining party room...
+              <VideoPlayer
+                fileId={video.fileId}
+                title={video.title!}
+                backHref={video.backHref}
+                parentFolderId={video.parentFolderId}
+                nextFileId={video.nextFileId}
+                previousFileId={video.previousFileId}
+                episodes={video.episodes}
+                progressByFileId={video.progressByFileId}
+                initialPositionSeconds={video.initialPositionSeconds}
+                initialCompleted={video.initialCompleted}
+                seekMode={video.seekMode}
+                durationSeconds={video.durationSeconds}
+                subtitles={video.subtitles}
+                introStart={video.introStart}
+                introEnd={video.introEnd}
+                outroStart={video.outroStart}
+                initialSubtitleSource={video.initialSubtitleSource}
+                initialSubtitleIndex={video.initialSubtitleIndex}
+                initialAudioLanguage={video.initialAudioLanguage}
+                initialAudioTitle={video.initialAudioTitle}
+                watchPartySync={watchPartySyncProp}
+              />
+            )}
+            {/* Floats over the video instead of sitting in its own row below it — see design.html. */}
+            {partyId && !partyLoadFailed && room && (
+              <div className="pointer-events-none absolute right-3 top-3 z-10 max-w-[70%] sm:max-w-[45%]">
+                <div className="pointer-events-auto">
+                  <WatchPartyVideoGrid />
+                </div>
               </div>
             )}
           </div>
-        )}
-      </section>
 
-      {video.seekMode === "raw" ? (
-        <DesktopAppRequiredNotice title={video.title ?? "This video"} />
-      ) : (
-        <VideoPlayer
-          fileId={video.fileId}
-          title={video.title!}
-          backHref={video.backHref}
-          parentFolderId={video.parentFolderId}
-          nextFileId={video.nextFileId}
-          previousFileId={video.previousFileId}
-          episodes={video.episodes}
-          progressByFileId={video.progressByFileId}
-          initialPositionSeconds={video.initialPositionSeconds}
-          initialCompleted={video.initialCompleted}
-          seekMode={video.seekMode}
-          durationSeconds={video.durationSeconds}
-          subtitles={video.subtitles}
-          introStart={video.introStart}
-          introEnd={video.introEnd}
-          outroStart={video.outroStart}
-          initialSubtitleSource={video.initialSubtitleSource}
-          initialSubtitleIndex={video.initialSubtitleIndex}
-          initialAudioLanguage={video.initialAudioLanguage}
-          initialAudioTitle={video.initialAudioTitle}
-          watchPartySync={watchPartySyncProp}
-        />
-      )}
+          {partyId && !partyLoadFailed && (
+            <PartySidePanel
+              collapsed={panelCollapsed}
+              onToggleCollapsed={() => setPanelCollapsed((value) => !value)}
+              room={room}
+              connectionState={connectionState}
+              syncEnabled={syncEnabled}
+              micEnabled={micEnabled}
+              audioReady={audioReady}
+              cameraEnabled={cameraEnabled}
+              onToggleMic={handleToggleMic}
+              onEnablePartyAudio={handleEnablePartyAudio}
+              onToggleCamera={handleToggleCamera}
+              participants={participants}
+              backendByIdentity={backendByIdentity}
+              isHost={isHost}
+              grantControl={grantControl}
+            />
+          )}
+        </div>
+      </PartyRoomProvider>
+    </div>
+  );
+}
+
+/** Only mounts the LiveKit room context (and its single audio renderer) once, for whichever of the
+ * video's floating camera strip / the side panel's chat happen to need it — avoids double-mounting
+ * RoomAudioRenderer across the two. */
+function PartyRoomProvider({ room, children }: { room: Room | null; children: ReactNode }) {
+  if (!room) return <>{children}</>;
+  return (
+    <RoomContext.Provider value={room}>
+      <RoomAudioRenderer />
+      {children}
+    </RoomContext.Provider>
+  );
+}
+
+type PartySidePanelProps = {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  room: Room | null;
+  connectionState: ConnectionState;
+  syncEnabled: boolean;
+  micEnabled: boolean;
+  audioReady: boolean;
+  cameraEnabled: boolean;
+  onToggleMic: () => void;
+  onEnablePartyAudio: () => void;
+  onToggleCamera: () => void;
+  participants: PartyParticipant[];
+  backendByIdentity: Map<string, WatchPartyParticipant>;
+  isHost: boolean;
+  grantControl: ReturnType<typeof useGrantWatchPartyControl>;
+}
+
+/** Docked side panel that narrows the video instead of covering or stacking below it, collapsible
+ * to a thin edge pill — see design.html's desktop/web layout. */
+function PartySidePanel(props: PartySidePanelProps) {
+  const {
+    collapsed,
+    onToggleCollapsed,
+    room,
+    connectionState,
+    syncEnabled,
+    micEnabled,
+    audioReady,
+    cameraEnabled,
+    onToggleMic,
+    onEnablePartyAudio,
+    onToggleCamera,
+    participants,
+    backendByIdentity,
+    isHost,
+    grantControl,
+  } = props;
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        aria-label="Expand party panel"
+        className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-divider-strong bg-surface-hover px-3 py-2 text-xs font-semibold text-white/70 transition hover:text-white lg:w-11 lg:flex-col lg:gap-3 lg:py-4"
+      >
+        <svg viewBox="0 0 24 24" className="h-4 w-4 rotate-180 lg:rotate-90" fill="none" stroke="currentColor" strokeWidth={2}>
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+        <span className="lg:[writing-mode:vertical-rl]">Party · {participants.length}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex w-full shrink-0 flex-col gap-3 rounded-xl border border-divider-strong bg-surface-hover/70 p-3 lg:w-80">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-white/65">
+          <span>{connectionState}</span>
+          <span>•</span>
+          <span>
+            {participants.length} participant{participants.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <button type="button" onClick={onToggleCollapsed} aria-label="Collapse party panel" className="text-white/50 transition hover:text-white">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
+
+      {!syncEnabled && <p className="text-xs text-amber-300">Playback sync requires converted/native video</p>}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onToggleMic}
+          disabled={!room}
+          className="rounded-full border border-white/20 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {micEnabled ? "Mute Mic" : "Unmute Mic"}
+        </button>
+        <button
+          type="button"
+          onClick={onEnablePartyAudio}
+          disabled={!room}
+          className="rounded-full border border-white/20 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {audioReady ? "Party Audio Ready" : "Enable Party Audio"}
+        </button>
+        <button
+          type="button"
+          onClick={onToggleCamera}
+          disabled={!room}
+          className="rounded-full border border-white/20 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {cameraEnabled ? "Turn Off Camera" : "Turn On Camera"}
+        </button>
+      </div>
+
+      <div className="max-h-56 space-y-2 overflow-y-auto">
+        {participants.length === 0 ? (
+          <p className="text-sm text-white/45">Waiting for participants to join...</p>
+        ) : (
+          participants.map((participant) => {
+            const backend = backendByIdentity.get(participant.identity);
+            const hasControl = !!backend && backend.deviceRole === "main" && backend.canControlPlayback;
+            // Host can grant/revoke any other main-device guest — never a companion device
+            // (it can never hold control regardless, see setControlPermission server-side)
+            // and never itself.
+            const canGrantThisRow = isHost && !participant.isHost && backend && backend.deviceRole === "main";
+            return (
+              <div key={participant.identity} className="flex items-center justify-between gap-2 rounded-lg bg-white/5 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">
+                    {participant.name}
+                    {participant.isLocal ? " (You)" : ""}
+                  </p>
+                  <p className="truncate text-xs text-white/45">{participant.identity}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {participant.isHost && (
+                    <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-xs font-semibold text-emerald-200">
+                      Host
+                    </span>
+                  )}
+                  {!participant.isHost && hasControl && (
+                    <span className="rounded-full border border-sky-400/25 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">
+                      Can control
+                    </span>
+                  )}
+                  {canGrantThisRow && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        grantControl.mutate({
+                          userId: backend!.userId,
+                          deviceId: backend!.deviceId,
+                          grant: !backend!.canControlPlayback,
+                        })
+                      }
+                      disabled={grantControl.isPending}
+                      className="rounded-md border border-white/20 px-2 py-1 text-xs font-semibold text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {backend!.canControlPlayback ? "Revoke control" : "Grant control"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {room ? <WatchPartyChat /> : <p className="text-sm text-white/45">Joining party room...</p>}
     </div>
   );
 }

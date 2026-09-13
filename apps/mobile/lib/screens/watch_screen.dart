@@ -97,22 +97,19 @@ class _WatchScreenState extends State<WatchScreen> {
             player = CampfireVideoPlayer(key: ValueKey(widget.fileId), video: video, watchPartySync: _syncController);
           }
 
-          // Layered as a sibling on top of the player, not inside it — keeps Watch Party
-          // deliberately isolated from CampfireVideoPlayer/MediaKitVideoPlayer's own internals.
-          // The two only ever talk to each other through _syncController.
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              player,
-              WatchPartyOverlay(
-                key: ValueKey(widget.fileId),
-                fileId: video.fileId,
-                videoTitle: video.title,
-                partyId: _partyId,
-                onPartyIdChanged: _handlePartyIdChanged,
-                syncController: _syncController,
-              ),
-            ],
+          // Wraps the player rather than sitting beside it in a Stack — keeps Watch Party
+          // deliberately isolated from CampfireVideoPlayer/MediaKitVideoPlayer's own internals (the
+          // two only ever talk to each other through _syncController), while letting the overlay
+          // itself decide per-platform whether party chrome floats over the player or narrows it in
+          // a docked side panel (see watch_party_overlay.dart's usesDockedPartyPanel branch).
+          return WatchPartyOverlay(
+            key: ValueKey(widget.fileId),
+            fileId: video.fileId,
+            videoTitle: video.title,
+            partyId: _partyId,
+            onPartyIdChanged: _handlePartyIdChanged,
+            syncController: _syncController,
+            child: player,
           );
         },
       ),

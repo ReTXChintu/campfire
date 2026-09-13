@@ -19,3 +19,9 @@ bool get requiresMediaKitPlayer => !kIsWeb && Platform.isWindows;
 /// the backend) — everywhere else (iOS, web) falls back to the same "get the app" messaging web
 /// itself shows, since neither platform has a working native-MKV player wired up here.
 bool get supportsMkvPlayback => !kIsWeb && (Platform.isWindows || Platform.isAndroid);
+
+/// Windows gets a docked side panel that narrows the video instead of a modal bottom sheet
+/// overlaid on top of it — see design.html's desktop/web layout, mirrored in
+/// widgets/watch_party_overlay.dart. Phone/TV keep the modal-sheet presentation until their own
+/// design-system passes (mobile's collapsible peek pill, TV's docked rail).
+bool get usesDockedPartyPanel => !kIsWeb && Platform.isWindows;

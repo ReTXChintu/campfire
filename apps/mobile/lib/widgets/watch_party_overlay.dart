@@ -8,6 +8,7 @@ import 'package:livekit_client/livekit_client.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/watch_party.dart';
+import '../platform_info.dart';
 import '../services/device_id_service.dart';
 import '../services/watch_party_service.dart';
 import '../services/watch_party_sync_controller.dart';
@@ -19,15 +20,17 @@ import 'watch_party_video_grid.dart';
 /// Watch Party entry point + live session chrome — voice/video calling, text chat, the participant
 /// roster with host grant/revoke controls, and (via `syncController`) playback sync for whichever
 /// player widget WatchScreen currently has on screen. Deliberately separate from
-/// CampfireVideoPlayer/MediaKitVideoPlayer (rendered as a sibling overlay by watch_screen.dart) —
-/// this owns the LiveKit room/backend party session; the sync controller is the only channel
-/// through which a player widget and this overlay ever talk to each other.
+/// CampfireVideoPlayer/MediaKitVideoPlayer internals — it wraps the player as `child` so it can
+/// decide, per platform, whether party chrome floats over the video (phone/TV, a `Stack`) or narrows
+/// it as a docked side panel (Windows, a `Row` — see [usesDockedPartyPanel]); the sync controller
+/// remains the only channel through which the player widget and this overlay talk to each other.
 class WatchPartyOverlay extends StatefulWidget {
   final String fileId;
   final String? videoTitle;
   final String? partyId;
   final ValueChanged<String?> onPartyIdChanged;
   final WatchPartySyncController syncController;
+  final Widget child;
 
   const WatchPartyOverlay({
     super.key,
@@ -36,6 +39,7 @@ class WatchPartyOverlay extends StatefulWidget {
     required this.partyId,
     required this.onPartyIdChanged,
     required this.syncController,
+    required this.child,
   });
 
   @override
@@ -53,6 +57,9 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
   bool _micEnabled = false;
   bool _cameraEnabled = false;
   String? _error;
+  // Windows-only: the docked side panel collapses to a thin edge pill instead of a modal sheet —
+  // see [usesDockedPartyPanel].
+  bool _sidebarCollapsed = false;
 
   // Join/control-change toasts — see watch_party_toast.dart. `_hasSeenInitialRoster` guards
   // against firing a spurious "X joined" toast for every participant already in the party at the
@@ -476,9 +483,83 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
     );
   }
 
+  Widget _buildCameraStrip() {
+    final room = _room;
+    if (room == null) return const SizedBox.shrink();
+    return WatchPartyVideoGrid(room: room);
+  }
+
+  Widget _buildDockedSidebar() {
+    if (_sidebarCollapsed) {
+      return Material(
+        color: const Color(0xF2141414),
+        child: InkWell(
+          onTap: () => setState(() => _sidebarCollapsed = false),
+          child: Container(
+            width: 40,
+            alignment: Alignment.topCenter,
+            padding: const EdgeInsets.only(top: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.chevron_left, color: Colors.white70),
+                const SizedBox(height: 8),
+                Text('${_participants.length}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return SizedBox(
+      width: 340,
+      child: Material(
+        color: const Color(0xF2141414),
+        child: _PartyPanel(
+          room: _room!,
+          joined: _joined!,
+          participants: _participants,
+          micEnabled: _micEnabled,
+          cameraEnabled: _cameraEnabled,
+          onToggleMic: _toggleMic,
+          onToggleCamera: _toggleCamera,
+          onSetControl: _setControl,
+          onLeave: _handleLeavePressed,
+          onEnd: _handleEndPressed,
+          docked: true,
+          onCollapse: () => setState(() => _sidebarCollapsed = true),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top + 8;
+
+    // Windows: the party panel narrows the video as a persistent docked sidebar instead of
+    // floating a modal sheet on top of it — see design.html's desktop/web layout and
+    // [usesDockedPartyPanel]. Every other state (connecting, entry point, etc.) still floats over
+    // the video like phone/TV, since there's nothing to dock until a room is actually joined.
+    if (usesDockedPartyPanel && _room != null && _joined != null) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                widget.child,
+                Positioned(right: 12, top: 12, child: _buildCameraStrip()),
+                Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
+              ],
+            ),
+          ),
+          _buildDockedSidebar(),
+        ],
+      );
+    }
+
     late final Widget content;
 
     if (_room != null && _joined != null) {
@@ -544,7 +625,9 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
     // Toasts render above whichever branch above is showing, in their own top-right stack just
     // below it — see design.html's "never over playback controls" placement rule.
     return Stack(
+      fit: StackFit.expand,
       children: [
+        widget.child,
         content,
         Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
       ],
@@ -642,6 +725,11 @@ class _PartyPanel extends StatelessWidget {
   final void Function(WatchPartyParticipant participant, bool grant) onSetControl;
   final VoidCallback onLeave;
   final VoidCallback onEnd;
+  // Windows' docked sidebar (see usesDockedPartyPanel): no bottom-sheet SafeArea framing, a
+  // collapse chevron instead of drag-to-dismiss, and no inline camera grid since that floats over
+  // the video itself instead (see WatchPartyOverlay._buildCameraStrip).
+  final bool docked;
+  final VoidCallback? onCollapse;
 
   const _PartyPanel({
     required this.room,
@@ -654,149 +742,186 @@ class _PartyPanel extends StatelessWidget {
     required this.onSetControl,
     required this.onLeave,
     required this.onEnd,
+    this.docked = false,
+    this.onCollapse,
   });
+
+  Widget _buildRoster(BuildContext context) {
+    final isHost = joined.isHost && joined.deviceRole == 'main';
+    if (participants.isEmpty) {
+      return const Text('No participants yet.', style: TextStyle(color: Colors.white38, fontSize: 12));
+    }
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: participants.length,
+      itemBuilder: (context, index) {
+        final participant = participants[index];
+        final isSelf = participant.identity == joined.participantIdentity;
+        final canGrant = isHost && participant.role != 'host' && participant.deviceRole == 'main';
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${participant.deviceLabel}${isSelf ? ' (You)' : ''}',
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (participant.role == 'host')
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text('Host', style: TextStyle(color: Colors.greenAccent, fontSize: 11)),
+                )
+              else if (participant.canControlPlayback)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text('Can control', style: TextStyle(color: Colors.lightBlueAccent, fontSize: 11)),
+                ),
+              if (canGrant)
+                TextButton(
+                  onPressed: () => onSetControl(participant, !participant.canControlPlayback),
+                  child: Text(
+                    participant.canControlPlayback ? 'Revoke' : 'Grant',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final isHost = joined.isHost && joined.deviceRole == 'main';
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-        child: Column(
+
+    final header = Row(
+      children: [
+        if (docked)
+          IconButton(
+            icon: const Icon(Icons.chevron_right, color: Colors.white70),
+            tooltip: 'Collapse party panel',
+            onPressed: onCollapse,
+          ),
+        const Text('Watch Party', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+        const Spacer(),
+        IconButton(
+          icon: Icon(micEnabled ? Icons.mic : Icons.mic_off, color: Colors.white),
+          onPressed: onToggleMic,
+        ),
+        IconButton(
+          icon: Icon(cameraEnabled ? Icons.videocam : Icons.videocam_off, color: Colors.white),
+          onPressed: onToggleCamera,
+        ),
+      ],
+    );
+
+    // The only way anyone else finds out this party exists — mirrors WatchPage.tsx's
+    // "Party #{partyId}" badge + "Copy Invite Link" button. Mobile has no known web frontend URL to
+    // build a clickable link from (unlike web, which knows its own origin), so this shares the bare
+    // code instead — both this app's "Join Watch Party" dialog (see top_bar.dart) and web's
+    // paste-code field already accept a bare code directly, so nothing is lost by not having a full
+    // URL.
+    final codeChip = Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceHover,
+          border: Border.all(color: AppColors.dividerStrong),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                const Text('Watch Party', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                const Spacer(),
-                IconButton(
-                  icon: Icon(micEnabled ? Icons.mic : Icons.mic_off, color: Colors.white),
-                  onPressed: onToggleMic,
-                ),
-                IconButton(
-                  icon: Icon(cameraEnabled ? Icons.videocam : Icons.videocam_off, color: Colors.white),
-                  onPressed: onToggleCamera,
-                ),
-              ],
+            SelectableText(
+              joined.party.id,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 3),
             ),
-            const SizedBox(height: 4),
-            // The only way anyone else finds out this party exists — mirrors WatchPage.tsx's
-            // "Party #{partyId}" badge + "Copy Invite Link" button. Mobile has no known web
-            // frontend URL to build a clickable link from (unlike web, which knows its own
-            // origin), so this shares the bare code instead — both this app's "Join Watch Party"
-            // dialog (see top_bar.dart) and web's paste-code field already accept a bare code
-            // directly, so nothing is lost by not having a full URL.
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceHover,
-                  border: Border.all(color: AppColors.dividerStrong),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SelectableText(
-                      joined.party.id,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 3,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    IconButton(
-                      icon: const Icon(Icons.copy, color: Colors.white70, size: 16),
-                      visualDensity: VisualDensity.compact,
-                      tooltip: 'Copy party code',
-                      onPressed: () {
-                        Clipboard.setData(ClipboardData(text: joined.party.id));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Party code copied')),
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            WatchPartyVideoGrid(room: room),
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 180),
-              child: participants.isEmpty
-                  ? const Text('No participants yet.', style: TextStyle(color: Colors.white38, fontSize: 12))
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: participants.length,
-                      itemBuilder: (context, index) {
-                        final participant = participants[index];
-                        final isSelf = participant.identity == joined.participantIdentity;
-                        final canGrant = isHost && participant.role != 'host' && participant.deviceRole == 'main';
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '${participant.deviceLabel}${isSelf ? ' (You)' : ''}',
-                                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (participant.role == 'host')
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 4),
-                                  child: Text('Host', style: TextStyle(color: Colors.greenAccent, fontSize: 11)),
-                                )
-                              else if (participant.canControlPlayback)
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 4),
-                                  child: Text('Can control', style: TextStyle(color: Colors.lightBlueAccent, fontSize: 11)),
-                                ),
-                              if (canGrant)
-                                TextButton(
-                                  onPressed: () => onSetControl(participant, !participant.canControlPlayback),
-                                  child: Text(
-                                    participant.canControlPlayback ? 'Revoke' : 'Grant',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            const Divider(color: Colors.white24, height: 20),
-            WatchPartyChat(room: room),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(onPressed: onLeave, child: const Text('Leave Party')),
-                ),
-                if (isHost) ...[
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
-                      onPressed: onEnd,
-                      child: const Text('End Party'),
-                    ),
-                  ),
-                ],
-              ],
+            const SizedBox(width: 10),
+            IconButton(
+              icon: const Icon(Icons.copy, color: Colors.white70, size: 16),
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Copy party code',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: joined.party.id));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Party code copied')));
+              },
             ),
           ],
         ),
       ),
     );
+
+    final leaveEndRow = Row(
+      children: [
+        Expanded(child: OutlinedButton(onPressed: onLeave, child: const Text('Leave Party'))),
+        if (isHost) ...[
+          const SizedBox(width: 8),
+          Expanded(
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
+              onPressed: onEnd,
+              child: const Text('End Party'),
+            ),
+          ),
+        ],
+      ],
+    );
+
+    final Widget body;
+    if (docked) {
+      // Fills the full-height sidebar (see WatchPartyOverlay._buildDockedSidebar) — the camera grid
+      // floats over the video instead of sitting inline here, and the roster+chat area scrolls
+      // within whatever vertical space is left instead of being clipped to a fixed height.
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          const SizedBox(height: 4),
+          codeChip,
+          const SizedBox(height: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildRoster(context),
+                  const Divider(color: Colors.white24, height: 20),
+                  WatchPartyChat(room: room),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          leaveEndRow,
+        ],
+      );
+    } else {
+      body = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          const SizedBox(height: 4),
+          codeChip,
+          const SizedBox(height: 8),
+          WatchPartyVideoGrid(room: room),
+          const SizedBox(height: 8),
+          ConstrainedBox(constraints: const BoxConstraints(maxHeight: 180), child: _buildRoster(context)),
+          const Divider(color: Colors.white24, height: 20),
+          WatchPartyChat(room: room),
+          const SizedBox(height: 12),
+          leaveEndRow,
+        ],
+      );
+    }
+
+    if (docked) return Padding(padding: const EdgeInsets.all(16), child: body);
+    return SafeArea(top: false, child: Padding(padding: const EdgeInsets.all(16), child: body));
   }
 }
