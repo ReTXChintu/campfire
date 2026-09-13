@@ -60,6 +60,10 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
   // Windows-only: the docked side panel collapses to a thin edge pill instead of a modal sheet —
   // see [usesDockedPartyPanel].
   bool _sidebarCollapsed = false;
+  // Phone/TV (everywhere not using the Windows docked panel): a persistent bottom-right "peek" pill
+  // expands into the full panel in place instead of a blocking modal sheet — see design.html's
+  // mobile mockups. TV gets its own docked rail in a later phase; this is the fallback until then.
+  bool _peekExpanded = false;
 
   // Join/control-change toasts — see watch_party_toast.dart. `_hasSeenInitialRoster` guards
   // against firing a spurious "X joined" toast for every participant already in the party at the
@@ -402,32 +406,6 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
     }
   }
 
-  void _openPartyPanel() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xF2141414),
-      isScrollControlled: true,
-      builder: (context) => _PartyPanel(
-        room: _room!,
-        joined: _joined!,
-        participants: _participants,
-        micEnabled: _micEnabled,
-        cameraEnabled: _cameraEnabled,
-        onToggleMic: _toggleMic,
-        onToggleCamera: _toggleCamera,
-        onSetControl: _setControl,
-        onLeave: () {
-          Navigator.of(context).pop();
-          _handleLeavePressed();
-        },
-        onEnd: () {
-          Navigator.of(context).pop();
-          _handleEndPressed();
-        },
-      ),
-    );
-  }
-
   void _openStartOrJoinSheet() {
     final codeController = TextEditingController();
     showModalBottomSheet(
@@ -560,19 +538,56 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
       );
     }
 
+    // Phone/TV: a persistent bottom-right "peek" pill expands the panel in place — never a
+    // blocking modal — see design.html's mobile mockups. Rendered outside `content` (which stays
+    // top-right for every other state) since it's bottom-anchored and thumb-reachable instead.
+    if (_room != null && _joined != null) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          widget.child,
+          Positioned(right: 12, top: top, child: _buildCameraStrip()),
+          Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: _peekExpanded
+                ? SizedBox(
+                    width: 320,
+                    height: (MediaQuery.sizeOf(context).height * 0.72).clamp(320.0, 560.0),
+                    child: Material(
+                      color: const Color(0xF2141414),
+                      borderRadius: BorderRadius.circular(16),
+                      clipBehavior: Clip.antiAlias,
+                      child: _PartyPanel(
+                        room: _room!,
+                        joined: _joined!,
+                        participants: _participants,
+                        micEnabled: _micEnabled,
+                        cameraEnabled: _cameraEnabled,
+                        onToggleMic: _toggleMic,
+                        onToggleCamera: _toggleCamera,
+                        onSetControl: _setControl,
+                        onLeave: _handleLeavePressed,
+                        onEnd: _handleEndPressed,
+                        docked: true,
+                        onCollapse: () => setState(() => _peekExpanded = false),
+                      ),
+                    ),
+                  )
+                : _PeekPill(
+                    count: _participants.length,
+                    locked: !_computeCanControl(),
+                    onTap: () => setState(() => _peekExpanded = true),
+                  ),
+          ),
+        ],
+      );
+    }
+
     late final Widget content;
 
-    if (_room != null && _joined != null) {
-      content = Positioned(
-        top: top,
-        right: 8,
-        child: _RoundIconButton(
-          icon: Icons.groups,
-          label: '${_participants.length}',
-          onTap: _openPartyPanel,
-        ),
-      );
-    } else if (_connecting) {
+    if (_connecting) {
       content = Positioned(top: top, right: 8, child: const _RoundIconButton(icon: Icons.sync, onTap: null));
     } else if (_pendingChoice is WatchPartyJoinRequiresConfirmation) {
       final pending = _pendingChoice as WatchPartyJoinRequiresConfirmation;
@@ -637,10 +652,9 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
 
 class _RoundIconButton extends StatelessWidget {
   final IconData icon;
-  final String? label;
   final VoidCallback? onTap;
 
-  const _RoundIconButton({required this.icon, this.label, required this.onTap});
+  const _RoundIconButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -652,16 +666,44 @@ class _RoundIconButton extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: label == null
-              ? Icon(icon, color: Colors.white, size: 20)
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(icon, color: Colors.white, size: 18),
-                    const SizedBox(width: 4),
-                    Text(label!, style: const TextStyle(color: Colors.white, fontSize: 12)),
-                  ],
-                ),
+          child: Icon(icon, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
+}
+
+/// Persistent, thumb-reachable, docked bottom-right — expands the panel in place on tap, never a
+/// blocking modal. See design.html's mobile mockups (e.g. "3 in party").
+class _PeekPill extends StatelessWidget {
+  final int count;
+  final bool locked;
+  final VoidCallback onTap;
+
+  const _PeekPill({required this.count, required this.locked, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surfaceHover.withValues(alpha: 0.95),
+      borderRadius: BorderRadius.circular(100),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(100),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(100),
+            border: Border.all(color: AppColors.dividerStrong),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(locked ? Icons.lock_outline : Icons.groups, color: Colors.white, size: 16),
+              const SizedBox(width: 6),
+              Text('$count in party', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
+          ),
         ),
       ),
     );
@@ -725,9 +767,10 @@ class _PartyPanel extends StatelessWidget {
   final void Function(WatchPartyParticipant participant, bool grant) onSetControl;
   final VoidCallback onLeave;
   final VoidCallback onEnd;
-  // Windows' docked sidebar (see usesDockedPartyPanel): no bottom-sheet SafeArea framing, a
-  // collapse chevron instead of drag-to-dismiss, and no inline camera grid since that floats over
-  // the video itself instead (see WatchPartyOverlay._buildCameraStrip).
+  // True for both Windows' docked sidebar (see usesDockedPartyPanel) and phone's expanded peek
+  // popover (see _PeekPill) — neither is a bottom-sheet, so both skip the SafeArea framing, use a
+  // collapse chevron instead of drag-to-dismiss, and drop the inline camera grid since that floats
+  // over the video itself instead (see WatchPartyOverlay._buildCameraStrip).
   final bool docked;
   final VoidCallback? onCollapse;
 
