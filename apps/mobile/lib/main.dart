@@ -1,10 +1,13 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 import 'app_router.dart';
 import 'services/auth_service.dart';
+import 'services/media_session_service.dart';
 import 'services/token_store.dart';
 import 'theme/app_theme.dart';
 
@@ -20,6 +23,15 @@ void main() async {
   // before any Player() is constructed.
   MediaKit.ensureInitialized();
   WidgetsFlutterBinding.ensureInitialized();
+  // Windows only — lets MediaKitVideoPlayer's fullscreen button toggle the OS window itself
+  // (there's no other window-level fullscreen concept on desktop). No-op/unused on every other
+  // platform this app runs on (Android, and this build target in general).
+  if (!kIsWeb && Platform.isWindows) {
+    await windowManager.ensureInitialized();
+  }
+  // Android only (no-ops itself on every other platform) — see
+  // services/media_session_service.dart.
+  await MediaSessionService.init();
   if (kDebugMode && _debugToken.isNotEmpty) {
     await TokenStore.write(_debugToken);
   }

@@ -65,6 +65,18 @@ dependencies:
   # lib/widgets/update_banner.dart.
   url_launcher: ^6.3.1
 
+  # Windows-only fullscreen toggle for MediaKitVideoPlayer — Windows has no window-level fullscreen
+  # concept otherwise. No-ops harmlessly on other platforms.
+  window_manager: ^0.4.3
+  # Android: MediaSession (Bluetooth/earphone/smartwatch play-pause-skip + lock-screen "now
+  # playing") — see lib/services/media_session_service.dart.
+  audio_service: ^0.18.15
+  # Android: screen-brightness swipe gesture (left half of the player) — see
+  # widgets/campfire_video_player.dart / media_kit_video_player.dart.
+  screen_brightness: ^2.1.0
+  # Android: system media-volume swipe gesture (right half of the player).
+  volume_controller: ^3.3.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

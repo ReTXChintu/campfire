@@ -5,11 +5,16 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:screen_brightness/screen_brightness.dart';
+import 'package:volume_controller/volume_controller.dart';
+import 'package:window_manager/window_manager.dart';
 import '../config.dart';
 import '../models/catalog.dart';
 import '../models/watch_party.dart';
 import '../services/catalog_service.dart';
+import '../services/media_session_service.dart';
 import '../services/media_token_service.dart';
+import '../services/pip_service.dart';
 import '../services/quality_prefs_service.dart';
 import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
@@ -103,6 +108,17 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
   double _speed = 1;
 
+  // Windows only — toggles the OS window itself (there's no in-player "fullscreen" concept on
+  // desktop the way the web <video> element has one). Never true/used on any other platform.
+  bool _isFullscreen = false;
+
+  Future<void> _toggleFullscreen() async {
+    if (!Platform.isWindows) return;
+    final next = !_isFullscreen;
+    await windowManager.setFullScreen(next);
+    if (mounted) setState(() => _isFullscreen = next);
+  }
+
   // True while opening/seeking to a resume position (mount, or a quality-change reopen) is still
   // in flight. media_kit's position stream starts emitting ticks as soon as a Media is opened —
   // well before the compensating seek below actually lands — so without this guard, an early tick
@@ -138,6 +154,20 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // anything "failed". Doesn't lock play/pause — pausing locally is harmless, it just won't stick
   // once the next inbound sync arrives.
   bool get _locked => _syncEnabled && !(widget.watchPartySync?.canControl ?? false);
+
+  // Android brightness/volume swipe gestures — see campfire_video_player.dart's identical fields
+  // for the full rationale (app-window-only brightness, system volume with the OS's own HUD).
+  bool? _dragIsLeftSide;
+  double _dragAccumulatedDy = 0;
+  double? _dragStartBrightness;
+  double? _dragStartVolume;
+  double? _brightnessOverlay; // 0.0-1.0, null = hidden
+  Timer? _overlayHideTimer;
+
+  // PiP auto-enter — see services/pip_service.dart. Tracks whichever playing value was last told
+  // to native, so the playing-stream listener only calls the platform channel on an actual
+  // transition, not every emission.
+  bool _lastPipEligible = false;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -248,6 +278,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         setState(() => _position = p);
         _maybeSave();
         _maybeAutoAdvance();
+        MediaSessionService.updateState(playing: _playing, position: p, speed: _speed);
       }),
       _player.stream.duration.listen((d) {
         if (_duration == Duration.zero && d > Duration.zero) {
@@ -257,6 +288,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       }),
       _player.stream.playing.listen((p) {
         if (mounted) setState(() => _playing = p);
+        MediaSessionService.updateState(playing: p, position: _position, speed: _speed);
+        if (p != _lastPipEligible) {
+          _lastPipEligible = p;
+          PipService.setAutoEnterEnabled(p);
+        }
       }),
       _player.stream.buffering.listen((b) {
         if (!mounted) return;
@@ -296,6 +332,25 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     _bootstrap();
     _scheduleHide();
     widget.watchPartySync?.addListener(_onSyncControllerChanged);
+
+    // Android only (no-op elsewhere — MediaSessionService's handler is null on every other
+    // platform). onPlay/onPause reuse _togglePlay(), calling it only when the direction actually
+    // matches so a Bluetooth press can't double-toggle.
+    MediaSessionService.attach(
+      title: video.title,
+      duration: video.durationSeconds != null ? Duration(milliseconds: (video.durationSeconds! * 1000).round()) : null,
+      onPlay: () {
+        if (!_playing) _togglePlay();
+      },
+      onPause: () {
+        if (_playing) _togglePlay();
+      },
+      onSeek: (position) => _seekTo(position.inMilliseconds / 1000),
+      onSkipNext: video.nextFileId == null ? null : _goToNext,
+      onSkipPrevious: video.previousFileId == null
+          ? null
+          : () => context.pushReplacement('/watch/${video.previousFileId}'),
+    );
   }
 
   // Fires whenever the sync controller's enabled/canControl/inboundState changes — a new inbound
@@ -450,6 +505,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _autoStepUpTimer?.cancel();
+    _overlayHideTimer?.cancel();
     for (final sub in _subs) {
       sub.cancel();
     }
@@ -460,6 +516,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
     _player.dispose();
     widget.watchPartySync?.removeListener(_onSyncControllerChanged);
+    // Navigating back to the library should never leave the OS window stuck fullscreen.
+    if (_isFullscreen) windowManager.setFullScreen(false);
+    MediaSessionService.detach();
+    PipService.setAutoEnterEnabled(false);
+    if (Platform.isAndroid) ScreenBrightness().resetApplicationScreenBrightness().catchError((_) {});
     super.dispose();
   }
 
@@ -576,6 +637,55 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     // (see _selectedSubtitleTrack) rather than silently dropping back to none.
     await _player.setSubtitleTrack(_selectedSubtitleTrack);
     _resumeSeekComplete = true;
+  }
+
+  static const _dragFullRangePixels = 250.0; // full vertical drag distance for a 0.0 -> 1.0 sweep
+
+  void _handleVerticalDragStart(DragStartDetails details) {
+    final width = MediaQuery.sizeOf(context).width;
+    _dragIsLeftSide = details.localPosition.dx < width / 2;
+    _dragAccumulatedDy = 0;
+    _dragStartBrightness = null;
+    _dragStartVolume = null;
+    if (_dragIsLeftSide == true) {
+      ScreenBrightness().application.then((value) {
+        if (mounted) _dragStartBrightness = value;
+      }).catchError((_) {});
+    } else {
+      VolumeController.instance.getVolume().then((value) {
+        if (mounted) _dragStartVolume = value;
+      }).catchError((_) {});
+    }
+  }
+
+  void _handleVerticalDragUpdate(DragUpdateDetails details) {
+    _dragAccumulatedDy += details.delta.dy;
+    final fraction = (-_dragAccumulatedDy / _dragFullRangePixels).clamp(-1.0, 1.0);
+    if (_dragIsLeftSide == true) {
+      final start = _dragStartBrightness;
+      if (start == null) return; // still waiting on the initial value fetch — drop this update
+      final next = (start + fraction).clamp(0.0, 1.0);
+      ScreenBrightness().setApplicationScreenBrightness(next).catchError((_) {});
+      setState(() => _brightnessOverlay = next);
+      _scheduleHideOverlay();
+    } else if (_dragIsLeftSide == false) {
+      final start = _dragStartVolume;
+      if (start == null) return;
+      final next = (start + fraction).clamp(0.0, 1.0);
+      VolumeController.instance.setVolume(next);
+    }
+  }
+
+  void _handleVerticalDragEnd(DragEndDetails details) {
+    _dragIsLeftSide = null;
+    _scheduleHideOverlay();
+  }
+
+  void _scheduleHideOverlay() {
+    _overlayHideTimer?.cancel();
+    _overlayHideTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _brightnessOverlay = null);
+    });
   }
 
   void _skip(int deltaSeconds) {
@@ -730,12 +840,19 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           _togglePlay();
           return KeyEventResult.handled;
         }
+        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape && _isFullscreen) {
+          _toggleFullscreen();
+          return KeyEventResult.handled;
+        }
         return KeyEventResult.ignored;
       },
       child: GestureDetector(
       onTap: _showControls,
       onDoubleTapDown: (details) => _doubleTapLocalPosition = details.localPosition,
       onDoubleTap: _handleDoubleTap,
+      onVerticalDragStart: Platform.isAndroid ? _handleVerticalDragStart : null,
+      onVerticalDragUpdate: Platform.isAndroid ? _handleVerticalDragUpdate : null,
+      onVerticalDragEnd: Platform.isAndroid ? _handleVerticalDragEnd : null,
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
@@ -744,6 +861,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
             Video(controller: _controller, controls: NoVideoControls, fit: BoxFit.contain),
 
             if (_isBuffering) const Center(child: CircularProgressIndicator(color: Colors.white70)),
+
+            // Only brightness gets a custom HUD — the volume gesture leaves showSystemUI on for
+            // VolumeController.setVolume, so the OS's own volume overlay already shows for that one.
+            if (_brightnessOverlay != null)
+              Center(child: _gestureHud(Icons.brightness_6, _brightnessOverlay!)),
 
             if (!_playing && !_isBuffering)
               Center(
@@ -984,6 +1106,26 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                       _controlsVisible = true;
                                     }),
                                   ),
+                                if (Platform.isAndroid)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.picture_in_picture_alt,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    tooltip: 'Picture in picture',
+                                    onPressed: PipService.enterNow,
+                                  ),
+                                if (Platform.isWindows)
+                                  IconButton(
+                                    icon: Icon(
+                                      _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                    tooltip: _isFullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                                    onPressed: _toggleFullscreen,
+                                  ),
                               ],
                             ),
                           ],
@@ -1025,6 +1167,33 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+      ),
+    );
+  }
+
+  Widget _gestureHud(IconData icon, double value) {
+    return Container(
+      width: 120,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 22),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: value,
+              minHeight: 4,
+              backgroundColor: Colors.white24,
+              valueColor: const AlwaysStoppedAnimation(Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }

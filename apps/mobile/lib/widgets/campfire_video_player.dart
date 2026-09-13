@@ -1,13 +1,18 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:go_router/go_router.dart';
+import 'package:screen_brightness/screen_brightness.dart';
+import 'package:volume_controller/volume_controller.dart';
 import '../config.dart';
 import '../models/catalog.dart';
 import '../models/watch_party.dart';
 import '../services/catalog_service.dart';
+import '../services/media_session_service.dart';
 import '../services/media_token_service.dart';
+import '../services/pip_service.dart';
 import '../services/quality_prefs_service.dart';
 import '../services/vtt_parser.dart';
 import '../services/watch_party_sync_controller.dart';
@@ -113,6 +118,25 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   // once the next inbound sync arrives.
   bool get _locked => _syncEnabled && !(widget.watchPartySync?.canControl ?? false);
 
+  // Android brightness/volume swipe gestures — left half of the screen adjusts screen brightness
+  // (app-window-only, via ScreenBrightness().application/setApplicationScreenBrightness — no
+  // special Android permission needed, unlike the system-wide brightness setting), right half
+  // adjusts system media volume (VolumeController, with the OS's own volume HUD shown via
+  // showSystemUI so it matches what the physical volume buttons do — no separate custom overlay
+  // needed for that one). Both share the same outer GestureDetector as the existing
+  // double-tap-to-skip gesture; Flutter's gesture arena handles tap/double-tap/vertical-drag side
+  // by side without conflict.
+  bool? _dragIsLeftSide;
+  double _dragAccumulatedDy = 0;
+  double? _dragStartBrightness;
+  double? _dragStartVolume;
+  double? _brightnessOverlay; // 0.0-1.0, null = hidden
+  Timer? _overlayHideTimer;
+
+  // PiP auto-enter — see services/pip_service.dart. Tracks whichever playing value was last told
+  // to native, so _onTick only calls the platform channel on an actual transition, not every tick.
+  bool _lastPipEligible = false;
+
   // "auto" | "original" | "<height>" — mirrors QualitySelection on web (Dart has no union types).
   String _qualitySelection = 'auto';
   int? _autoResolvedHeight;
@@ -195,6 +219,26 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     _bootstrap();
     _scheduleHide();
     widget.watchPartySync?.addListener(_onSyncControllerChanged);
+
+    // Android only (no-op elsewhere — MediaSessionService's handler is null on every other
+    // platform) — lets Bluetooth earphones/smartwatches/the lock screen see this as "now playing"
+    // and control it. onPlay/onPause reuse _togglePlay(), calling it only when the direction
+    // actually matches so a Bluetooth press can't double-toggle.
+    MediaSessionService.attach(
+      title: video.title,
+      duration: video.durationSeconds != null ? Duration(milliseconds: (video.durationSeconds! * 1000).round()) : null,
+      onPlay: () {
+        if (!(_controller?.value.isPlaying ?? false)) _togglePlay();
+      },
+      onPause: () {
+        if (_controller?.value.isPlaying ?? false) _togglePlay();
+      },
+      onSeek: (position) => _seekTo(position.inMilliseconds / 1000),
+      onSkipNext: video.nextFileId == null ? null : _goToNext,
+      onSkipPrevious: video.previousFileId == null
+          ? null
+          : () => context.pushReplacement('/watch/${video.previousFileId}'),
+    );
   }
 
   // Fires whenever the sync controller's enabled/canControl/inboundState changes — a new inbound
@@ -299,11 +343,18 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _autoStepUpTimer?.cancel();
+    _overlayHideTimer?.cancel();
     _saveProgress();
     _restoreSystemChrome();
     _controller?.removeListener(_onTick);
     _controller?.dispose();
     widget.watchPartySync?.removeListener(_onSyncControllerChanged);
+    MediaSessionService.detach();
+    PipService.setAutoEnterEnabled(false);
+    // Leaving the player restores normal brightness rather than leaving the rest of the app
+    // dimmed/brightened by whatever the gesture last set (app-window-only override, see
+    // _handleVerticalDragUpdate — never touches the system-wide brightness setting).
+    if (Platform.isAndroid) ScreenBrightness().resetApplicationScreenBrightness().catchError((_) {});
     super.dispose();
   }
 
@@ -480,6 +531,13 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       _onAutoBufferingChanged(buffering);
     }
 
+    final isPlaying = controller.value.isPlaying;
+    MediaSessionService.updateState(playing: isPlaying, position: _absolutePosition, speed: _speed);
+    if (isPlaying != _lastPipEligible) {
+      _lastPipEligible = isPlaying;
+      PipService.setAutoEnterEnabled(isPlaying);
+    }
+
     final duration = controller.value.duration;
     if (!_endedHandled &&
         duration > Duration.zero &&
@@ -572,6 +630,55 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     } else {
       _togglePlay();
     }
+  }
+
+  static const _dragFullRangePixels = 250.0; // full vertical drag distance for a 0.0 -> 1.0 sweep
+
+  void _handleVerticalDragStart(DragStartDetails details) {
+    final width = MediaQuery.sizeOf(context).width;
+    _dragIsLeftSide = details.localPosition.dx < width / 2;
+    _dragAccumulatedDy = 0;
+    _dragStartBrightness = null;
+    _dragStartVolume = null;
+    if (_dragIsLeftSide == true) {
+      ScreenBrightness().application.then((value) {
+        if (mounted) _dragStartBrightness = value;
+      }).catchError((_) {});
+    } else {
+      VolumeController.instance.getVolume().then((value) {
+        if (mounted) _dragStartVolume = value;
+      }).catchError((_) {});
+    }
+  }
+
+  void _handleVerticalDragUpdate(DragUpdateDetails details) {
+    _dragAccumulatedDy += details.delta.dy;
+    final fraction = (-_dragAccumulatedDy / _dragFullRangePixels).clamp(-1.0, 1.0);
+    if (_dragIsLeftSide == true) {
+      final start = _dragStartBrightness;
+      if (start == null) return; // still waiting on the initial value fetch — drop this update
+      final next = (start + fraction).clamp(0.0, 1.0);
+      ScreenBrightness().setApplicationScreenBrightness(next).catchError((_) {});
+      setState(() => _brightnessOverlay = next);
+      _scheduleHideOverlay();
+    } else if (_dragIsLeftSide == false) {
+      final start = _dragStartVolume;
+      if (start == null) return;
+      final next = (start + fraction).clamp(0.0, 1.0);
+      VolumeController.instance.setVolume(next);
+    }
+  }
+
+  void _handleVerticalDragEnd(DragEndDetails details) {
+    _dragIsLeftSide = null;
+    _scheduleHideOverlay();
+  }
+
+  void _scheduleHideOverlay() {
+    _overlayHideTimer?.cancel();
+    _overlayHideTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _brightnessOverlay = null);
+    });
   }
 
   void _skip(int deltaSeconds) {
@@ -688,6 +795,9 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       onTap: _showControls,
       onDoubleTapDown: (details) => _doubleTapLocalPosition = details.localPosition,
       onDoubleTap: _handleDoubleTap,
+      onVerticalDragStart: Platform.isAndroid ? _handleVerticalDragStart : null,
+      onVerticalDragUpdate: Platform.isAndroid ? _handleVerticalDragUpdate : null,
+      onVerticalDragEnd: Platform.isAndroid ? _handleVerticalDragEnd : null,
       child: ColoredBox(
         color: Colors.black,
         child: Stack(
@@ -727,6 +837,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
               const Center(
                 child: CircularProgressIndicator(color: Colors.white70),
               ),
+
+            // Only brightness gets a custom HUD — the volume gesture leaves showSystemUI on for
+            // VolumeController.setVolume, so the OS's own volume overlay already shows for that one.
+            if (_brightnessOverlay != null)
+              Center(child: _gestureHud(Icons.brightness_6, _brightnessOverlay!)),
 
             if (!(_controller?.value.isPlaying ?? false) && !_isBuffering)
               Center(
@@ -1028,6 +1143,16 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                       _controlsVisible = true;
                                     }),
                                   ),
+                                if (Platform.isAndroid)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.picture_in_picture_alt,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    tooltip: 'Picture in picture',
+                                    onPressed: PipService.enterNow,
+                                  ),
                               ],
                             ),
                           ],
@@ -1076,6 +1201,33 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
             fontSize: 13,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _gestureHud(IconData icon, double value) {
+    return Container(
+      width: 120,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 22),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: value,
+              minHeight: 4,
+              backgroundColor: Colors.white24,
+              valueColor: const AlwaysStoppedAnimation(Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }

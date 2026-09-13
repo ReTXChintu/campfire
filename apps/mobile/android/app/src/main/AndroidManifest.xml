@@ -1,9 +1,20 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Declared here (not just in the debug/profile-only manifests Flutter's template ships,
          which get merged in automatically for those variants) because a release build only sees
          this main manifest — without it, every request from the release APK fails silently at
          the OS level with no network access at all, while debug/profile builds work fine. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- MediaSession (Bluetooth earphone/smartwatch play-pause-skip + lock-screen "now playing")
+         — see lib/services/media_session_service.dart. Required by the audio_service plugin
+         itself, not something requested at runtime. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
+    <!-- Android 13+ requires this for the media-session notification to show at all — requested
+         at runtime via permission_handler in MediaSessionService.init(). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <!-- Watch Party voice/video calling (LiveKit/flutter_webrtc) — requested at runtime via
          permission_handler before enabling the mic/camera, but still required here or the OS
@@ -39,7 +50,9 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
                  while the Flutter UI initializes. After that, this theme continues
@@ -55,6 +68,25 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- audio_service's MediaSession service + media-button receiver — see
+             lib/services/media_session_service.dart. MainActivity extends the plugin's own
+             AudioServiceActivity (see MainActivity.kt) to share its FlutterEngine, per the
+             plugin's own setup instructions. -->
+        <service android:name="com.ryanheise.audioservice.AudioService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="true" tools:ignore="Instantiatable">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+        <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+            android:exported="true" tools:ignore="Instantiatable">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
