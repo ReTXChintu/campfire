@@ -7,6 +7,7 @@ import VideoPlayer from "../components/VideoPlayer";
 import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
 import WatchPartyChat from "../components/WatchPartyChat";
 import WatchPartyVideoGrid from "../components/WatchPartyVideoGrid";
+import WatchPartyToastStack, { type WatchPartyToastData } from "../components/WatchPartyToast";
 import { useVideo } from "../hooks/useCatalog";
 import {
   leaveWatchParty,
@@ -162,6 +163,46 @@ export default function WatchPage() {
   useEffect(() => {
     controllerIdentitiesRef.current = controllerIdentities;
   }, [controllerIdentities]);
+
+  // Join / control-change toasts — diffs each new roster snapshot against the previous one. Mirrors
+  // apps/mobile/lib/widgets/watch_party_overlay.dart's `_diffParticipantsForToasts`.
+  const [toasts, setToasts] = useState<WatchPartyToastData[]>([]);
+  const nextToastIdRef = useRef(0);
+  const previousParticipantsRef = useRef<WatchPartyParticipant[] | null>(null);
+  const hasSeenInitialRosterRef = useRef(false);
+  const pushToast = useCallback((message: string, control = false) => {
+    const id = nextToastIdRef.current++;
+    setToasts((prev) => [...prev, { id, message, control }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, control ? 6000 : 4000);
+  }, []);
+  useEffect(() => {
+    previousParticipantsRef.current = null;
+    hasSeenInitialRosterRef.current = false;
+  }, [partyId]);
+  useEffect(() => {
+    const previous = previousParticipantsRef.current;
+    previousParticipantsRef.current = backendParticipants;
+    if (!hasSeenInitialRosterRef.current) {
+      hasSeenInitialRosterRef.current = true;
+      return;
+    }
+    if (!previous) return;
+    const previousIdentities = new Set(previous.map((p) => `${p.role}-${p.userId}-${p.deviceId}`));
+    for (const p of backendParticipants) {
+      if (!previousIdentities.has(`${p.role}-${p.userId}-${p.deviceId}`)) {
+        pushToast(`${p.deviceLabel} joined the party`);
+      }
+    }
+    const myIdentity = joinedTokenData?.participantIdentity;
+    if (!myIdentity) return;
+    const wasMine = previous.find((p) => `${p.role}-${p.userId}-${p.deviceId}` === myIdentity);
+    const isMine = backendParticipants.find((p) => `${p.role}-${p.userId}-${p.deviceId}` === myIdentity);
+    if (wasMine && isMine && wasMine.canControlPlayback !== isMine.canControlPlayback) {
+      pushToast(isMine.canControlPlayback ? "You were granted control" : "Your control was revoked", true);
+    }
+  }, [backendParticipants, joinedTokenData?.participantIdentity, pushToast]);
 
   const syncParticipants = useCallback((nextRoom: Room | null, hostIdentity: string | null) => {
     if (!nextRoom) {
@@ -413,6 +454,7 @@ export default function WatchPage() {
 
   return (
     <div className="w-full flex-1 px-4 py-6 sm:px-6">
+      <WatchPartyToastStack toasts={toasts} />
       <section className="mb-6 rounded-2xl border border-white/10 bg-surface/70 p-4 backdrop-blur">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-2xl">
@@ -533,8 +575,20 @@ export default function WatchPage() {
             </div>
           ) : (
             <div className="grid gap-2 sm:min-w-96">
-              <div className="rounded-lg border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-200">
-                Party #{partyId}
+              <div className="flex w-fit items-center gap-2.5 rounded-lg border border-divider-strong bg-surface-hover px-3.5 py-2">
+                <span className="text-base font-bold tracking-[0.25em] text-white">{partyId}</span>
+                <button
+                  type="button"
+                  onClick={handleCopyInvite}
+                  disabled={!inviteLink}
+                  aria-label="Copy party code"
+                  className="text-white/60 transition hover:text-white disabled:opacity-40"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <rect x="9" y="9" width="12" height="12" rx="2" />
+                    <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+                  </svg>
+                </button>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button

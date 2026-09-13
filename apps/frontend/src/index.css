@@ -1,18 +1,24 @@
 @import "tailwindcss";
 
+/* Campfire design system (design.html) — Char/Smoke/Ember/Gold/Birch/Ash-red. Mirrored by hand in
+   apps/mobile/lib/theme/app_theme.dart's AppColors; keep both in sync when either changes. */
 :root {
-  --background: #0a0b0f;
-  --bg-elevated: #14161c;
-  --surface: #1c1f27;
-  --surface-hover: #252932;
-  --foreground: #f2efe9;
-  --text-secondary: #9a9ca8;
-  --text-tertiary: #5c5f6b;
-  --accent: #ff4d2e;
-  --accent-dim: #b5391f;
-  --amber: #ffb13c;
-  --live: #2ed47a;
-  --divider: #23262e;
+  --background: #0e0d0c;
+  --bg-elevated: #161412;
+  --surface: #1e1b18;
+  --surface-hover: #272320;
+  --foreground: #f1ece3;
+  --text-secondary: #b4ada3;
+  --text-tertiary: #7a736a;
+  --accent: #ff6a3d;
+  --accent-dim: #b5451f;
+  --accent-soft: rgba(255, 106, 61, 0.16);
+  --amber: #ffb25e;
+  --live: #3fcb8e;
+  --danger: #e5645e;
+  --danger-soft: rgba(229, 100, 94, 0.14);
+  --divider: #262220;
+  --divider-strong: #353330;
 }
 
 @theme inline {
@@ -24,9 +30,13 @@
   --color-text-tertiary: var(--text-tertiary);
   --color-accent: var(--accent);
   --color-accent-dim: var(--accent-dim);
+  --color-accent-soft: var(--accent-soft);
   --color-amber: var(--amber);
   --color-live: var(--live);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --color-divider: var(--divider);
+  --color-divider-strong: var(--divider-strong);
   --font-sans: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
   --font-display: "Bebas Neue", sans-serif;

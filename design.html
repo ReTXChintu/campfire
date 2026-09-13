@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Campfire — Player &amp; Watch Party Design System</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#0E0D0C;
+    --bg-1:#161412;
+    --bg-2:#1E1B18;
+    --bg-3:#272320;
+    --border:rgba(255,246,235,0.09);
+    --border-strong:rgba(255,246,235,0.16);
+    --text:#F1ECE3;
+    --text-dim:#B4ADA3;
+    --text-faint:#7A736A;
+    --ember:#FF6A3D;
+    --ember-soft:rgba(255,106,61,0.16);
+    --gold:#FFB25E;
+    --danger:#E5645E;
+    --danger-soft:rgba(229,100,94,0.14);
+    --live:#3FCB8E;
+    --radius-s:6px;
+    --radius-m:10px;
+    --radius-l:16px;
+    --sans: "Segoe UI", Inter, -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--bg); color:var(--text); font-family:var(--sans);
+    line-height:1.5; font-size:15px;
+  }
+  a{color:inherit;}
+  .layout{display:flex; max-width:1400px; margin:0 auto;}
+  nav.toc{
+    position:sticky; top:0; height:100vh; width:230px; flex:none;
+    padding:36px 18px 36px 28px; overflow-y:auto; border-right:1px solid var(--border);
+  }
+  nav.toc .brand{display:flex; align-items:center; gap:8px; margin-bottom:28px;}
+  nav.toc .flame{width:16px; height:16px; border-radius:50% 50% 50% 4px; background:linear-gradient(160deg,var(--gold),var(--ember)); transform:rotate(45deg);}
+  nav.toc .brand-name{font-weight:600; letter-spacing:0.2px;}
+  nav.toc ol{list-style:none; margin:0; padding:0; counter-reset:sec;}
+  nav.toc li{counter-increment:sec; margin-bottom:2px;}
+  nav.toc li a{
+    display:block; padding:7px 8px; border-radius:var(--radius-s); font-size:13px; color:var(--text-dim);
+    text-decoration:none;
+  }
+  nav.toc li a::before{content: counter(sec) "  "; color:var(--text-faint);}
+  nav.toc li a:hover{background:var(--bg-1); color:var(--text);}
+  main{flex:1; min-width:0; padding:0 56px 120px 56px;}
+
+  .hero{
+    padding:72px 0 40px 0; position:relative; overflow:hidden;
+  }
+  .hero::before{
+    content:""; position:absolute; top:-160px; left:-80px; width:520px; height:420px; border-radius:50%;
+    background:radial-gradient(circle, rgba(255,106,61,0.20), rgba(255,106,61,0) 70%); pointer-events:none;
+  }
+  .hero h1{font-size:38px; margin:0 0 14px 0; max-width:640px; position:relative; font-weight:650; letter-spacing:-0.3px;}
+  .hero p{font-size:16px; color:var(--text-dim); max-width:560px; position:relative;}
+  .hero .meta{margin-top:22px; display:flex; gap:10px; flex-wrap:wrap; position:relative;}
+
+  .tag{
+    display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding:4px 10px;
+    border-radius:100px; border:1px solid var(--border-strong); color:var(--text-dim); background:var(--bg-1);
+  }
+  .tag.live{border-color:rgba(63,203,142,0.5); color:var(--live);}
+  .tag.locked{border-color:rgba(229,100,94,0.5); color:var(--danger);}
+  .tag.ember{border-color:rgba(255,106,61,0.5); color:var(--ember);}
+  .tag.tv{border-color:var(--border-strong); color:var(--text-dim);}
+
+  section{padding:56px 0; border-top:1px solid var(--border);}
+  section:first-of-type{border-top:none;}
+  h2{font-size:22px; margin:0 0 6px 0; padding-left:14px; border-left:3px solid var(--ember); font-weight:600;}
+  h3{font-size:15px; margin:36px 0 14px 0; color:var(--text-dim); font-weight:600; text-transform:none;}
+  .section-intro{color:var(--text-dim); max-width:680px; margin:14px 0 30px 17px; font-size:14.5px;}
+
+  /* ---- tokens ---- */
+  .swatches{display:flex; gap:14px; flex-wrap:wrap; margin-left:17px;}
+  .swatch{width:150px;}
+  .swatch .chip{height:64px; border-radius:var(--radius-m); border:1px solid var(--border);}
+  .swatch .name{font-size:12.5px; margin-top:8px; font-weight:600;}
+  .swatch .hex{font-size:11.5px; color:var(--text-faint);}
+
+  .type-scale{margin-left:17px;}
+  .type-row{display:flex; align-items:baseline; gap:18px; padding:10px 0; border-bottom:1px solid var(--border);}
+  .type-row .label{width:180px; font-size:12px; color:var(--text-faint); flex:none;}
+  .type-row .sample{color:var(--text);}
+
+  .elev-row{display:flex; gap:16px; margin-left:17px; flex-wrap:wrap;}
+  .elev-card{width:210px; padding:16px; border-radius:var(--radius-m); font-size:12.5px; color:var(--text-dim);}
+  .elev-card b{display:block; color:var(--text); font-size:13px; margin-bottom:4px;}
+  .e0{background:#000;}
+  .e1{background:linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.85));}
+  .e2{background:var(--bg-2); border:1px solid var(--border);}
+  .e3{background:rgba(20,18,16,0.72); border:1px solid var(--border-strong); backdrop-filter:blur(14px);}
+  .e4{background:var(--bg-3); border:1px solid var(--border-strong); box-shadow:0 12px 30px rgba(0,0,0,0.5);}
+
+  /* ---- icon system ---- */
+  .ic{display:inline-flex; position:relative; width:1em; height:1em; align-items:center; justify-content:center;}
+  .ic-play{width:0;height:0;border-top:.42em solid transparent;border-bottom:.42em solid transparent;border-left:.66em solid currentColor;margin-left:.14em;}
+  .ic-pause::before,.ic-pause::after{content:"";position:absolute;top:0;width:.26em;height:1em;background:currentColor;border-radius:1px;}
+  .ic-pause::before{left:.12em;} .ic-pause::after{right:.12em;}
+  .ic-mic{width:.5em;height:.78em;border-radius:.28em;background:currentColor;}
+  .ic-mic::after{content:"";position:absolute;bottom:-.36em;left:50%;transform:translateX(-50%);width:.72em;height:.34em;border:.09em solid currentColor;border-top:none;border-radius:0 0 .5em .5em;}
+  .ic-mic.off::before{content:"";position:absolute;top:-.08em;left:-.15em;width:1.3em;height:.1em;background:currentColor;transform:rotate(45deg);transform-origin:left top;}
+  .ic-cam{width:.86em;height:.58em;border-radius:.14em;background:currentColor;}
+  .ic-cam::after{content:"";position:absolute;top:50%;left:.66em;transform:translateY(-50%);width:.34em;height:.34em;border-radius:50%;border:.07em solid currentColor;}
+  .ic-cam.off::before{content:"";position:absolute;top:-.08em;left:-.12em;width:1.3em;height:.1em;background:currentColor;transform:rotate(40deg);transform-origin:left top;}
+  .ic-chat{width:1em;height:.72em;border-radius:.22em;background:currentColor;}
+  .ic-chat::after{content:"";position:absolute;bottom:-.24em;left:.16em;width:0;height:0;border-top:.26em solid currentColor;border-right:.26em solid transparent;}
+  .ic-lock{width:.66em;height:.5em;background:currentColor;border-radius:.08em;margin-top:.32em;}
+  .ic-lock::before{content:"";position:absolute;top:-.34em;left:50%;transform:translateX(-50%);width:.48em;height:.46em;border:.09em solid currentColor;border-bottom:none;border-radius:.34em .34em 0 0;}
+  .ic-users{width:1em;height:.68em;}
+  .ic-users::before,.ic-users::after{content:"";position:absolute;bottom:0;width:.58em;height:.58em;border-radius:50%;background:currentColor;}
+  .ic-users::before{left:0; opacity:.5;} .ic-users::after{right:0;}
+  .ic-close::before,.ic-close::after{content:"";position:absolute;top:50%;left:0;width:1em;height:.11em;background:currentColor;}
+  .ic-close::before{transform:rotate(45deg);} .ic-close::after{transform:rotate(-45deg);}
+  .ic-search{width:.6em;height:.6em;border:.11em solid currentColor;border-radius:50%;}
+  .ic-search::after{content:"";position:absolute;bottom:-.18em;right:-.18em;width:.42em;height:.11em;background:currentColor;transform:rotate(45deg);}
+  .ic-copy{width:.62em;height:.72em;border:.09em solid currentColor;border-radius:.08em;}
+  .ic-copy::after{content:"";position:absolute;top:-.14em;left:-.14em;width:.62em;height:.72em;border:.09em solid currentColor;border-radius:.08em;background:var(--bg-3);}
+  .ic-flame{width:.7em;height:.9em;border-radius:50% 50% 50% 8%; background:linear-gradient(160deg,var(--gold),var(--ember)); transform:rotate(45deg);}
+
+  /* ---- component demos ---- */
+  .comp-row{display:flex; gap:22px; flex-wrap:wrap; margin-left:17px; align-items:flex-start;}
+  .comp-card{background:var(--bg-1); border:1px solid var(--border); border-radius:var(--radius-m); padding:18px; }
+  .comp-card .cap{font-size:12px; color:var(--text-faint); margin-top:12px;}
+
+  .btn{display:inline-flex; align-items:center; gap:8px; padding:9px 16px; border-radius:100px; font-size:13.5px; font-weight:600; border:1px solid transparent; cursor:default;}
+  .btn.primary{background:var(--ember); color:#1A0D06;}
+  .btn.secondary{background:var(--bg-3); color:var(--text); border-color:var(--border-strong);}
+  .btn.ghost{background:transparent; color:var(--text-dim); border-color:var(--border-strong);}
+  .btn.danger-outline{background:transparent; color:var(--danger); border-color:rgba(229,100,94,0.5);}
+
+  .icon-btn{width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:transparent; color:var(--text); font-size:15px; position:relative;}
+  .icon-btn.tv{width:56px; height:56px; font-size:22px; background:rgba(255,255,255,0.06);}
+  .icon-btn.sm{width:28px;height:28px;font-size:12px;}
+  .icon-btn.focused{outline:3px solid var(--gold); outline-offset:3px; box-shadow:0 0 0 7px rgba(255,178,94,0.22); background:rgba(255,255,255,0.1);}
+  .icon-btn:hover{background:rgba(255,255,255,0.08);}
+
+  .avatar{border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; color:#1A0D06; flex:none;}
+  .av1{background:#FFB25E;} .av2{background:#8FD6B0;} .av3{background:#9DBBFF;} .av4{background:#E0A7FF;} .av5{background:#FF8A8A;}
+
+  .cam-tile{width:118px; border-radius:var(--radius-m); overflow:hidden; background:var(--bg-2); border:1px solid var(--border); position:relative;}
+  .cam-tile .frame{height:82px; display:flex; align-items:center; justify-content:center;}
+  .cam-tile .frame .avatar{width:44px;height:44px;font-size:16px;}
+  .cam-tile .label{position:absolute; bottom:6px; left:7px; font-size:11px; background:rgba(0,0,0,0.55); padding:2px 6px; border-radius:5px; display:flex; align-items:center; gap:4px;}
+  .cam-tile .badge{position:absolute; top:6px; left:7px; font-size:9.5px; background:var(--ember); color:#1A0D06; font-weight:700; padding:2px 6px; border-radius:5px;}
+  .cam-tile.speaking{border-color:var(--ember); box-shadow:0 0 0 1px var(--ember);}
+  .cam-tile .mute-badge{position:absolute; bottom:6px; right:7px; width:18px; height:18px; border-radius:50%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; font-size:9px;}
+
+  .roster-row{display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--border); font-size:13px;}
+  .roster-row .avatar{width:30px;height:30px;font-size:12px;}
+  .roster-row .who{flex:1; min-width:0;}
+  .roster-row .who .name{font-weight:600; display:flex; align-items:center; gap:6px;}
+  .roster-row .who .role{font-size:11.5px; color:var(--text-faint);}
+  .roster-row .status{display:flex; gap:5px; color:var(--text-faint); font-size:11px;}
+
+  .lock-banner{display:flex; align-items:center; gap:10px; background:var(--bg-3); border:1px solid var(--border-strong); border-left:3px solid var(--danger); border-radius:var(--radius-m); padding:11px 14px; font-size:12.5px;}
+  .lock-banner .txt{flex:1;}
+  .lock-banner .txt b{display:block; font-size:13px; margin-bottom:1px;}
+
+  .toast{display:flex; align-items:center; gap:10px; background:var(--bg-3); border:1px solid var(--border-strong); border-radius:var(--radius-m); padding:10px 14px; font-size:12.5px; box-shadow:0 10px 24px rgba(0,0,0,0.4); border-left:3px solid var(--text-faint);}
+  .toast.control{border-left-color:var(--ember);}
+
+  .code-chip{display:inline-flex; align-items:center; gap:12px; background:var(--bg-3); border:1px solid var(--border-strong); border-radius:var(--radius-m); padding:10px 16px;}
+  .code-chip .code{font-size:20px; letter-spacing:4px; font-weight:700;}
+
+  .chat-msg{display:flex; gap:8px; margin-bottom:9px; font-size:12px;}
+  .chat-msg .avatar{width:22px;height:22px;font-size:9.5px;}
+  .chat-msg .name{font-weight:700; margin-right:5px;}
+  .chat-msg .bubble{color:var(--text-dim);}
+
+  /* ---- device frames ---- */
+  .screen-block{margin:26px 0 56px 17px;}
+  .screen-flex{display:flex; gap:38px; flex-wrap:wrap; align-items:flex-start;}
+  .frame-wrap{display:flex; flex-direction:column; align-items:flex-start; gap:10px;}
+  .frame-head{display:flex; align-items:center; gap:8px;}
+  .frame-title{font-weight:600; font-size:13.5px;}
+
+  .video-surface{
+    position:absolute; inset:0; background:
+      repeating-linear-gradient(135deg, #1c1a18 0 2px, #171512 2px 40px);
+  }
+  .video-surface::after{
+    content:"video surface"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:rgba(255,246,235,0.13); font-size:11px; letter-spacing:1px;
+  }
+
+  .scrub{height:4px; border-radius:3px; background:rgba(255,255,255,0.22); position:relative; margin-bottom:10px;}
+  .scrub .fill{position:absolute; left:0; top:0; bottom:0; background:var(--ember); border-radius:3px;}
+  .scrub .fill.locked{background:var(--text-faint);}
+  .scrub .handle{position:absolute; top:50%; width:10px; height:10px; border-radius:50%; background:var(--ember); transform:translate(-50%,-50%);}
+
+  .callout{position:absolute; width:20px; height:20px; border-radius:50%; background:var(--gold); color:#1A0D06; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; box-shadow:0 0 0 3px rgba(14,13,12,0.85); z-index:50;}
+  .legend{list-style:none; margin:0; padding:0; max-width:300px; font-size:12.5px; color:var(--text-dim);}
+  .legend li{display:flex; gap:8px; margin-bottom:7px;}
+  .legend .num{flex:none; width:18px; height:18px; border-radius:50%; background:var(--gold); color:#1A0D06; font-size:10.5px; font-weight:800; display:flex; align-items:center; justify-content:center; margin-top:1px;}
+
+  /* TV */
+  .tv-frame{width:640px; height:360px; border-radius:14px; padding:14px; background:#25211D; box-shadow:0 20px 40px rgba(0,0,0,0.5);}
+  .tv-screen{width:100%; height:100%; border-radius:4px; background:#000; position:relative; overflow:hidden; font-size:13px;}
+
+  /* Desktop */
+  .desk-frame{width:640px; border-radius:10px; overflow:hidden; border:1px solid var(--border-strong); box-shadow:0 20px 40px rgba(0,0,0,0.45); background:#1B1917;}
+  .desk-titlebar{height:30px; display:flex; align-items:center; padding:0 12px; gap:6px; background:#1B1917; border-bottom:1px solid var(--border);}
+  .desk-titlebar .dot{width:9px; height:9px; border-radius:50%; background:#3a3632;}
+  .desk-titlebar .url{margin-left:10px; font-size:10.5px; color:var(--text-faint); background:#131110; padding:3px 10px; border-radius:5px; flex:1; max-width:220px;}
+  .desk-screen{width:100%; height:360px; background:#000; position:relative; overflow:hidden; font-size:12.5px;}
+
+  /* Phone */
+  .phone-p{width:210px; height:430px; border-radius:26px; border:6px solid #25211D; background:#000; position:relative; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,0.45); font-size:11px;}
+  .phone-p::before{content:""; position:absolute; top:8px; left:50%; transform:translateX(-50%); width:50px; height:5px; border-radius:4px; background:#25211D; z-index:5;}
+  .phone-l{width:430px; height:210px; border-radius:22px; border:6px solid #25211D; background:#000; position:relative; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,0.45); font-size:11px;}
+
+  /* shared chrome */
+  .chrome-top{position:absolute; top:0; left:0; right:0; padding:12px 14px; background:linear-gradient(rgba(0,0,0,0.8), transparent); display:flex; justify-content:space-between; align-items:flex-start; z-index:10;}
+  .chrome-bottom{position:absolute; bottom:0; left:0; right:0; padding:14px; background:linear-gradient(transparent, rgba(0,0,0,0.9)); z-index:10;}
+  .ctrl-row{display:flex; align-items:center; gap:10px;}
+  .ctrl-row .spacer{flex:1;}
+  .title-block{color:#fff;}
+  .title-block .show{font-size:12px; color:var(--text-dim);}
+  .title-block .ep{font-weight:600; font-size:13.5px;}
+  .pill-badge{font-size:10px; padding:3px 8px; border-radius:100px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.18); display:flex; align-items:center; gap:4px;}
+
+  .party-panel{position:absolute; top:0; right:0; bottom:0; width:190px; background:rgba(20,17,15,0.86); backdrop-filter:blur(16px); border-left:1px solid var(--border-strong); display:flex; flex-direction:column; z-index:20;}
+  .party-panel .tabs{display:flex; border-bottom:1px solid var(--border); font-size:11px;}
+  .party-panel .tabs div{flex:1; text-align:center; padding:9px 0; color:var(--text-faint);}
+  .party-panel .tabs div.on{color:var(--text); border-bottom:2px solid var(--ember);}
+  .party-panel .body{flex:1; overflow:hidden; padding:10px;}
+  .party-panel .inputbar{padding:8px; border-top:1px solid var(--border); font-size:10.5px; color:var(--text-faint); display:flex; gap:6px; align-items:center;}
+  .party-panel .inputbar .box{flex:1; background:var(--bg-3); border-radius:100px; padding:6px 10px;}
+
+  .sheet{position:absolute; left:0; right:0; bottom:0; background:rgba(20,17,15,0.92); backdrop-filter:blur(16px); border-top-left-radius:16px; border-top-right-radius:16px; border-top:1px solid var(--border-strong); z-index:20;}
+  .sheet .grabber{width:32px; height:3px; background:var(--text-faint); border-radius:3px; margin:8px auto;}
+  .sheet .pill-collapsed{position:absolute; right:12px; bottom:12px; background:rgba(20,17,15,0.9); border:1px solid var(--border-strong); border-radius:100px; padding:6px 12px; font-size:10.5px; display:flex; align-items:center; gap:6px; z-index:20;}
+
+  .tv-rail{position:absolute; top:0; right:0; bottom:0; width:160px; background:rgba(20,17,15,0.9); backdrop-filter:blur(16px); border-left:1px solid var(--border-strong); display:flex; flex-direction:column; z-index:20; font-size:11px;}
+  .tv-rail .head{padding:10px; font-size:10px; color:var(--text-faint); border-bottom:1px solid var(--border);}
+
+  .cam-strip{position:absolute; top:12px; right:12px; display:flex; gap:6px; z-index:15;}
+  .cam-strip .mini{width:40px; height:40px; border-radius:8px; background:var(--bg-2); border:1px solid var(--border-strong); display:flex; align-items:center; justify-content:center; position:relative;}
+  .cam-strip .mini .avatar{width:22px;height:22px;font-size:9px;}
+  .cam-strip .mini.speaking{border-color:var(--ember);}
+
+  .grid-mini{display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:12px;}
+  .grid-mini .card{aspect-ratio:2/3; background:var(--bg-2); border-radius:6px; border:1px solid var(--border);}
+  .grid-mini .card.focused{outline:3px solid var(--gold); outline-offset:2px; transform:scale(1.05);}
+
+  table.notes{width:100%; border-collapse:collapse; margin-left:17px; font-size:13px; max-width:900px;}
+  table.notes th{text-align:left; font-size:11.5px; color:var(--text-faint); padding:6px 14px 10px 0; border-bottom:1px solid var(--border-strong); font-weight:600;}
+  table.notes td{padding:10px 14px 10px 0; border-bottom:1px solid var(--border); vertical-align:top; color:var(--text-dim);}
+  table.notes td:first-child{color:var(--text); font-weight:600; white-space:nowrap;}
+
+  .cut-list{margin-left:17px; display:flex; flex-direction:column; gap:14px; max-width:820px;}
+  .cut-item{display:flex; gap:14px; padding:16px; background:var(--bg-1); border:1px solid var(--border); border-radius:var(--radius-m);}
+  .cut-item .x{flex:none; width:26px; height:26px; border-radius:50%; background:var(--danger-soft); color:var(--danger); display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800;}
+  .cut-item b{display:block; margin-bottom:3px; font-size:14px;}
+  .cut-item p{margin:0; font-size:13px; color:var(--text-dim);}
+
+  .flow-map{margin-left:17px; overflow-x:auto;}
+  .flow-map svg{display:block;}
+
+  .platform-note{font-size:12px; color:var(--text-faint); margin-top:14px; max-width:600px; padding-left:17px; border-left:2px solid var(--border-strong); margin-left:17px;}
+  code{background:var(--bg-3); padding:1px 6px; border-radius:4px; font-size:12px;}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <div class="brand"><div class="flame"></div><div class="brand-name">Campfire</div></div>
+  <ol>
+    <li><a href="#foundations">Foundations</a></li>
+    <li><a href="#components">Components</a></li>
+    <li><a href="#journey">The full journey</a></li>
+    <li><a href="#tvflow">TV focus flow</a></li>
+    <li><a href="#tv">Android TV screens</a></li>
+    <li><a href="#desktop">Desktop &amp; web screens</a></li>
+    <li><a href="#mobile">Phone screens</a></li>
+    <li><a href="#notify">Joins &amp; control changes</a></li>
+    <li><a href="#cuts">Where we're cutting scope</a></li>
+  </ol>
+</nav>
+
+<main>
+
+  <div class="hero">
+    <h1>One player, one dark room, three ways to sit in it.</h1>
+    <p>A shared design system for solo playback and Watch Party across Android TV, Windows desktop, web, and phone — so camera tiles, chat, and roster controls stop competing with the movie for space.</p>
+    <div class="meta">
+      <span class="tag ember">Dark theme</span>
+      <span class="tag">D-pad · mouse · touch</span>
+      <span class="tag">Player + Watch Party</span>
+    </div>
+  </div>
+
+  <!-- ============ FOUNDATIONS ============ -->
+  <section id="foundations">
+    <h2>Foundations</h2>
+    <p class="section-intro">Campfire's existing dark theme stays, but it's under-specified today. These are the tokens every screen below is built from — a warm, low-saturation dark palette (not a cold near-black), one accent reserved for meaning rather than decoration, and elevation expressed through surface tone and blur rather than drop shadows, since panels genuinely sit on top of moving video.</p>
+
+    <h3>Color</h3>
+    <div class="swatches">
+      <div class="swatch"><div class="chip" style="background:#0E0D0C"></div><div class="name">Char (bg)</div><div class="hex">#0E0D0C</div></div>
+      <div class="swatch"><div class="chip" style="background:#1E1B18"></div><div class="name">Smoke (surface)</div><div class="hex">#1E1B18</div></div>
+      <div class="swatch"><div class="chip" style="background:#FF6A3D"></div><div class="name">Ember (accent)</div><div class="hex">#FF6A3D</div></div>
+      <div class="swatch"><div class="chip" style="background:#FFB25E"></div><div class="name">Gold (focus/live)</div><div class="hex">#FFB25E</div></div>
+      <div class="swatch"><div class="chip" style="background:#F1ECE3"></div><div class="name">Birch (text)</div><div class="hex">#F1ECE3</div></div>
+      <div class="swatch"><div class="chip" style="background:#E5645E"></div><div class="name">Ash-red (locked)</div><div class="hex">#E5645E</div></div>
+    </div>
+    <p class="section-intro" style="margin-left:17px;">Ember marks anything actionable or "live" (play button, start-party CTA, active-speaker ring). Gold is reserved for one job only: the TV focus ring, so focus never gets confused with a normal accent. The locked state uses a muted red hairline, not the whole banner in red — it's information, not a scolding.</p>
+
+    <h3>Type scale</h3>
+    <div class="type-scale">
+      <div class="type-row"><div class="label">Desktop / web body</div><div class="sample" style="font-size:15px;">14–15px — control labels, chat text</div></div>
+      <div class="type-row"><div class="label">Mobile body</div><div class="sample" style="font-size:14px;">14px, min tap target 44×44dp regardless of visual icon size</div></div>
+      <div class="type-row"><div class="label">TV body (10-foot)</div><div class="sample" style="font-size:22px;">22–24px minimum — nothing smaller ships on TV</div></div>
+      <div class="type-row"><div class="label">TV row / title</div><div class="sample" style="font-size:30px;">30–40px for episode titles and section headers</div></div>
+    </div>
+
+    <h3>Elevation &amp; blur</h3>
+    <div class="elev-row">
+      <div class="elev-card e0"><b>E0 — Video</b>Always full-bleed, always the base layer. Nothing permanently reduces its size except an intentional layout split on desktop (see below).</div>
+      <div class="elev-card e1"><b>E1 — Chrome scrim</b>Gradient only, no blur. Playback controls, back button, title.</div>
+      <div class="elev-card e2"><b>E2 — Floating controls</b>Camera mini-strip, PiP button. Flat surface, thin border, no shadow.</div>
+      <div class="elev-card e3"><b>E3 — Party surfaces</b>Chat panel, roster, bottom sheet. Blurred translucent surface so video is still sensed behind it.</div>
+      <div class="elev-card e4"><b>E4 — Transient</b>Toasts, the pairing/login layer. Opaque, drop shadow, always dismissible, never traps input.</div>
+    </div>
+  </section>
+
+  <!-- ============ COMPONENTS ============ -->
+  <section id="components">
+    <h2>Components</h2>
+    <p class="section-intro">The existing controls (play/pause, ±10s, scrub, speed, quality, subtitles, episode list, Skip Intro / Next Episode, back+title) keep their current behavior — they're re-skinned onto these tokens, not redesigned. What's new is the Watch Party layer: camera tile, roster row, the lock banner, join/control toasts, and the party code chip.</p>
+
+    <h3>Buttons &amp; icon buttons</h3>
+    <div class="comp-row">
+      <div class="comp-card">
+        <div style="display:flex; gap:10px;">
+          <span class="btn primary">Start Watch Party</span>
+          <span class="btn secondary">Join with code</span>
+          <span class="btn ghost">Cancel</span>
+        </div>
+        <div class="cap">Primary is reserved for one action per screen.</div>
+      </div>
+      <div class="comp-card">
+        <div style="display:flex; gap:10px; align-items:center;">
+          <span class="icon-btn"><span class="ic ic-play"></span></span>
+          <span class="icon-btn"><span class="ic ic-pause"></span></span>
+          <span class="icon-btn tv focused"><span class="ic ic-play"></span></span>
+        </div>
+        <div class="cap">Same 34px icon button on desktop/mobile; 56px + gold focus ring on TV.</div>
+      </div>
+    </div>
+
+    <h3>Camera tile &amp; roster</h3>
+    <div class="comp-row">
+      <div class="comp-card">
+        <div style="display:flex; gap:8px;">
+          <div class="cam-tile speaking"><div class="frame"><div class="avatar av1">JM</div></div><div class="badge">Host</div><div class="label">Jae</div></div>
+          <div class="cam-tile"><div class="frame"><div class="avatar av2">RT</div></div><div class="label">Rosa</div><div class="mute-badge"><span class="ic ic-mic off"></span></div></div>
+        </div>
+        <div class="cap">Only people with camera <i>on</i> get a tile. Camera-off participants live in the roster only — not as a black rectangle.</div>
+      </div>
+      <div class="comp-card" style="width:260px;">
+        <div class="roster-row"><div class="avatar av1">JM</div><div class="who"><div class="name">Jae <span class="pill-badge" style="padding:1px 6px;">Host</span></div></div><div class="status"><span class="ic ic-mic"></span></div></div>
+        <div class="roster-row"><div class="avatar av3">TV</div><div class="who"><div class="name">Living Room TV <span class="pill-badge" style="padding:1px 6px;">TV</span></div><div class="role">No camera on this device</div></div></div>
+        <div class="roster-row" style="border-bottom:none;"><div class="avatar av2">RT</div><div class="who"><div class="name">Rosa</div><div class="role">Locked</div></div><span class="btn ghost" style="padding:5px 10px; font-size:11.5px;">Grant control</span></div>
+      </div>
+    </div>
+
+    <h3>Lock banner, toast, party code</h3>
+    <div class="comp-row">
+      <div class="comp-card" style="width:280px;">
+        <div class="lock-banner"><span class="ic ic-lock" style="font-size:16px;"></span><div class="txt"><b>Jae has the remote</b>You can watch, chat, and talk — ask to take over anytime.</div></div>
+        <div class="cap">Explains the state in one line; never just greys out buttons silently.</div>
+      </div>
+      <div class="comp-card" style="width:240px;">
+        <div class="toast" style="margin-bottom:8px;"><div class="avatar av2" style="width:22px;height:22px;font-size:9px;">RT</div>Rosa joined the party</div>
+        <div class="toast control"><span class="ic ic-flame" style="font-size:13px;"></span>You were granted control</div>
+        <div class="cap">Top corner, auto-dismiss, never over the control row.</div>
+      </div>
+      <div class="comp-card">
+        <div class="code-chip"><div class="code">FOX 419</div><span class="icon-btn sm"><span class="ic ic-copy"></span></span></div>
+        <div class="cap">Wide letter-spacing for at-a-glance reading, not a monospace font.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ JOURNEY ============ -->
+  <section id="journey">
+    <h2>The full journey</h2>
+    <p class="section-intro">Login to logout, mapped once for every platform. Screens in <span style="color:var(--text);">white</span> get a full mockup further down because they're where the hard, platform-specific problems live. Screens in grey follow ordinary streaming-app conventions (a profile picker, a title page, an account screen) and are called out with layout notes rather than pixel mockups — happy to go deeper on any one of them.</p>
+    <div class="flow-map">
+      <svg width="1080" height="230" viewBox="0 0 1080 230" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#7A736A"/></marker>
+        </defs>
+        <!-- nodes -->
+        <g font-size="12" fill="#F1ECE3">
+          <!-- Login -->
+          <rect x="10" y="70" width="110" height="46" rx="8" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+          <text x="65" y="98" text-anchor="middle">Login</text>
+          <!-- Profile -->
+          <rect x="150" y="70" width="110" height="46" rx="8" fill="#161412" stroke="#3a352f"/>
+          <text x="205" y="98" text-anchor="middle" fill="#B4ADA3">Profile picker</text>
+          <!-- Home -->
+          <rect x="290" y="70" width="110" height="46" rx="8" fill="#161412" stroke="#3a352f"/>
+          <text x="345" y="98" text-anchor="middle" fill="#B4ADA3">Home / Library</text>
+          <!-- Detail -->
+          <rect x="430" y="70" width="110" height="46" rx="8" fill="#161412" stroke="#3a352f"/>
+          <text x="485" y="98" text-anchor="middle" fill="#B4ADA3">Title detail</text>
+          <!-- Player solo -->
+          <rect x="570" y="10" width="130" height="46" rx="8" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+          <text x="635" y="38" text-anchor="middle">Solo playback</text>
+          <!-- start party -->
+          <rect x="570" y="130" width="130" height="46" rx="8" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+          <text x="635" y="153" text-anchor="middle">Start party</text>
+          <text x="635" y="167" text-anchor="middle" font-size="10" fill="#7A736A">(from home or open video)</text>
+          <!-- join party -->
+          <rect x="290" y="150" width="130" height="46" rx="8" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+          <text x="355" y="173" text-anchor="middle">Join with code</text>
+          <text x="355" y="186" text-anchor="middle" font-size="10" fill="#7A736A">from Home</text>
+          <!-- party active -->
+          <rect x="740" y="70" width="150" height="46" rx="8" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+          <text x="815" y="93" text-anchor="middle">Party active</text>
+          <text x="815" y="107" text-anchor="middle" font-size="10" fill="#7A736A">host / guest · locked / control</text>
+          <!-- settings -->
+          <rect x="930" y="10" width="130" height="46" rx="8" fill="#161412" stroke="#3a352f"/>
+          <text x="995" y="38" text-anchor="middle" fill="#B4ADA3">Settings / account</text>
+          <!-- logout -->
+          <rect x="930" y="130" width="130" height="46" rx="8" fill="#161412" stroke="#3a352f"/>
+          <text x="995" y="158" text-anchor="middle" fill="#B4ADA3">Log out</text>
+
+          <!-- arrows -->
+          <path d="M120,93 H150" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M260,93 H290" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M400,93 H430" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M540,85 Q555,55 570,38" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M540,100 Q555,140 570,153" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M345,116 Q345,135 345,150" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M420,173 Q680,220 815,116" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M700,153 Q720,120 740,100" stroke="#7A736A" marker-end="url(#arrow)" fill="none"/>
+          <path d="M890,85 Q910,55 930,38" stroke="#7A736A" marker-end="url(#arrow)" fill="none" stroke-dasharray="3,3"/>
+          <path d="M890,105 Q910,135 930,150" stroke="#7A736A" marker-end="url(#arrow)" fill="none" stroke-dasharray="3,3"/>
+          <path d="M345,70 Q345,45 290,93" stroke="#3a352f" fill="none"/>
+        </g>
+      </svg>
+    </div>
+    <p class="platform-note">TV skips the profile-picker step's typing entirely — see the login mockup below. Mobile's "Home" is portrait; the moment a video starts, mobile rotates to the landscape player. Desktop/web share this exact map; the only structural difference is windowed vs. browser-tab chrome, noted per-screen below.</p>
+  </section>
+
+  <!-- ============ TV FOCUS FLOW ============ -->
+  <section id="tvflow">
+    <h2>TV focus flow</h2>
+    <p class="section-intro">The one truly new input problem: D-pad only, no pointer, no keyboard. Two focus "modes" — <b style="color:var(--text)">Watching</b> (chrome hidden, party rail closed) and <b style="color:var(--text)">Controlling</b> (chrome visible, focus lives in a control row or the party rail). Every path back to Watching is a single Back press away, and there's no control that can trap focus.</p>
+    <div class="flow-map">
+      <svg width="1000" height="430" viewBox="0 0 1000 430" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, sans-serif">
+        <defs>
+          <marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#FFB25E"/></marker>
+        </defs>
+        <!-- Watching state -->
+        <rect x="30" y="180" width="180" height="70" rx="10" fill="#0E0D0C" stroke="#F1ECE3" stroke-opacity=".4" stroke-dasharray="4,3"/>
+        <text x="120" y="210" text-anchor="middle" fill="#F1ECE3" font-size="13" font-weight="700">Watching</text>
+        <text x="120" y="228" text-anchor="middle" fill="#7A736A" font-size="10.5">chrome hidden, nothing focused</text>
+        <text x="120" y="242" text-anchor="middle" fill="#7A736A" font-size="10.5">any D-pad key wakes chrome</text>
+
+        <!-- control row -->
+        <rect x="290" y="30" width="230" height="56" rx="10" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+        <text x="405" y="53" text-anchor="middle" fill="#F1ECE3" font-size="12.5" font-weight="700">Playback control row</text>
+        <text x="405" y="70" text-anchor="middle" fill="#B4ADA3" font-size="10.5">back · play/pause · ±10s · speed · CC · episodes</text>
+
+        <!-- party toggle -->
+        <rect x="290" y="120" width="230" height="56" rx="10" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+        <text x="405" y="143" text-anchor="middle" fill="#F1ECE3" font-size="12.5" font-weight="700">Party icon (rightmost)</text>
+        <text x="405" y="160" text-anchor="middle" fill="#B4ADA3" font-size="10.5">shows live participant count</text>
+
+        <!-- rail: roster -->
+        <rect x="600" y="10" width="200" height="50" rx="10" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+        <text x="700" y="40" text-anchor="middle" fill="#F1ECE3" font-size="12">Party rail — Roster</text>
+
+        <!-- rail: reactions -->
+        <rect x="600" y="90" width="200" height="50" rx="10" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+        <text x="700" y="120" text-anchor="middle" fill="#F1ECE3" font-size="12">Party rail — Quick reactions</text>
+
+        <!-- rail: keyboard chat -->
+        <rect x="600" y="170" width="200" height="50" rx="10" fill="#1E1B18" stroke="#F1ECE3" stroke-opacity=".5"/>
+        <text x="700" y="200" text-anchor="middle" fill="#F1ECE3" font-size="12">Open full chat (on-screen kbd)</text>
+
+        <!-- lock note -->
+        <rect x="290" y="210" width="230" height="56" rx="10" fill="#1E1B18" stroke="#E5645E" stroke-opacity=".6"/>
+        <text x="405" y="233" text-anchor="middle" fill="#F1ECE3" font-size="12.5" font-weight="700">Locked control (if guest)</text>
+        <text x="405" y="250" text-anchor="middle" fill="#B4ADA3" font-size="10.5">OK shows who has the remote</text>
+
+        <!-- back stack -->
+        <rect x="30" y="330" width="720" height="70" rx="10" fill="none" stroke="#7A736A" stroke-dasharray="3,3"/>
+        <text x="45" y="352" fill="#7A736A" font-size="11" font-weight="700">Back-press stack (never a dead end):</text>
+        <text x="45" y="372" fill="#B4ADA3" font-size="11">Full chat/keyboard → Party rail → Chrome (Watching) → Exit player → Title detail</text>
+        <text x="45" y="390" fill="#7A736A" font-size="10">One Back press moves exactly one level up this stack, every time.</text>
+
+        <!-- arrows -->
+        <path d="M210,200 Q250,80 290,58" stroke="#FFB25E" fill="none" marker-end="url(#arrow2)"/>
+        <text x="235" y="130" fill="#FFB25E" font-size="10">any D-pad key</text>
+
+        <path d="M520,58 Q555,90 520,148" stroke="#FFB25E" fill="none" marker-end="url(#arrow2)"/>
+        <text x="500" y="100" fill="#FFB25E" font-size="10" transform="rotate(90 555 100)"></text>
+        <text x="528" y="105" fill="#7A736A" font-size="10">↑↓ moves within row</text>
+
+        <path d="M520,148 H600,35" stroke="#FFB25E" fill="none" marker-end="url(#arrow2)"/>
+        <text x="530" y="140" fill="#7A736A" font-size="10">OK / right → opens rail</text>
+
+        <path d="M700,60 Q700,75 700,90" stroke="#7A736A" fill="none" marker-end="url(#arrow2)"/>
+        <path d="M700,140 Q700,155 700,170" stroke="#7A736A" fill="none" marker-end="url(#arrow2)"/>
+        <text x="712" y="80" fill="#7A736A" font-size="10">↓ within rail</text>
+
+        <path d="M600,115 Q550,150 520,148" stroke="#7A736A" fill="none" marker-end="url(#arrow2)" stroke-dasharray="3,3"/>
+        <text x="530" y="180" fill="#7A736A" font-size="10">Back → closes rail, returns here</text>
+
+        <path d="M405,176 Q405,195 405,210" stroke="#7A736A" fill="none" marker-end="url(#arrow2)" stroke-dasharray="3,3"/>
+        <text x="415" y="196" fill="#7A736A" font-size="9.5">(guest, no control granted)</text>
+
+        <path d="M120,180 Q200,60 290,45" stroke="#7A736A" fill="none" marker-end="url(#arrow2)" stroke-dasharray="3,3"/>
+      </svg>
+    </div>
+    <p class="section-intro" style="margin-top:6px;">Why a rail instead of a modal: a modal chat window would steal focus from the video state entirely and risk a dead end if it doesn't map Back correctly. A docked rail keeps "you're still in the player" legible, and D-pad Left always walks focus back out of it toward the control row, never off the edge of the screen.</p>
+  </section>
+
+  <!-- ============ TV SCREENS ============ -->
+  <section id="tv">
+    <h2>Android TV</h2>
+    <p class="section-intro">10-foot legibility, D-pad only, and the one hard rule: <b style="color:var(--text)">TVs never show camera video.</b> A TV device shows up in the roster with a device icon, never as a black or placeholder tile.</p>
+
+    <h3>Login — pairing, not typing</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="tv-frame"><div class="tv-screen" style="display:flex; align-items:center; justify-content:center; gap:40px; background:#0E0D0C;">
+          <div style="width:120px; height:120px; background:#fff; border-radius:8px; display:grid; grid-template-columns:repeat(7,1fr); grid-template-rows:repeat(7,1fr); padding:8px; gap:2px;">
+            <div style="grid-column:1/3; grid-row:1/3; background:#000;"></div>
+            <div style="grid-column:6/8; grid-row:1/3; background:#000;"></div>
+            <div style="grid-column:1/3; grid-row:6/8; background:#000;"></div>
+            <div style="grid-column:4; grid-row:2; background:#000;"></div>
+            <div style="grid-column:5; grid-row:4; background:#000;"></div>
+            <div style="grid-column:3; grid-row:5; background:#000;"></div>
+            <div style="grid-column:6; grid-row:6; background:#000;"></div>
+            <div style="grid-column:4; grid-row:7; background:#000;"></div>
+          </div>
+          <div style="color:#F1ECE3;">
+            <div style="font-size:13px; color:#B4ADA3; margin-bottom:6px;">Scan, or go to campfire.tv/link and enter</div>
+            <div class="code-chip"><div class="code" style="font-size:24px;">7 F Q 2 M 1</div></div>
+          </div>
+        </div></div>
+        <div class="frame-title">TV login — pairing code (no on-screen keyboard needed)</div>
+      </div>
+    </div>
+    <p class="platform-note">Password entry with a D-pad is painful and a known source of TV-app abandonment — Campfire pairs the TV to an already-logged-in phone/browser session instead, the same pattern YouTube and most streaming TV apps use. An on-screen keyboard remains as a fallback only.</p>
+
+    <h3>Home — focus highlighting, extended to the player next</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="tv-frame"><div class="tv-screen">
+          <div style="padding:14px 16px 4px 16px; color:#F1ECE3; font-size:15px; font-weight:700;">Continue watching</div>
+          <div class="grid-mini">
+            <div class="card focused"></div><div class="card"></div><div class="card"></div><div class="card"></div>
+          </div>
+        </div></div>
+        <div class="frame-title">Existing pattern — kept as-is</div>
+      </div>
+    </div>
+
+    <h3>Solo playback</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="tv-frame"><div class="tv-screen">
+          <div class="video-surface"></div>
+          <div class="chrome-top">
+            <div class="title-block"><div class="show">Aurora Station</div><div class="ep">S1 · E4 — Signal Loss</div></div>
+          </div>
+          <div class="chrome-bottom">
+            <div class="scrub"><div class="fill" style="width:38%;"></div><div class="handle" style="left:38%;"></div></div>
+            <div class="ctrl-row">
+              <span class="icon-btn tv"><span class="ic ic-close" style="transform:rotate(90deg) scale(.7);"></span></span>
+              <span class="icon-btn tv focused"><span class="ic ic-pause"></span></span>
+              <span class="icon-btn tv" style="font-size:14px;">−10</span>
+              <span class="icon-btn tv" style="font-size:14px;">+10</span>
+              <span class="icon-btn tv" style="font-size:13px;">CC</span>
+              <span class="icon-btn tv"><span class="ic" style="font-size:16px;">☰</span></span>
+              <div class="spacer"></div>
+              <span class="pill-badge" style="font-size:11px; padding:6px 12px;">37:12 / 51:40</span>
+            </div>
+          </div>
+        </div></div>
+        <div class="frame-title">Solo — chrome hidden by default, one D-pad press reveals it</div>
+      </div>
+    </div>
+
+    <h3>Host, party active</h3>
+    <div class="screen-block">
+      <div class="screen-flex">
+        <div class="frame-wrap">
+          <div class="tv-frame"><div class="tv-screen">
+            <div class="video-surface"></div>
+            <div class="tv-rail">
+              <div class="head">Watching with 3</div>
+              <div style="padding:8px;">
+                <div class="roster-row" style="border-color:rgba(255,255,255,.08);"><div class="avatar av1" style="width:22px;height:22px;font-size:9px;">JM</div><div class="who"><div class="name" style="font-size:10.5px;">Jae (you) <span class="pill-badge" style="padding:0 5px; font-size:8px;">Host</span></div></div></div>
+                <div class="roster-row" style="border-color:rgba(255,255,255,.08);"><div class="avatar av2" style="width:22px;height:22px;font-size:9px;">RT</div><div class="who"><div class="name" style="font-size:10.5px;">Rosa</div></div></div>
+                <div class="roster-row" style="border-bottom:none;"><div class="avatar av3" style="width:22px;height:22px;font-size:9px; background:#9DBBFF;">📺</div><div class="who"><div class="name" style="font-size:10.5px;">Kitchen TV <span class="pill-badge" style="padding:0 5px; font-size:8px;">TV</span></div></div></div>
+              </div>
+              <div style="margin-top:auto; padding:10px; border-top:1px solid rgba(255,255,255,.08); display:flex; gap:6px; flex-wrap:wrap;">
+                <span class="pill-badge">😂</span><span class="pill-badge">🔥</span><span class="pill-badge focused" style="outline:2px solid var(--gold);">👏</span>
+              </div>
+            </div>
+            <div class="chrome-bottom" style="right:160px;">
+              <div class="scrub"><div class="fill" style="width:38%;"></div></div>
+              <div class="ctrl-row">
+                <span class="icon-btn tv"><span class="ic ic-pause"></span></span>
+                <span class="icon-btn tv" style="font-size:14px;">−10</span>
+                <div class="spacer"></div>
+                <span class="icon-btn tv"><span class="ic ic-users"></span></span>
+              </div>
+            </div>
+          </div></div>
+          <div class="frame-title">TV host — no camera anywhere, ever</div>
+        </div>
+      </div>
+    </div>
+    <p class="platform-note">The TV itself never has a camera, so it never claims a tile. It's identified purely by a device badge in the roster and in anyone else's camera-strip roster view. Quick reactions (not typed chat) are the default TV input for "saying something" mid-scene — full text chat is one more OK-press away via an on-screen keyboard, kept as a fallback rather than the primary path.</p>
+
+    <h3>Guest, locked</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="tv-frame"><div class="tv-screen">
+          <div class="video-surface"></div>
+          <div class="chrome-bottom">
+            <div class="scrub"><div class="fill locked" style="width:38%;"></div></div>
+            <div class="ctrl-row">
+              <span class="icon-btn tv" style="opacity:.4;"><span class="ic ic-pause"></span></span>
+              <span class="icon-btn tv focused" style="border:1px solid var(--danger);"><span class="ic ic-lock"></span></span>
+              <div class="spacer"></div>
+              <span class="icon-btn tv"><span class="ic ic-users"></span></span>
+            </div>
+          </div>
+          <div style="position:absolute; bottom:74px; left:14px; right:160px;">
+            <div class="lock-banner" style="font-size:13px;"><span class="ic ic-lock" style="font-size:18px;"></span><div class="txt"><b>Jae has the remote</b>Press OK to ask Jae to hand it over.</div></div>
+          </div>
+        </div></div>
+        <div class="frame-title">Guest, locked — pressing the disabled control explains why, instead of doing nothing</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DESKTOP / WEB SCREENS ============ -->
+  <section id="desktop">
+    <h2>Windows desktop &amp; web</h2>
+    <p class="section-intro">Mouse + keyboard, a resizable window (or browser tab), and actual room to spare — so the party panel <i>shrinks</i> the video into a letterboxed area instead of floating over it. Web and the desktop app share this exact layout; the only difference is web requests the Fullscreen API instead of an OS-level window, and has no window-chrome to manage.</p>
+
+    <h3>Login</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="desk-frame">
+          <div class="desk-titlebar"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url">campfire.app</div></div>
+          <div class="desk-screen" style="display:flex; align-items:center; justify-content:center; background:#0E0D0C;">
+            <div style="width:280px;">
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:22px;"><div class="flame"></div><b style="font-size:15px;">Campfire</b></div>
+              <div style="background:#1E1B18; border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px; color:var(--text-faint);">you@email.com</div>
+              <div style="background:#1E1B18; border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:14px; color:var(--text-faint);">••••••••</div>
+              <div class="btn primary" style="width:100%; justify-content:center;">Log in</div>
+            </div>
+          </div>
+        </div>
+        <div class="frame-title">Standard pattern — full password manager / SSO support</div>
+      </div>
+    </div>
+
+    <h3>Title detail — both party entry points live here</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="desk-frame">
+          <div class="desk-titlebar"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url">campfire.app/aurora-station</div></div>
+          <div class="desk-screen" style="padding:26px; background:#141210;">
+            <div style="font-size:20px; font-weight:700; margin-bottom:4px;">Aurora Station</div>
+            <div style="color:var(--text-faint); font-size:12px; margin-bottom:16px;">S1 · 8 episodes · Sci-fi</div>
+            <div style="display:flex; gap:10px;">
+              <span class="btn primary"><span class="ic ic-play"></span> Play</span>
+              <span class="btn secondary"><span class="ic ic-flame"></span> Start Watch Party</span>
+              <span class="btn ghost"><span class="ic ic-users"></span> Join with code</span>
+            </div>
+          </div>
+        </div>
+        <div class="frame-title">Play, Start Watch Party, and Join sit side by side — none is buried in a menu</div>
+      </div>
+    </div>
+
+    <h3>Solo playback</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="desk-frame"><div class="desk-titlebar"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url">campfire.app</div></div>
+        <div class="desk-screen">
+          <div class="video-surface"></div>
+          <div class="chrome-top">
+            <div class="title-block"><div class="show" style="cursor:default;">← Aurora Station</div></div>
+            <div class="ctrl-row"><span class="icon-btn"><span class="ic" style="font-size:13px;">⤢</span></span></div>
+          </div>
+          <div class="chrome-bottom">
+            <div class="scrub"><div class="fill" style="width:38%;"></div><div class="handle" style="left:38%;"></div></div>
+            <div class="ctrl-row">
+              <span class="icon-btn"><span class="ic ic-pause"></span></span>
+              <span class="icon-btn" style="font-size:11px;">−10</span>
+              <span class="icon-btn" style="font-size:11px;">+10</span>
+              <span class="icon-btn" style="font-size:11px;">1×</span>
+              <span class="icon-btn" style="font-size:11px;">CC</span>
+              <span class="icon-btn"><span class="ic" style="font-size:13px;">☰</span></span>
+              <div class="spacer"></div>
+              <span style="font-size:11px; color:var(--text-dim);">37:12 / 51:40</span>
+            </div>
+          </div>
+        </div></div>
+        <div class="frame-title">Chrome auto-hides after ~3s idle, returns on mouse move — unchanged from today</div>
+      </div>
+    </div>
+
+    <h3>Host, party active, camera on</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="desk-frame"><div class="desk-titlebar"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url">campfire.app</div></div>
+        <div class="desk-screen" style="position:relative;">
+          <div style="position:absolute; left:0; top:0; bottom:0; right:190px;">
+            <div class="video-surface" style="position:absolute; inset:0;"></div>
+            <div class="cam-strip">
+              <div class="mini speaking"><div class="avatar av1" style="width:20px;height:20px;font-size:8px;">JM</div></div>
+              <div class="mini"><div class="avatar av2" style="width:20px;height:20px;font-size:8px;">RT</div></div>
+            </div>
+            <div class="chrome-bottom" style="position:absolute;">
+              <div class="scrub"><div class="fill" style="width:38%;"></div><div class="handle" style="left:38%;"></div></div>
+              <div class="ctrl-row">
+                <span class="icon-btn"><span class="ic ic-pause"></span></span>
+                <span class="icon-btn" style="font-size:11px;">−10</span>
+                <span class="icon-btn"><span class="ic ic-mic"></span></span>
+                <span class="icon-btn"><span class="ic ic-cam"></span></span>
+                <div class="spacer"></div>
+              </div>
+            </div>
+          </div>
+          <div class="party-panel">
+            <div class="tabs"><div class="on">Chat</div><div>People · 3</div></div>
+            <div class="body">
+              <div class="chat-msg"><div class="avatar av2" style="width:18px;height:18px;font-size:8px;">RT</div><div><span class="name">Rosa</span><span class="bubble">wait rewind that</span></div></div>
+              <div class="chat-msg"><div class="avatar av1" style="width:18px;height:18px;font-size:8px;">JM</div><div><span class="name">Jae</span><span class="bubble">on it 😆</span></div></div>
+            </div>
+            <div class="inputbar"><div class="box">Message…</div></div>
+          </div>
+        </div></div>
+        <div class="frame-title">Panel narrows the video, never covers it — collapsible to a thin edge tab</div>
+      </div>
+    </div>
+
+    <h3>Guest, locked + panel collapsed</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="desk-frame"><div class="desk-titlebar"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="url">campfire.app</div></div>
+        <div class="desk-screen" style="position:relative;">
+          <div class="video-surface"></div>
+          <div style="position:absolute; top:14px; right:14px;" class="pill-badge"><span class="ic ic-flame" style="font-size:11px;"></span> Chat</div>
+          <div class="chrome-bottom">
+            <div class="scrub"><div class="fill locked" style="width:38%;"></div></div>
+            <div class="ctrl-row">
+              <span class="icon-btn" style="opacity:.35; cursor:not-allowed;"><span class="ic ic-pause"></span></span>
+              <span class="icon-btn" style="opacity:.35;" title="Locked">−10</span>
+              <div class="spacer"></div>
+            </div>
+            <div class="lock-banner" style="margin-top:8px;"><span class="ic ic-lock" style="font-size:15px;"></span><div class="txt"><b>Jae has the remote</b><span style="color:var(--text-dim);">You can still chat, talk, and react.</span></div><span class="btn ghost" style="padding:6px 12px; font-size:11.5px;">Ask</span></div>
+          </div>
+        </div></div>
+        <div class="frame-title">Party panel collapsed to a corner pill when not needed — video stays full-width</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MOBILE SCREENS ============ -->
+  <section id="mobile">
+    <h2>Android phone</h2>
+    <p class="section-intro">Portrait for browsing and chat, landscape for playback. Thumb reach drives placement: primary transport controls stay bottom-center/right where a two-hand landscape grip or a one-hand thumb naturally lands; party controls live in a bottom sheet, never in the existing brightness/volume swipe zones on the left/right screen halves.</p>
+
+    <h3>Login &amp; home</h3>
+    <div class="screen-block">
+      <div class="screen-flex">
+        <div class="frame-wrap">
+          <div class="phone-p"><div style="padding:40px 18px 0 18px; color:#F1ECE3;">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:26px;"><div class="flame" style="width:12px;height:12px;"></div><b style="font-size:13px;">Campfire</b></div>
+            <div style="background:#1E1B18; border-radius:8px; padding:9px 10px; margin-bottom:8px; color:var(--text-faint); font-size:10.5px;">you@email.com</div>
+            <div style="background:#1E1B18; border-radius:8px; padding:9px 10px; margin-bottom:12px; color:var(--text-faint); font-size:10.5px;">••••••••</div>
+            <div class="btn primary" style="width:100%; justify-content:center; font-size:11px; padding:8px;">Log in</div>
+          </div></div>
+          <div class="frame-title">Login (portrait)</div>
+        </div>
+        <div class="frame-wrap">
+          <div class="phone-p"><div style="padding:14px; color:#F1ECE3;">
+            <div style="font-size:12px; font-weight:700; margin-bottom:8px;">Continue watching</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <div style="aspect-ratio:2/3; background:#1E1B18; border-radius:6px;"></div>
+              <div style="aspect-ratio:2/3; background:#1E1B18; border-radius:6px;"></div>
+              <div style="aspect-ratio:2/3; background:#1E1B18; border-radius:6px;"></div>
+              <div style="aspect-ratio:2/3; background:#1E1B18; border-radius:6px;"></div>
+            </div>
+          </div></div>
+          <div class="frame-title">Home (portrait)</div>
+        </div>
+        <div class="frame-wrap">
+          <div class="phone-p"><div style="padding:20px 16px; color:#F1ECE3;">
+            <div style="aspect-ratio:16/9; background:#1E1B18; border-radius:8px; margin-bottom:12px;"></div>
+            <div style="font-weight:700; font-size:13px;">Aurora Station</div>
+            <div style="color:var(--text-faint); font-size:10.5px; margin-bottom:14px;">S1 · 8 episodes</div>
+            <div class="btn primary" style="width:100%; justify-content:center; font-size:11px; padding:8px; margin-bottom:8px;"><span class="ic ic-play" style="font-size:9px;"></span> Play</div>
+            <div style="display:flex; gap:8px;">
+              <div class="btn secondary" style="flex:1; justify-content:center; font-size:10.5px; padding:8px;">Start party</div>
+              <div class="btn ghost" style="flex:1; justify-content:center; font-size:10.5px; padding:8px;">Join</div>
+            </div>
+          </div></div>
+          <div class="frame-title">Title detail (portrait)</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Solo playback (landscape)</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="phone-l">
+          <div class="video-surface"></div>
+          <div class="chrome-top"><div class="title-block" style="font-size:10px;">← Aurora Station · E4</div><span class="icon-btn sm"><span class="ic" style="font-size:10px;">⧉</span></span></div>
+          <div class="chrome-bottom" style="padding:10px;">
+            <div class="scrub" style="height:3px; margin-bottom:8px;"><div class="fill" style="width:38%;"></div><div class="handle" style="left:38%; width:8px;height:8px;"></div></div>
+            <div class="ctrl-row">
+              <span class="icon-btn sm" style="font-size:9px;">−10</span>
+              <span class="icon-btn sm"><span class="ic ic-pause" style="font-size:12px;"></span></span>
+              <span class="icon-btn sm" style="font-size:9px;">+10</span>
+              <div class="spacer"></div>
+              <span class="icon-btn sm" style="font-size:9px;">1×</span>
+            </div>
+          </div>
+        </div>
+        <div class="frame-title">Left half = brightness swipe, right half = volume swipe (unchanged) — controls sit clear of both edges</div>
+      </div>
+    </div>
+
+    <h3>Host, party active, camera on</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="phone-l">
+          <div class="video-surface"></div>
+          <div class="cam-strip" style="top:8px; right:8px;">
+            <div class="mini speaking" style="width:30px;height:30px;"><div class="avatar av1" style="width:16px;height:16px;font-size:7px;">JM</div></div>
+            <div class="mini" style="width:30px;height:30px;"><div class="avatar av2" style="width:16px;height:16px;font-size:7px;">RT</div></div>
+          </div>
+          <div class="sheet" style="height:36px; display:flex; align-items:center; justify-content:center;">
+            <div class="grabber" style="position:static;"></div>
+          </div>
+          <div class="pill-collapsed" style="bottom:44px;"><span class="ic ic-chat" style="font-size:9px;"></span> 3 in party</div>
+        </div>
+        <div class="frame-title">Party sheet peeks from the bottom edge — thumb-reachable, collapsed by default so it never blocks the frame</div>
+      </div>
+    </div>
+
+    <h3>Guest, locked</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div class="phone-l">
+          <div class="video-surface"></div>
+          <div class="chrome-bottom" style="padding:10px;">
+            <div class="scrub" style="height:3px;"><div class="fill locked" style="width:38%;"></div></div>
+            <div class="ctrl-row" style="margin-top:6px;">
+              <span class="icon-btn sm" style="opacity:.35;">−10</span>
+              <span class="icon-btn sm" style="opacity:.35;"><span class="ic ic-pause" style="font-size:12px;"></span></span>
+              <div class="spacer"></div>
+            </div>
+          </div>
+          <div class="pill-collapsed" style="bottom:44px; border-color:rgba(229,100,94,.5);"><span class="ic ic-lock" style="font-size:9px;"></span> Jae has the remote</div>
+        </div>
+        <div class="frame-title">Same collapsed-pill pattern, doubling as the lock explanation — tap to ask</div>
+      </div>
+    </div>
+
+    <h3>Picture-in-Picture</h3>
+    <div class="screen-block">
+      <div class="frame-wrap">
+        <div style="width:180px; height:100px; background:#0E0D0C; border-radius:10px; position:relative; overflow:hidden; border:1px solid var(--border-strong); box-shadow:0 12px 30px rgba(0,0,0,.5);">
+          <div class="video-surface"></div>
+          <div style="position:absolute; top:6px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--ember); box-shadow:0 0 0 3px rgba(255,106,61,.25);"></div>
+          <div style="position:absolute; bottom:6px; left:50%; transform:translateX(-50%);"><span class="icon-btn sm" style="background:rgba(0,0,0,.4);"><span class="ic ic-pause" style="font-size:11px;"></span></span></div>
+        </div>
+        <div class="frame-title">PiP — a small ember dot signals the party's voice call is still live even though chat/roster aren't visible</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ NOTIFICATIONS ============ -->
+  <section id="notify">
+    <h2>Joins &amp; control changes</h2>
+    <p class="section-intro">One pattern everywhere: a transient toast in a top corner, never the bottom (where playback controls live), auto-dismissing, never stealing input focus — so a TV user doesn't lose their place mid-navigation just because someone joined.</p>
+    <table class="notes">
+      <tr><th>Event</th><th>Placement</th><th>Duration</th><th>Notes</th></tr>
+      <tr><td>Someone joined</td><td>Top-right (top-center on TV)</td><td>~4s</td><td>Neutral border, avatar + name, stacks up to 2 with a "+N more"</td></tr>
+      <tr><td>You were granted control</td><td>Same corner</td><td>~6s or dismiss</td><td>Ember accent border — it changes what you can do, so it earns a beat longer on screen</td></tr>
+      <tr><td>Your control was revoked</td><td>Same corner</td><td>~6s or dismiss</td><td>Paired with the lock banner appearing in chrome — the toast explains the moment, the banner explains the ongoing state</td></tr>
+      <tr><td>TV: any of the above</td><td>Top-center, outside the focus row</td><td>~5s</td><td>Never receives D-pad focus itself — purely informational</td></tr>
+    </table>
+  </section>
+
+  <!-- ============ SCOPE CUTS ============ -->
+  <section id="cuts">
+    <h2>Where we're cutting scope</h2>
+    <p class="section-intro">Cramming every feature onto every platform is how the current app got messy. These cuts are deliberate.</p>
+    <div class="cut-list">
+      <div class="cut-item"><div class="x">✕</div><div><b>No camera video on Android TV — ever</b><p>TVs are represented as a device in the roster with a small "TV" badge, the same place a camera-off phone shows up. Building even a disabled camera affordance invites someone to ask why it doesn't work; not building it avoids the question.</p></div></div>
+      <div class="cut-item"><div class="x">✕</div><div><b>No tile for camera-off participants, on any platform</b><p>A tile only appears once a camera turns on. Camera-off people live in the roster, not as an empty rectangle taking up strip space next to the movie.</p></div></div>
+      <div class="cut-item"><div class="x">✕</div><div><b>No full-screen camera grid, anywhere</b><p>Campfire is video-first, not a video-call app with a movie playing in the corner. Camera tiles stay a small strip; a full Zoom-style grid would invert that.</p></div></div>
+      <div class="cut-item"><div class="x">✕</div><div><b>Typed chat is not the primary TV input</b><p>An on-screen keyboard over D-pad is slow enough that it discourages use. Quick reactions are the default; full typed chat stays available as a secondary path (or via phone-as-remote pairing), not the first thing offered.</p></div></div>
+      <div class="cut-item"><div class="x">✕</div><div><b>Companion mode gets no dedicated screens yet</b><p>A second device joining for chat/calling only is the mobile portrait chat+roster layout with the video slot removed. If the layout is componentized as designed here, this mode falls out for free later rather than needing its own design pass now.</p></div></div>
+    </div>
+  </section>
+
+</main>
+</div>
+</body>
+</html>

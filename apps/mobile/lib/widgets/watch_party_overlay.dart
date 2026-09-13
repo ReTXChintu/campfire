@@ -11,7 +11,9 @@ import '../models/watch_party.dart';
 import '../services/device_id_service.dart';
 import '../services/watch_party_service.dart';
 import '../services/watch_party_sync_controller.dart';
+import '../theme/app_theme.dart';
 import 'watch_party_chat.dart';
+import 'watch_party_toast.dart';
 import 'watch_party_video_grid.dart';
 
 /// Watch Party entry point + live session chrome — voice/video calling, text chat, the participant
@@ -51,6 +53,13 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
   bool _micEnabled = false;
   bool _cameraEnabled = false;
   String? _error;
+
+  // Join/control-change toasts — see watch_party_toast.dart. `_hasSeenInitialRoster` guards
+  // against firing a spurious "X joined" toast for every participant already in the party at the
+  // moment *we* connect — only genuinely new arrivals after that point should toast.
+  final List<WatchPartyToastData> _toasts = [];
+  bool _hasSeenInitialRoster = false;
+  int _nextToastId = 0;
 
   @override
   void initState() {
@@ -106,6 +115,41 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
       }
     }
     return joined.canControlPlayback;
+  }
+
+  void _pushToast(String message, {bool control = false}) {
+    if (!mounted) return;
+    final id = _nextToastId++;
+    setState(() => _toasts.add(WatchPartyToastData(id: id, message: message, control: control)));
+    Timer(Duration(seconds: control ? 6 : 4), () {
+      if (mounted) setState(() => _toasts.removeWhere((t) => t.id == id));
+    });
+  }
+
+  // Compares the roster we already had against a freshly-fetched/pushed one and toasts on the two
+  // events design.html calls out: a new participant joining, and *this session's own* control
+  // being granted or revoked (not anyone else's — that's not actionable/relevant to me).
+  void _diffParticipantsForToasts(List<WatchPartyParticipant> previous, List<WatchPartyParticipant> next) {
+    if (!_hasSeenInitialRoster) {
+      _hasSeenInitialRoster = true;
+      return;
+    }
+    final previousIdentities = previous.map((p) => p.identity).toSet();
+    for (final participant in next) {
+      if (!previousIdentities.contains(participant.identity)) {
+        _pushToast('${participant.deviceLabel} joined the party');
+      }
+    }
+    final myIdentity = _joined?.participantIdentity;
+    if (myIdentity == null) return;
+    final wasMine = previous.where((p) => p.identity == myIdentity).firstOrNull;
+    final isMine = next.where((p) => p.identity == myIdentity).firstOrNull;
+    if (wasMine != null && isMine != null && wasMine.canControlPlayback != isMine.canControlPlayback) {
+      _pushToast(
+        isMine.canControlPlayback ? 'You were granted control' : 'Your control was revoked',
+        control: true,
+      );
+    }
   }
 
   void _reconfigureSyncController() {
@@ -234,6 +278,7 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
     try {
       final list = await WatchPartyService.getParticipants(joined.party.id);
       if (mounted) {
+        _diffParticipantsForToasts(_participants, list);
         setState(() => _participants = list);
         _reconfigureSyncController();
       }
@@ -248,9 +293,9 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
         final decoded = jsonDecode(utf8.decode(event.data)) as Map<String, dynamic>;
         final list = decoded['participants'] as List?;
         if (list == null) return;
-        setState(() {
-          _participants = list.map((e) => WatchPartyParticipant.fromJson(e as Map<String, dynamic>)).toList();
-        });
+        final next = list.map((e) => WatchPartyParticipant.fromJson(e as Map<String, dynamic>)).toList();
+        _diffParticipantsForToasts(_participants, next);
+        setState(() => _participants = next);
         _reconfigureSyncController();
       } catch (_) {
         // Ignore malformed payloads.
@@ -434,9 +479,10 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top + 8;
+    late final Widget content;
 
     if (_room != null && _joined != null) {
-      return Positioned(
+      content = Positioned(
         top: top,
         right: 8,
         child: _RoundIconButton(
@@ -445,15 +491,11 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
           onTap: _openPartyPanel,
         ),
       );
-    }
-
-    if (_connecting) {
-      return Positioned(top: top, right: 8, child: const _RoundIconButton(icon: Icons.sync, onTap: null));
-    }
-
-    final pending = _pendingChoice;
-    if (pending is WatchPartyJoinRequiresConfirmation) {
-      return _ChoiceBanner(
+    } else if (_connecting) {
+      content = Positioned(top: top, right: 8, child: const _RoundIconButton(icon: Icons.sync, onTap: null));
+    } else if (_pendingChoice is WatchPartyJoinRequiresConfirmation) {
+      final pending = _pendingChoice as WatchPartyJoinRequiresConfirmation;
+      content = _ChoiceBanner(
         top: top,
         message: "You're already watching on ${pending.existingSession.deviceLabel}. Join from this device too?",
         primaryLabel: 'Join anyway',
@@ -461,9 +503,9 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
         secondaryLabel: 'No',
         onSecondary: () => widget.onPartyIdChanged(null),
       );
-    }
-    if (pending is WatchPartyJoinRequiresRoleChoice) {
-      return FutureBuilder<String>(
+    } else if (_pendingChoice is WatchPartyJoinRequiresRoleChoice) {
+      final pending = _pendingChoice as WatchPartyJoinRequiresRoleChoice;
+      content = FutureBuilder<String>(
         future: DeviceIdService.getDeviceId(),
         builder: (context, snapshot) {
           final deviceId = snapshot.data;
@@ -477,26 +519,35 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
           );
         },
       );
+    } else {
+      // No active party and nothing pending — just the entry point, plus a small error message if
+      // the last attempt failed.
+      content = Positioned(
+        top: top,
+        right: 8,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            _RoundIconButton(icon: Icons.groups_outlined, onTap: _openStartOrJoinSheet),
+            if (_error != null)
+              Container(
+                margin: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(6)),
+                child: Text(_error!, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+              ),
+          ],
+        ),
+      );
     }
 
-    // No active party and nothing pending — just the entry point, plus a small error toast if the
-    // last attempt failed.
-    return Positioned(
-      top: top,
-      right: 8,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _RoundIconButton(icon: Icons.groups_outlined, onTap: _openStartOrJoinSheet),
-          if (_error != null)
-            Container(
-              margin: const EdgeInsets.only(top: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(6)),
-              child: Text(_error!, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-            ),
-        ],
-      ),
+    // Toasts render above whichever branch above is showing, in their own top-right stack just
+    // below it — see design.html's "never over playback controls" placement rule.
+    return Stack(
+      children: [
+        content,
+        Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
+      ],
     );
   }
 }
@@ -637,25 +688,42 @@ class _PartyPanel extends StatelessWidget {
             // origin), so this shares the bare code instead — both this app's "Join Watch Party"
             // dialog (see top_bar.dart) and web's paste-code field already accept a bare code
             // directly, so nothing is lost by not having a full URL.
-            Row(
-              children: [
-                Expanded(
-                  child: SelectableText(
-                    'Party code: ${joined.party.id}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceHover,
+                  border: Border.all(color: AppColors.dividerStrong),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.copy, color: Colors.white70, size: 18),
-                  tooltip: 'Copy party code',
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: joined.party.id));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Party code copied')),
-                    );
-                  },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SelectableText(
+                      joined.party.id,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 3,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton(
+                      icon: const Icon(Icons.copy, color: Colors.white70, size: 16),
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Copy party code',
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: joined.party.id));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Party code copied')),
+                        );
+                      },
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
             const SizedBox(height: 8),
             WatchPartyVideoGrid(room: room),

@@ -54,7 +54,10 @@ class _TvFocusableState extends State<TvFocusable> {
             duration: const Duration(milliseconds: 120),
             decoration: BoxDecoration(
               borderRadius: widget.borderRadius,
-              border: Border.all(color: _focused ? AppColors.accent : Colors.transparent, width: 3),
+              // Gold, not the Ember accent — design.html reserves Gold for exactly one job (the TV
+              // focus ring) so a focused element is never visually confused with an accented/"live"
+              // one.
+              border: Border.all(color: _focused ? AppColors.amber : Colors.transparent, width: 3),
             ),
             child: widget.child,
           ),

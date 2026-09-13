@@ -19,6 +19,7 @@ import '../services/quality_prefs_service.dart';
 import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
 import 'episodes_panel.dart';
+import 'lock_banner.dart';
 
 // TEMP diagnostic logging — remove once the Android resume/subtitle investigation is done.
 void _dbg(String msg) => debugPrint('[MKV ${DateTime.now().toIso8601String().substring(11, 23)}] $msg');
@@ -861,6 +862,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
             Video(controller: _controller, controls: NoVideoControls, fit: BoxFit.contain),
 
             if (_isBuffering) const Center(child: CircularProgressIndicator(color: Colors.white70)),
+
+            if (_locked) const Positioned(left: 16, right: 16, top: 64, child: LockBanner()),
 
             // Only brightness gets a custom HUD — the volume gesture leaves showSystemUI on for
             // VolumeController.setVolume, so the OS's own volume overlay already shows for that one.

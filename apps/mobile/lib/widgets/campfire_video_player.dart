@@ -18,6 +18,7 @@ import '../services/vtt_parser.dart';
 import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
 import 'episodes_panel.dart';
+import 'lock_banner.dart';
 
 const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 const _hideControlsDelay = Duration(seconds: 3);
@@ -837,6 +838,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
               const Center(
                 child: CircularProgressIndicator(color: Colors.white70),
               ),
+
+            if (_locked) const Positioned(left: 16, right: 16, top: 64, child: LockBanner()),
 
             // Only brightness gets a custom HUD — the volume gesture leaves showSystemUI on for
             // VolumeController.setVolume, so the OS's own volume overlay already shows for that one.

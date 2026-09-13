@@ -6,6 +6,7 @@ import { languageName } from "../lib/languageNames";
 import { API_URL, apiGet, apiPost, apiPostKeepalive } from "../lib/api";
 import { useMediaToken } from "../lib/mediaToken";
 import EpisodesPanel from "./EpisodesPanel";
+import LockBanner from "./LockBanner";
 import TrackSettingsMenu from "./TrackSettingsMenu";
 import SubtitleMenu from "./SubtitleMenu";
 import type { QualitySelection } from "./QualitySection";
@@ -969,6 +970,14 @@ export default function VideoPlayer({
         </Link>
         <h1 className="truncate text-sm font-medium text-white/90">{title}</h1>
       </div>
+
+      {locked && (
+        <div className="pointer-events-none absolute left-4 right-4 top-16 flex justify-start">
+          <div className="pointer-events-auto max-w-sm">
+            <LockBanner />
+          </div>
+        </div>
+      )}
 
       {isBuffering && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
