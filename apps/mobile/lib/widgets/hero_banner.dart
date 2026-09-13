@@ -1,30 +1,61 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../theme/app_theme.dart';
+import 'authed_network_image.dart';
 
 class HeroBanner extends StatelessWidget {
   final String title;
   final String? badge;
   final String playHref;
   final String? infoHref;
+  // A ready-to-fetch backend path (e.g. "/api/thumbnail/<id>") — null when the hero item is a
+  // folder with no thumbnail yet, in which case this falls back to the original gradient-only look.
+  final String? thumbnailPath;
 
-  const HeroBanner({super.key, required this.title, this.badge, required this.playHref, this.infoHref});
+  const HeroBanner({
+    super.key,
+    required this.title,
+    this.badge,
+    required this.playHref,
+    this.infoHref,
+    this.thumbnailPath,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       height: 340,
       width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: RadialGradient(
-          center: Alignment(0.4, -0.6),
-          radius: 1.2,
-          colors: [Color(0xFF3A1A12), Color(0xFF1A0E12), AppColors.background],
-          stops: [0, 0.4, 0.9],
-        ),
-      ),
+      color: AppColors.background,
       child: Stack(
         children: [
+          if (thumbnailPath != null)
+            Positioned.fill(child: AuthedNetworkImage(path: thumbnailPath!, fit: BoxFit.cover)),
+          // Darkens the backdrop image enough to keep the title/buttons legible; falls back to the
+          // original brand-colored radial gradient when there's no image to darken.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: thumbnailPath != null
+                    ? LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.35),
+                          Colors.black.withValues(alpha: 0.15),
+                          AppColors.background,
+                        ],
+                        stops: const [0, 0.5, 1],
+                      )
+                    : const RadialGradient(
+                        center: Alignment(0.4, -0.6),
+                        radius: 1.2,
+                        colors: [Color(0xFF3A1A12), Color(0xFF1A0E12), AppColors.background],
+                        stops: [0, 0.4, 0.9],
+                      ),
+              ),
+            ),
+          ),
           Positioned(
             left: 0,
             right: 0,

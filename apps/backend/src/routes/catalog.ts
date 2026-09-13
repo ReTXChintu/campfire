@@ -63,6 +63,11 @@ router.get("/library", requireAuth, async (req, res) => {
     return bt - at;
   })[0];
 
+  // A ready-to-use path (or null, when a folder simply has no thumbnail yet) rather than a raw id
+  // + kind — keeps clients from needing to know the folder-vs-video branching this backend already
+  // knows (matches heroPlayHref/heroInfoHref's own "hand back a usable href" convention).
+  const heroThumbnailPath =
+    hero.kind === "video" ? `/api/thumbnail/${hero.id}` : hero.thumbnailFileId ? `/api/thumbnail-folder/${hero.id}` : null;
   let heroPlayHref = `/folder/${hero.id}`;
   const heroInfoHref = hero.kind === "folder" ? `/folder/${hero.id}` : undefined;
   if (hero.kind === "video") {
@@ -94,7 +99,13 @@ router.get("/library", requireAuth, async (req, res) => {
 
   res.json({
     empty: false,
-    hero: { title: hero.name, badge: "Recently Added", playHref: heroPlayHref, infoHref: heroInfoHref ?? null },
+    hero: {
+      title: hero.name,
+      badge: "Recently Added",
+      playHref: heroPlayHref,
+      infoHref: heroInfoHref ?? null,
+      thumbnailPath: heroThumbnailPath,
+    },
     continueWatching: continueWatchingItems,
     folders,
     videos,

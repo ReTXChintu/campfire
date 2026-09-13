@@ -135,14 +135,24 @@ class HeroData {
   final String badge;
   final String playHref;
   final String? infoHref;
+  // A ready-to-fetch backend path (e.g. "/api/thumbnail/<id>"), or null when a folder simply has
+  // no thumbnail yet.
+  final String? thumbnailPath;
 
-  const HeroData({required this.title, required this.badge, required this.playHref, this.infoHref});
+  const HeroData({
+    required this.title,
+    required this.badge,
+    required this.playHref,
+    this.infoHref,
+    this.thumbnailPath,
+  });
 
   factory HeroData.fromJson(Map<String, dynamic> json) => HeroData(
     title: json['title'] as String,
     badge: json['badge'] as String,
     playHref: json['playHref'] as String,
     infoHref: json['infoHref'] as String?,
+    thumbnailPath: json['thumbnailPath'] as String?,
   );
 }
 

@@ -61,6 +61,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     badge: data.hero!.badge,
                     playHref: data.hero!.playHref,
                     infoHref: data.hero!.infoHref,
+                    thumbnailPath: data.hero!.thumbnailPath,
                   ),
                 if (data.continueWatching.isNotEmpty)
                   Rail(

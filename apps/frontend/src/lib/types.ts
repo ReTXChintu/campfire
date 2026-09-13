@@ -85,7 +85,10 @@ export type CatalogVideo = {
 
 export type LibraryResponse = {
   empty: boolean;
-  hero: { title: string; badge: string; playHref: string; infoHref: string | null } | null;
+  // thumbnailPath is a ready-to-fetch backend path (e.g. "/api/thumbnail/<id>"), or null when a
+  // folder simply has no thumbnail yet — not currently rendered on web (Hero.tsx is gradient-only
+  // by design there too), included here just so the type matches what the backend actually sends.
+  hero: { title: string; badge: string; playHref: string; infoHref: string | null; thumbnailPath: string | null } | null;
   continueWatching: { item: CatalogListItem; progress: WatchProgress }[];
   folders: CatalogListItem[];
   videos: CatalogListItem[];
