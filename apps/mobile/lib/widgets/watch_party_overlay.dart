@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:go_router/go_router.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -147,6 +149,17 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
       );
       if (!mounted) return;
       if (result is WatchPartyJoinSuccess) {
+        // A code pasted/joined for a party tied to a *different* video than the one currently open
+        // (e.g. the home screen's "Join Watch Party" dialog, or a code shared while watching
+        // something else) — redirect to the party's actual video before ever touching LiveKit,
+        // mirroring WatchPage.tsx's identical `party.fileId !== fileId` redirect. WatchScreen fully
+        // remounts on a fileId change (no persistent route the way web's SPA has), so the new
+        // screen's own WatchPartyOverlay picks the join back up from here — a brief extra
+        // round-trip, but join-token returns the same session/deviceRole without re-prompting.
+        if (result.party.fileId != widget.fileId) {
+          context.pushReplacement('/watch/${result.party.fileId}?party=${result.party.id}');
+          return;
+        }
         await _connectRoom(result);
       } else {
         setState(() {
@@ -614,6 +627,33 @@ class _PartyPanel extends StatelessWidget {
                 IconButton(
                   icon: Icon(cameraEnabled ? Icons.videocam : Icons.videocam_off, color: Colors.white),
                   onPressed: onToggleCamera,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            // The only way anyone else finds out this party exists — mirrors WatchPage.tsx's
+            // "Party #{partyId}" badge + "Copy Invite Link" button. Mobile has no known web
+            // frontend URL to build a clickable link from (unlike web, which knows its own
+            // origin), so this shares the bare code instead — both this app's "Join Watch Party"
+            // dialog (see top_bar.dart) and web's paste-code field already accept a bare code
+            // directly, so nothing is lost by not having a full URL.
+            Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    'Party code: ${joined.party.id}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy, color: Colors.white70, size: 18),
+                  tooltip: 'Copy party code',
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: joined.party.id));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Party code copied')),
+                    );
+                  },
                 ),
               ],
             ),
