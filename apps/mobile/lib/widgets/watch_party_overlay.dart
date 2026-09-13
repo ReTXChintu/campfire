@@ -13,6 +13,7 @@ import '../services/device_id_service.dart';
 import '../services/watch_party_service.dart';
 import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
+import 'tv_party_rail.dart';
 import 'watch_party_chat.dart';
 import 'watch_party_toast.dart';
 import 'watch_party_video_grid.dart';
@@ -538,9 +539,38 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
       );
     }
 
-    // Phone/TV: a persistent bottom-right "peek" pill expands the panel in place — never a
-    // blocking modal — see design.html's mobile mockups. Rendered outside `content` (which stays
-    // top-right for every other state) since it's bottom-anchored and thumb-reachable instead.
+    // Android TV: an always-mounted docked rail (never a modal — a D-pad remote can't dismiss one
+    // the way touch can), no camera strip (TV never publishes a camera track, see TvPartyRail's own
+    // doc comment). See design.html's TV mockups and [isAndroidTv].
+    if (isAndroidTv && _room != null && _joined != null) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                widget.child,
+                Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
+              ],
+            ),
+          ),
+          TvPartyRail(
+            room: _room!,
+            joined: _joined!,
+            participants: _participants,
+            onSetControl: _setControl,
+            onLeave: _handleLeavePressed,
+            onEnd: _handleEndPressed,
+            onExitToChrome: () => widget.syncController.tvChromeFocusNode.requestFocus(),
+          ),
+        ],
+      );
+    }
+
+    // Phone: a persistent bottom-right "peek" pill expands the panel in place — never a blocking
+    // modal — see design.html's mobile mockups. Rendered outside `content` (which stays top-right
+    // for every other state) since it's bottom-anchored and thumb-reachable instead.
     if (_room != null && _joined != null) {
       return Stack(
         fit: StackFit.expand,

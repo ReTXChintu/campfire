@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'app_router.dart';
+import 'platform_info.dart';
 import 'services/auth_service.dart';
 import 'services/media_session_service.dart';
 import 'services/token_store.dart';
@@ -32,6 +33,9 @@ void main() async {
   // Android only (no-ops itself on every other platform) — see
   // services/media_session_service.dart.
   await MediaSessionService.init();
+  // Android TV vs. phone/tablet can only be told apart at runtime — see platform_info.dart's
+  // isAndroidTv. Must resolve before the router/UI can branch on it.
+  await initAndroidTvDetection();
   if (kDebugMode && _debugToken.isNotEmpty) {
     await TokenStore.write(_debugToken);
   }

@@ -76,6 +76,10 @@ dependencies:
   screen_brightness: ^2.1.0
   # Android: system media-volume swipe gesture (right half of the player).
   volume_controller: ^3.3.3
+  # Android TV detection (systemFeatures' android.software.leanback) — see platform_info.dart's
+  # isAndroidTv. Already resolved transitively (another dependency pulls it in); declared directly
+  # since app code now imports it too.
+  device_info_plus: ^12.4.0
 
 dev_dependencies:
   flutter_test:

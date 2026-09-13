@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import '../models/watch_party.dart';
 
 /// Bridges a connected WatchPartyOverlay (owns the LiveKit room + backend party session) to
@@ -12,11 +12,24 @@ class WatchPartySyncController extends ChangeNotifier {
   WatchPartySyncState? _inboundState;
   Future<void> Function(WatchPartySyncState state)? _broadcaster;
 
+  // Android TV only: lets WatchPartyOverlay's TvPartyRail hand keyboard/D-pad focus back to the
+  // player's chrome when Back is pressed while the rail has focus — see design.html's "Back always
+  // walks up exactly one level: rail -> chrome -> exit player" rule. The player widgets use this as
+  // their own root Focus node's `focusNode:` (instead of an implicit one) so this can actually
+  // reach it; unused/harmless everywhere else.
+  final tvChromeFocusNode = FocusNode(debugLabel: 'tv-chrome-anchor');
+
   bool get enabled => _enabled;
   // Whether *this* session currently drives playback for the party — true for the host's main
   // device, and for any guest's main device the host has granted control to. Not "is the host".
   bool get canControl => _canControl;
   WatchPartySyncState? get inboundState => _inboundState;
+
+  @override
+  void dispose() {
+    tvChromeFocusNode.dispose();
+    super.dispose();
+  }
 
   /// Called by WatchPartyOverlay once connected, and again whenever control permission changes
   /// (a grant/revoke) — pass enabled:false/broadcaster:null on disconnect.

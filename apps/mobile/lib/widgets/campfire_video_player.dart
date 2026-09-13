@@ -9,6 +9,7 @@ import 'package:volume_controller/volume_controller.dart';
 import '../config.dart';
 import '../models/catalog.dart';
 import '../models/watch_party.dart';
+import '../platform_info.dart';
 import '../services/catalog_service.dart';
 import '../services/media_session_service.dart';
 import '../services/media_token_service.dart';
@@ -175,6 +176,10 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _enterImmersiveLandscape();
+    // TV starts in "Watching" mode — chrome hidden, nothing focused, any D-pad press wakes it (see
+    // design.html's two-mode focus model, handled in the Focus/PopScope wrapper in build()).
+    // Everywhere else the chrome is visible from the start, as before.
+    if (isAndroidTv) _controlsVisible = false;
 
     if (!_usingPassthrough &&
         !video.initialCompleted &&
@@ -783,10 +788,26 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
         video.nextFileId != null;
     final subtitleText = _currentSubtitleText();
 
-    return Focus(
+    // Two-mode TV focus model (see design.html): Watching (chrome hidden, any D-pad key just wakes
+    // it rather than also performing that key's normal action) vs Controlling (chrome visible,
+    // Back walks back down to Watching instead of exiting the player outright — canPop only allows
+    // the real pop once already in Watching). No-op everywhere else (canPop stays true, key
+    // handling unchanged).
+    return PopScope(
+      canPop: !isAndroidTv || !_controlsVisible,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && isAndroidTv && _controlsVisible) setState(() => _controlsVisible = false);
+      },
+      child: Focus(
+      focusNode: widget.watchPartySync?.tvChromeFocusNode,
       autofocus: true,
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.space) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+        if (isAndroidTv && !_controlsVisible) {
+          _showControls();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.space) {
           _togglePlay();
           return KeyEventResult.handled;
         }
@@ -1181,6 +1202,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
             if (_qualityMenuOpen) _qualityMenu(),
           ],
         ),
+      ),
       ),
       ),
     );
