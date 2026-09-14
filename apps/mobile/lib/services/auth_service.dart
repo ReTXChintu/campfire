@@ -77,6 +77,14 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  /// Completes TV pairing-code login — the poll endpoint already minted the JWT the same way
+  /// /auth/login does, so this just stores it and loads the profile, same as signIn/signUp's last
+  /// two steps. See screens/tv_pairing_login_screen.dart.
+  Future<void> signInWithToken(String token) async {
+    await TokenStore.write(token);
+    await _loadCurrentUser();
+  }
+
   Future<void> signUp(String email, String password, String? name) async {
     error = null;
     notifyListeners();

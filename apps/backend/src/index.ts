@@ -4,6 +4,7 @@ import cors from "cors";
 import { createServer as createHttpServer } from "node:http";
 import { env } from "./config/env";
 import { seedAdminUser } from "./lib/users";
+import { ensureIndexes as ensureDevicePairingIndexes } from "./lib/devicePairings";
 import { startConversionQueue } from "./lib/conversionQueue";
 import { startRenditionQueue } from "./lib/renditionQueue";
 
@@ -66,7 +67,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const server = createHttpServer(app);
 
-seedAdminUser(env.adminEmail, env.adminPassword)
+Promise.all([seedAdminUser(env.adminEmail, env.adminPassword), ensureDevicePairingIndexes()])
   .then(() => {
     startConversionQueue();
     startRenditionQueue();

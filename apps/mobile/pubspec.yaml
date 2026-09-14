@@ -80,6 +80,9 @@ dependencies:
   # isAndroidTv. Already resolved transitively (another dependency pulls it in); declared directly
   # since app code now imports it too.
   device_info_plus: ^12.4.0
+  # TV pairing-code login: renders the claim-URL QR code on screen. See
+  # screens/tv_pairing_login_screen.dart.
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

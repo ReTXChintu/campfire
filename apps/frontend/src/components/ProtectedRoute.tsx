@@ -10,7 +10,9 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   if (!token) {
-    return <Navigate to={`/login?callbackUrl=${encodeURIComponent(location.pathname)}`} replace />;
+    // Includes location.search, not just pathname — /link?code=XXXXX (the TV-pairing claim page)
+    // needs the code to survive this redirect.
+    return <Navigate to={`/login?callbackUrl=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   }
   return <>{children}</>;
 }

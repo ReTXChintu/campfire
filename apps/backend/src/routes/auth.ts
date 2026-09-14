@@ -1,6 +1,7 @@
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
+import { claimPairing, pollAndConsumePairing, startPairing } from "../lib/devicePairings";
 import {
   createUser,
   EmailAlreadyRegisteredError,
@@ -103,6 +104,46 @@ router.get("/me", requireAuth, async (req, res) => {
     avatarUrl: user.avatarUrl,
     isAdmin: isAdminEmail(user.email),
   });
+});
+
+// TV pairing-code login — a TV isn't logged in yet, so it shows a short human-typeable code (and a
+// QR code encoding a claim URL) instead of a password field; a phone/browser that's already logged
+// in claims it, and the TV polls until claimed. See lib/devicePairings.ts.
+router.post("/pair/start", async (_req, res) => {
+  const { code, expiresAt } = await startPairing();
+  res.json({ code, expiresAt: expiresAt.toISOString() });
+});
+
+router.post("/pair/claim", requireAuth, async (req, res) => {
+  const { code } = req.body as { code?: string };
+  if (!code) {
+    res.status(400).json({ error: "code is required" });
+    return;
+  }
+  const claimed = await claimPairing(code.trim().toUpperCase(), req.authUser!.userId);
+  if (!claimed) {
+    res.status(404).json({ error: "Invalid or expired code" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+router.get("/pair/poll/:code", async (req, res) => {
+  const result = await pollAndConsumePairing(req.params.code.trim().toUpperCase());
+  if (result.status === "not_found") {
+    res.status(404).json({ error: "Invalid or expired code" });
+    return;
+  }
+  if (result.status === "pending") {
+    res.json({ status: "pending" });
+    return;
+  }
+  const user = await getUserById(result.userId);
+  if (!user) {
+    res.status(404).json({ error: "Account no longer exists" });
+    return;
+  }
+  res.json({ status: "claimed", token: signToken(user) });
 });
 
 export default router;

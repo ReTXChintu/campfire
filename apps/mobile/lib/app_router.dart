@@ -6,6 +6,7 @@ import 'screens/admin/admin_catalog_video_page.dart';
 import 'screens/folder_screen.dart';
 import 'screens/library_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/tv_pairing_login_screen.dart';
 import 'screens/watch_screen.dart';
 import 'services/auth_service.dart';
 
@@ -32,7 +33,12 @@ GoRouter buildRouter(AuthService auth) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      // Android TV gets pairing-code login instead — no on-screen-keyboard password entry (see
+      // isAndroidTv, tv_pairing_login_screen.dart).
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => isAndroidTv ? const TvPairingLoginScreen() : const LoginScreen(),
+      ),
       GoRoute(path: '/', builder: (context, state) => const LibraryScreen()),
       GoRoute(
         path: '/folder/:folderId',

@@ -21,6 +21,9 @@ env:
   # setting an API_URL repository variable (Settings -> Secrets and variables -> Actions ->
   # Variables) if the backend's address ever changes — no workflow edit needed.
   API_URL: ${{ vars.API_URL || 'http://187.127.179.114:50001' }}
+  # Same idea, for the web frontend's own URL — only used by the TV pairing-login QR code (see
+  # config.dart's webBaseUrl), which needs a URL a phone can actually open.
+  WEB_URL: ${{ vars.WEB_URL || 'http://187.127.179.114:50000' }}
   APK_NAME: Campfire.apk
   WINDOWS_INSTALLER_NAME: Campfire.exe
 
@@ -56,7 +59,7 @@ jobs:
 
       - name: Build APK
         working-directory: apps/mobile
-        run: flutter build apk --release --dart-define=API_URL=${{ env.API_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
+        run: flutter build apk --release --dart-define=API_URL=${{ env.API_URL }} --dart-define=WEB_URL=${{ env.WEB_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
 
       - name: Stage artifact under its fixed deploy name
         run: cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk ${{ env.APK_NAME }}

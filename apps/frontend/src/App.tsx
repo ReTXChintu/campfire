@@ -6,6 +6,7 @@ import ResetPasswordPage from "./routes/ResetPasswordPage";
 import LibraryPage from "./routes/LibraryPage";
 import FolderPage from "./routes/FolderPage";
 import WatchPage from "./routes/WatchPage";
+import LinkDevicePage from "./routes/LinkDevicePage";
 import NotFoundPage from "./routes/NotFoundPage";
 import AdminConverterPage from "./routes/admin/AdminConverterPage";
 import AdminCatalogPage from "./routes/admin/AdminCatalogPage";
@@ -40,6 +41,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <WatchPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/link"
+          element={
+            <ProtectedRoute>
+              <LinkDevicePage />
             </ProtectedRoute>
           }
         />
