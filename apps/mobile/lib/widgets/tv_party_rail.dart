@@ -4,6 +4,7 @@ import 'package:livekit_client/livekit_client.dart';
 
 import '../models/watch_party.dart';
 import '../theme/app_theme.dart';
+import 'reaction_picker.dart';
 import 'tv_focusable.dart';
 import 'watch_party_chat.dart';
 
@@ -20,6 +21,7 @@ class TvPartyRail extends StatefulWidget {
   final void Function(WatchPartyParticipant participant, bool grant) onSetControl;
   final VoidCallback onLeave;
   final VoidCallback onEnd;
+  final ValueChanged<String> onSendReaction;
   // Called when Back is pressed while focus is somewhere inside this rail — walks focus back down
   // to the player's own chrome instead of letting Back exit the player outright (see
   // design.html's "Back always walks up exactly one level" rule, and the two-mode focus handling
@@ -34,6 +36,7 @@ class TvPartyRail extends StatefulWidget {
     required this.onSetControl,
     required this.onLeave,
     required this.onEnd,
+    required this.onSendReaction,
     required this.onExitToChrome,
   });
 
@@ -131,6 +134,8 @@ class _TvPartyRailState extends State<TvPartyRail> {
                             ],
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        ReactionPicker(onSend: widget.onSendReaction, tvFocusable: true),
                         const SizedBox(height: 8),
                         TvFocusable(
                           onTap: _openChat,

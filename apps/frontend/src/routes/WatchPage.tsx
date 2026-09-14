@@ -5,6 +5,7 @@ import { ConnectionState, Room, RoomEvent, type Participant } from "livekit-clie
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import VideoPlayer from "../components/VideoPlayer";
 import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
+import ReactionOverlay, { type FloatingReaction } from "../components/ReactionOverlay";
 import WatchPartyChat from "../components/WatchPartyChat";
 import WatchPartyVideoGrid from "../components/WatchPartyVideoGrid";
 import WatchPartyToastStack, { type WatchPartyToastData } from "../components/WatchPartyToast";
@@ -36,6 +37,10 @@ type PartyParticipant = {
   isHost: boolean;
   isLocal: boolean;
 };
+
+// Quick reactions — the primary TV interaction (typed chat is secondary there); this same set is
+// offered everywhere for consistency. Mirrors apps/mobile/lib/widgets/reaction_picker.dart.
+const REACTION_EMOJIS = ["😂", "🔥", "👏", "❤️", "👍"];
 
 function extractPartyCode(value: string): string {
   const trimmed = value.trim();
@@ -207,6 +212,29 @@ export default function WatchPage() {
     }
   }, [backendParticipants, joinedTokenData?.participantIdentity, pushToast]);
 
+  // Quick reactions — ephemeral, no persistence, broadcast to everyone over the same LiveKit data
+  // channel sync-state already uses. See design.html's "quick reactions" pattern.
+  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
+  const nextReactionIdRef = useRef(0);
+  const pushReaction = useCallback((emoji: string) => {
+    const id = nextReactionIdRef.current++;
+    setReactions((prev) => [...prev, { id, emoji, x: 15 + Math.random() * 70 }]);
+    window.setTimeout(() => {
+      setReactions((prev) => prev.filter((reaction) => reaction.id !== id));
+    }, 2200);
+  }, []);
+  const sendReaction = useCallback(
+    async (emoji: string) => {
+      // LiveKit doesn't echo publishData back to its own sender, so show it locally right away.
+      pushReaction(emoji);
+      const currentRoom = roomRef.current;
+      if (!currentRoom) return;
+      const payload = new TextEncoder().encode(JSON.stringify({ type: "reaction", emoji }));
+      await currentRoom.localParticipant.publishData(payload, { reliable: false, topic: "watch-party-reaction" });
+    },
+    [pushReaction],
+  );
+
   const syncParticipants = useCallback((nextRoom: Room | null, hostIdentity: string | null) => {
     if (!nextRoom) {
       setParticipants([]);
@@ -271,6 +299,17 @@ export default function WatchPage() {
           if (parsed.participants) {
             queryClient.setQueryData(["watch-party-participants", partyId], parsed.participants);
           }
+        } catch {
+          // Ignore malformed payloads.
+        }
+        return;
+      }
+      // Ephemeral, from anyone — unlike sync-state, reactions aren't gated to whoever currently
+      // holds playback control.
+      if (topic === "watch-party-reaction") {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(payload)) as { emoji?: string };
+          if (typeof parsed.emoji === "string") pushReaction(parsed.emoji);
         } catch {
           // Ignore malformed payloads.
         }
@@ -345,7 +384,7 @@ export default function WatchPage() {
       setMicEnabled(false);
       setCameraEnabled(false);
     };
-  }, [joinedTokenData, partyId, syncParticipants, setSearchParams, queryClient]);
+  }, [joinedTokenData, partyId, syncParticipants, setSearchParams, queryClient, pushReaction]);
 
   const inviteLink = useMemo(() => {
     if (!party || typeof window === "undefined") return null;
@@ -663,6 +702,7 @@ export default function WatchPage() {
                 </div>
               </div>
             )}
+            {partyId && !partyLoadFailed && <ReactionOverlay reactions={reactions} />}
           </div>
 
           {partyId && !partyLoadFailed && (
@@ -682,6 +722,7 @@ export default function WatchPage() {
               backendByIdentity={backendByIdentity}
               isHost={isHost}
               grantControl={grantControl}
+              onSendReaction={sendReaction}
             />
           )}
         </div>
@@ -719,6 +760,7 @@ type PartySidePanelProps = {
   backendByIdentity: Map<string, WatchPartyParticipant>;
   isHost: boolean;
   grantControl: ReturnType<typeof useGrantWatchPartyControl>;
+  onSendReaction: (emoji: string) => void;
 }
 
 /** Docked side panel that narrows the video instead of covering or stacking below it, collapsible
@@ -740,6 +782,7 @@ function PartySidePanel(props: PartySidePanelProps) {
     backendByIdentity,
     isHost,
     grantControl,
+    onSendReaction,
   } = props;
 
   if (collapsed) {
@@ -802,6 +845,20 @@ function PartySidePanel(props: PartySidePanelProps) {
         >
           {cameraEnabled ? "Turn Off Camera" : "Turn On Camera"}
         </button>
+      </div>
+
+      <div className="flex gap-1.5">
+        {REACTION_EMOJIS.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => onSendReaction(emoji)}
+            disabled={!room}
+            className="flex-1 rounded-lg border border-divider-strong bg-surface-hover py-1.5 text-lg transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {emoji}
+          </button>
+        ))}
       </div>
 
       <div className="max-h-56 space-y-2 overflow-y-auto">

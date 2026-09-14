@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
@@ -13,6 +14,8 @@ import '../services/device_id_service.dart';
 import '../services/watch_party_service.dart';
 import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
+import 'reaction_overlay.dart';
+import 'reaction_picker.dart';
 import 'tv_party_rail.dart';
 import 'watch_party_chat.dart';
 import 'watch_party_toast.dart';
@@ -65,6 +68,11 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
   // expands into the full panel in place instead of a blocking modal sheet — see design.html's
   // mobile mockups. TV gets its own docked rail in a later phase; this is the fallback until then.
   bool _peekExpanded = false;
+
+  // Quick reactions — ephemeral, no persistence, broadcast over the same data channel sync-state
+  // already uses. See reaction_overlay.dart / reaction_picker.dart and design.html.
+  final List<FloatingReactionData> _reactions = [];
+  int _nextReactionId = 0;
 
   // Join/control-change toasts — see watch_party_toast.dart. `_hasSeenInitialRoster` guards
   // against firing a spurious "X joined" toast for every participant already in the party at the
@@ -127,6 +135,25 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
       }
     }
     return joined.canControlPlayback;
+  }
+
+  void _pushLocalReaction(String emoji) {
+    if (!mounted) return;
+    final id = _nextReactionId++;
+    setState(() => _reactions.add(FloatingReactionData(id: id, emoji: emoji, x: Random().nextDouble() * 0.8)));
+    Timer(const Duration(milliseconds: 2200), () {
+      if (mounted) setState(() => _reactions.removeWhere((r) => r.id == id));
+    });
+  }
+
+  // LiveKit doesn't echo publishData back to its own sender, so this shows the reaction locally
+  // right away, same as WatchPage.tsx's sendReaction.
+  Future<void> _sendReaction(String emoji) async {
+    _pushLocalReaction(emoji);
+    final room = _room;
+    if (room == null) return;
+    final payload = utf8.encode(jsonEncode({'type': 'reaction', 'emoji': emoji}));
+    await room.localParticipant?.publishData(payload, reliable: false, topic: 'watch-party-reaction');
   }
 
   void _pushToast(String message, {bool control = false}) {
@@ -309,6 +336,18 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
         _diffParticipantsForToasts(_participants, next);
         setState(() => _participants = next);
         _reconfigureSyncController();
+      } catch (_) {
+        // Ignore malformed payloads.
+      }
+      return;
+    }
+    if (event.topic == 'watch-party-reaction') {
+      // Ephemeral, from anyone — unlike sync-state, reactions aren't gated to whoever currently
+      // holds playback control.
+      try {
+        final decoded = jsonDecode(utf8.decode(event.data)) as Map<String, dynamic>;
+        final emoji = decoded['emoji'] as String?;
+        if (emoji != null) _pushLocalReaction(emoji);
       } catch (_) {
         // Ignore malformed payloads.
       }
@@ -505,6 +544,7 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
           onSetControl: _setControl,
           onLeave: _handleLeavePressed,
           onEnd: _handleEndPressed,
+          onSendReaction: _sendReaction,
           docked: true,
           onCollapse: () => setState(() => _sidebarCollapsed = true),
         ),
@@ -529,6 +569,7 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
               fit: StackFit.expand,
               children: [
                 widget.child,
+                Positioned.fill(child: ReactionOverlay(reactions: _reactions)),
                 Positioned(right: 12, top: 12, child: _buildCameraStrip()),
                 Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
               ],
@@ -551,6 +592,7 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
               fit: StackFit.expand,
               children: [
                 widget.child,
+                Positioned.fill(child: ReactionOverlay(reactions: _reactions)),
                 Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
               ],
             ),
@@ -562,6 +604,7 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
             onSetControl: _setControl,
             onLeave: _handleLeavePressed,
             onEnd: _handleEndPressed,
+            onSendReaction: _sendReaction,
             onExitToChrome: () => widget.syncController.tvChromeFocusNode.requestFocus(),
           ),
         ],
@@ -576,6 +619,7 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
         fit: StackFit.expand,
         children: [
           widget.child,
+          Positioned.fill(child: ReactionOverlay(reactions: _reactions)),
           Positioned(right: 12, top: top, child: _buildCameraStrip()),
           Positioned(top: top + 44, right: 8, child: WatchPartyToastStack(toasts: _toasts)),
           Positioned(
@@ -600,6 +644,7 @@ class _WatchPartyOverlayState extends State<WatchPartyOverlay> {
                         onSetControl: _setControl,
                         onLeave: _handleLeavePressed,
                         onEnd: _handleEndPressed,
+                        onSendReaction: _sendReaction,
                         docked: true,
                         onCollapse: () => setState(() => _peekExpanded = false),
                       ),
@@ -797,6 +842,7 @@ class _PartyPanel extends StatelessWidget {
   final void Function(WatchPartyParticipant participant, bool grant) onSetControl;
   final VoidCallback onLeave;
   final VoidCallback onEnd;
+  final ValueChanged<String> onSendReaction;
   // True for both Windows' docked sidebar (see usesDockedPartyPanel) and phone's expanded peek
   // popover (see _PeekPill) — neither is a bottom-sheet, so both skip the SafeArea framing, use a
   // collapse chevron instead of drag-to-dismiss, and drop the inline camera grid since that floats
@@ -815,6 +861,7 @@ class _PartyPanel extends StatelessWidget {
     required this.onSetControl,
     required this.onLeave,
     required this.onEnd,
+    required this.onSendReaction,
     this.docked = false,
     this.onCollapse,
   });
@@ -930,6 +977,8 @@ class _PartyPanel extends StatelessWidget {
       ),
     );
 
+    final reactionPicker = ReactionPicker(onSend: onSendReaction);
+
     final leaveEndRow = Row(
       children: [
         Expanded(child: OutlinedButton(onPressed: onLeave, child: const Text('Leave Party'))),
@@ -958,6 +1007,8 @@ class _PartyPanel extends StatelessWidget {
           const SizedBox(height: 4),
           codeChip,
           const SizedBox(height: 8),
+          reactionPicker,
+          const SizedBox(height: 8),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -982,6 +1033,8 @@ class _PartyPanel extends StatelessWidget {
           header,
           const SizedBox(height: 4),
           codeChip,
+          const SizedBox(height: 8),
+          reactionPicker,
           const SizedBox(height: 8),
           WatchPartyVideoGrid(room: room),
           const SizedBox(height: 8),
