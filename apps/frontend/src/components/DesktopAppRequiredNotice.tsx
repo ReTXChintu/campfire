@@ -14,6 +14,7 @@ export default function DesktopAppRequiredNotice({ title }: { title: string }) {
           {desktopAppDownloadUrl && (
             <a
               href={desktopAppDownloadUrl}
+              download={desktopAppDownloadUrl.split("/").pop()}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-md bg-white px-4 py-2 text-sm font-bold text-black transition hover:bg-white/90"
@@ -24,6 +25,7 @@ export default function DesktopAppRequiredNotice({ title }: { title: string }) {
           {mobileAppDownloadUrl && (
             <a
               href={mobileAppDownloadUrl}
+              download={mobileAppDownloadUrl.split("/").pop()}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-md border border-divider px-4 py-2 text-sm font-bold text-white/90 transition hover:bg-white/5"

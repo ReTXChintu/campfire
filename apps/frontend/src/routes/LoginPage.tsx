@@ -141,6 +141,7 @@ export default function LoginPage() {
         {mobileAppDownloadUrl && (
           <a
             href={mobileAppDownloadUrl}
+            download={mobileAppDownloadUrl.split("/").pop()}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 rounded-full border border-divider px-3 py-1.5 text-xs font-medium text-white/90 transition hover:border-white/30 hover:text-white"

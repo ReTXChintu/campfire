@@ -23,6 +23,8 @@ router.post("/", requireAuth, async (req, res) => {
     durationSeconds,
     subtitleSource,
     subtitleIndex,
+    subtitleLanguage,
+    subtitleTitle,
     audioLanguage,
     audioTitle,
   } = req.body as {
@@ -32,6 +34,8 @@ router.post("/", requireAuth, async (req, res) => {
     durationSeconds?: number;
     subtitleSource?: SubtitleSource;
     subtitleIndex?: number | null;
+    subtitleLanguage?: string | null;
+    subtitleTitle?: string | null;
     audioLanguage?: string | null;
     audioTitle?: string | null;
   };
@@ -58,6 +62,8 @@ router.post("/", requireAuth, async (req, res) => {
     durationSeconds,
     subtitleSource,
     subtitleIndex,
+    subtitleLanguage,
+    subtitleTitle,
     audioLanguage,
     audioTitle,
   });

@@ -13,7 +13,21 @@ const distDir = join(dirname(fileURLToPath(import.meta.url)), "dist");
 // index.html so react-router's client-side routes (e.g. /watch/:fileId) work on a hard refresh.
 const serve = sirv(distDir, { single: true, gzip: true });
 
-const server = createHttpServer(serve);
+// sirv resolves Content-Type via mrmime, whose built-in table has no `.apk` entry — with no
+// Content-Type at all, browsers sniff the file's own bytes, and since an APK is itself a ZIP
+// container, that resolves to application/zip and gets saved as "Campfire.apk.zip" instead of
+// "Campfire.apk". The frontend's download links now also set an explicit `download` attribute
+// (see TopBar.tsx/DesktopAppRequiredNotice.tsx/LoginPage.tsx) to force the right filename
+// regardless, but this covers anyone hitting the URL directly.
+const server = createHttpServer((req, res) => {
+  if (req.url === "/Campfire.apk") {
+    res.setHeader("Content-Type", "application/vnd.android.package-archive");
+    res.setHeader("Content-Disposition", 'attachment; filename="Campfire.apk"');
+  } else if (req.url === "/Campfire.exe") {
+    res.setHeader("Content-Disposition", 'attachment; filename="Campfire.exe"');
+  }
+  serve(req, res);
+});
 
 server.listen(port, () => {
   console.log(`Campfire frontend serving ${distDir} on http://0.0.0.0:${port}`);

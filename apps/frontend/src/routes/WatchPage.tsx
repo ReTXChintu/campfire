@@ -689,6 +689,8 @@ export default function WatchPage() {
                 outroStart={video.outroStart}
                 initialSubtitleSource={video.initialSubtitleSource}
                 initialSubtitleIndex={video.initialSubtitleIndex}
+                initialSubtitleLanguage={video.initialSubtitleLanguage}
+                initialSubtitleTitle={video.initialSubtitleTitle}
                 initialAudioLanguage={video.initialAudioLanguage}
                 initialAudioTitle={video.initialAudioTitle}
                 watchPartySync={watchPartySyncProp}

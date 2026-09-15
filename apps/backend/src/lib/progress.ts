@@ -18,9 +18,17 @@ export type WatchProgress = {
   // Audio is matched by language+title (not a raw index) since the identifier space genuinely
   // differs by player: web/CampfireVideoPlayer's restart-mode audio is a raw ffprobe stream index,
   // while MediaKitVideoPlayer's is mpv's own track id — language+title is the only representation
-  // both can look themselves up by.
+  // both can look themselves up by. subtitleLanguage/subtitleTitle are the same idea for
+  // subtitles — subtitleIndex alone only round-trips safely on the exact same video (its meaning
+  // is "index into *this file's* subtitles/probe list"), which breaks the moment a preference is
+  // reused on a different episode's own, differently-ordered list (see
+  // routes/catalog.ts's series-wide fallback). Name-matching resolves that: clients look up
+  // subtitleLanguage/subtitleTitle in whatever the current video's own track list is, falling back
+  // to "off"/default when no match exists there.
   subtitleSource?: SubtitleSource;
   subtitleIndex?: number | null;
+  subtitleLanguage?: string | null;
+  subtitleTitle?: string | null;
   audioLanguage?: string | null;
   audioTitle?: string | null;
   updatedAt: Date;
@@ -49,6 +57,27 @@ export async function getProgressForFolder(userId: string, parentFolderId: strin
   return col.find({ userId, parentFolderId }).toArray();
 }
 
+/** The most recently-touched track preference anywhere else in this series (folder) — powers
+ * "pick the audio/subtitle once, every other episode follows" for a video the user hasn't
+ * personally set a preference on yet. `excludeFileId` skips the video currently being loaded
+ * (its own progress doc, if any, already takes priority and is checked separately). */
+export async function getMostRecentPreferenceForFolder(
+  userId: string,
+  parentFolderId: string,
+  excludeFileId: string,
+) {
+  const col = await collection();
+  return col.findOne(
+    {
+      userId,
+      parentFolderId,
+      fileId: { $ne: excludeFileId },
+      $or: [{ subtitleSource: { $exists: true } }, { audioLanguage: { $exists: true } }],
+    },
+    { sort: { updatedAt: -1 } },
+  );
+}
+
 /** Most recently-watched, not-yet-completed videos for a user, across the whole library — powers
  * a real "Continue Watching" row (not fabricated data). */
 export async function getRecentInProgress(userId: string, limit: number) {
@@ -68,6 +97,8 @@ export async function upsertProgress(input: {
   durationSeconds: number;
   subtitleSource?: SubtitleSource;
   subtitleIndex?: number | null;
+  subtitleLanguage?: string | null;
+  subtitleTitle?: string | null;
   audioLanguage?: string | null;
   audioTitle?: string | null;
 }) {
@@ -88,6 +119,8 @@ export async function upsertProgress(input: {
   // previously-saved preference by omission.
   if (input.subtitleSource !== undefined) set.subtitleSource = input.subtitleSource;
   if (input.subtitleIndex !== undefined) set.subtitleIndex = input.subtitleIndex;
+  if (input.subtitleLanguage !== undefined) set.subtitleLanguage = input.subtitleLanguage;
+  if (input.subtitleTitle !== undefined) set.subtitleTitle = input.subtitleTitle;
   if (input.audioLanguage !== undefined) set.audioLanguage = input.audioLanguage;
   if (input.audioTitle !== undefined) set.audioTitle = input.audioTitle;
 

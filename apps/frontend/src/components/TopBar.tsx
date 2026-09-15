@@ -8,6 +8,11 @@ function DownloadLink({ href, label }: { href: string; label: string }) {
   return (
     <a
       href={href}
+      // Without this, the browser decides the saved filename/extension itself — and since the
+      // static server has no MIME entry for .apk, it falls back to sniffing the file's own bytes,
+      // which for an APK (a ZIP container) resolves to application/zip and gets saved as
+      // "Campfire.apk.zip". Naming the download explicitly sidesteps that entirely.
+      download={href.split("/").pop()}
       target="_blank"
       rel="noopener noreferrer"
       className="hidden items-center gap-1.5 rounded-full border border-divider px-3 py-1.5 text-xs font-medium text-white/90 transition hover:border-white/30 hover:text-white sm:flex"

@@ -11,7 +11,7 @@ import {
   getCatalogVideo,
   listPublishedVideosByParent,
 } from "../lib/catalogVideos";
-import { getProgress, getProgressForFolder, getRecentInProgress } from "../lib/progress";
+import { getProgress, getProgressForFolder, getMostRecentPreferenceForFolder, getRecentInProgress } from "../lib/progress";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 
@@ -239,6 +239,24 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   }
 
   const progress = await getProgress(req.authUser!.userId, fileId);
+  // "Watch a series, the audio/subtitle pick follows every episode" — if this exact video has
+  // never had a preference saved on it, fall back to whatever was most recently picked elsewhere
+  // in the same series, rather than always landing on defaults for every new episode. An explicit
+  // preference on this video's own progress doc always wins once it exists (e.g. the user picked
+  // something different for this one episode specifically). subtitleIndex is only trusted from the
+  // video's own doc — a raw index only means something within a single video's own subtitle/probe
+  // list, so a fallback from a sibling episode carries language/title only, and the client
+  // resolves that by name against this video's own track list (falling back to no subtitle / the
+  // default track when the name isn't found there).
+  let preference = progress;
+  let preferenceIsOwnVideo = true;
+  if (!isStandalone && !progress?.subtitleSource && !progress?.audioLanguage) {
+    const fallback = await getMostRecentPreferenceForFolder(req.authUser!.userId, parentFolderId, fileId);
+    if (fallback) {
+      preference = fallback;
+      preferenceIsOwnVideo = false;
+    }
+  }
   const backHref = isStandalone ? "/" : `/folder/${parentFolderId}`;
   // "native": browser <video> plays it directly. "raw": MKV — not web-playable at all, only the
   // desktop/mobile app's native player handles it (see isMkv in lib/drive.ts and the `raw` query
@@ -263,12 +281,15 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     progressByFileId,
     initialPositionSeconds: progress?.positionSeconds ?? 0,
     initialCompleted: progress?.completed ?? false,
-    // Remembered track choices (see lib/progress.ts) — undefined/absent on `progress` itself
-    // (never saved) collapses to null here, meaning "no preference, use default behavior".
-    initialSubtitleSource: progress?.subtitleSource ?? null,
-    initialSubtitleIndex: progress?.subtitleIndex ?? null,
-    initialAudioLanguage: progress?.audioLanguage ?? null,
-    initialAudioTitle: progress?.audioTitle ?? null,
+    // Remembered track choices (see lib/progress.ts) — undefined/absent collapses to null here,
+    // meaning "no preference, use default behavior". May come from this video's own progress doc,
+    // or (see `preference` above) a series-wide fallback from a sibling episode.
+    initialSubtitleSource: preference?.subtitleSource ?? null,
+    initialSubtitleIndex: preferenceIsOwnVideo ? (preference?.subtitleIndex ?? null) : null,
+    initialSubtitleLanguage: preference?.subtitleLanguage ?? null,
+    initialSubtitleTitle: preference?.subtitleTitle ?? null,
+    initialAudioLanguage: preference?.audioLanguage ?? null,
+    initialAudioTitle: preference?.audioTitle ?? null,
     seekMode,
     durationSeconds: video.durationSeconds,
     subtitles,

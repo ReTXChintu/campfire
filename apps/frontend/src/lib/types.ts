@@ -139,11 +139,18 @@ export type VideoResponse = {
   // Remembered track choices (see apps/backend/src/lib/progress.ts) — null means "no preference
   // recorded yet", not "off". initialSubtitleIndex is only meaningful when the source is
   // "external" (an index into `subtitles` above) or "restart" (a raw ffprobe stream index, used
-  // by the live-extracted-on-seek subtitle path non-native content uses). Audio is matched by
-  // language+title rather than a raw index, since the identifier space isn't portable across
-  // seekModes/players.
+  // by the live-extracted-on-seek subtitle path non-native content uses) *and* the preference came
+  // from this exact video's own history — the backend nulls it out when falling back to a sibling
+  // episode's preference (series-wide propagation), since a raw index only means something within
+  // a single video's own track list. initialSubtitleLanguage/initialSubtitleTitle are the
+  // name-based identity to match against `subtitles`/the probe's subtitle tracks instead in that
+  // case (or preferably always, since name-matching is more robust than index even for the
+  // same-video case). Audio is matched by language+title rather than a raw index, since the
+  // identifier space isn't portable across seekModes/players.
   initialSubtitleSource: "off" | "external" | "restart" | null;
   initialSubtitleIndex: number | null;
+  initialSubtitleLanguage: string | null;
+  initialSubtitleTitle: string | null;
   initialAudioLanguage: string | null;
   initialAudioTitle: string | null;
 };

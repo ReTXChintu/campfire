@@ -47,6 +47,8 @@ type Props = {
   outroStart: number | null;
   initialSubtitleSource: "off" | "external" | "restart" | null;
   initialSubtitleIndex: number | null;
+  initialSubtitleLanguage: string | null;
+  initialSubtitleTitle: string | null;
   initialAudioLanguage: string | null;
   initialAudioTitle: string | null;
   watchPartySync?: {
@@ -145,6 +147,8 @@ export default function VideoPlayer({
   outroStart,
   initialSubtitleSource,
   initialSubtitleIndex,
+  initialSubtitleLanguage,
+  initialSubtitleTitle,
   initialAudioLanguage,
   initialAudioTitle,
   watchPartySync,
@@ -212,7 +216,10 @@ export default function VideoPlayer({
   const [hoverSeconds, setHoverSeconds] = useState<number | null>(null);
   const [hoverPercent, setHoverPercent] = useState(0);
 
-  // restart-mode only
+  // restart-mode only. Prefers a name match against probe.subtitleTracks once probe resolves (see
+  // the effect below) — the raw index used here as the initial guess is only reliable when it came
+  // from this exact video's own progress doc (a series-wide fallback from a sibling episode never
+  // carries an index, only language/title — see initialSubtitleIndex's doc comment).
   const [audioIndex, setAudioIndex] = useState<number | null>(null);
   const [audioDelayMs, setAudioDelayMs] = useState(0);
   const [restartSubtitleIndex, setRestartSubtitleIndex] = useState<number | null>(
@@ -221,10 +228,19 @@ export default function VideoPlayer({
   const [subtitleDelayMs, setSubtitleDelayMs] = useState(0);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
 
-  // native-mode only
-  const [nativeSubtitleIndex, setNativeSubtitleIndex] = useState<number | null>(
-    initialSubtitleSource === "external" ? initialSubtitleIndex : null,
-  );
+  // native-mode only — subtitles is available synchronously (a prop, not fetched), so this can
+  // resolve by name right away instead of waiting on probe the way restart-mode/audio do.
+  const [nativeSubtitleIndex, setNativeSubtitleIndex] = useState<number | null>(() => {
+    if (initialSubtitleSource !== "external") return null;
+    if (initialSubtitleLanguage == null && initialSubtitleTitle == null) {
+      // No name recorded at all (older saved preference, or one with no language/title metadata
+      // to match by) — the raw index is the only thing to go on, and only ever trustworthy for
+      // this exact video anyway.
+      return initialSubtitleIndex;
+    }
+    const match = subtitles.find((s) => s.language === initialSubtitleLanguage && s.title === initialSubtitleTitle);
+    return match?.index ?? null; // named preference doesn't exist here — default (off)
+  });
   const [nativeDuration, setNativeDuration] = useState<number | null>(null);
 
   // Remembered audio-track preference (see apps/backend/src/lib/progress.ts) — restart-mode only,
@@ -233,6 +249,12 @@ export default function VideoPlayer({
   // state) because they're read-once inputs to that effect, not values the UI itself renders.
   const audioPreferenceRef = useRef({ language: initialAudioLanguage, title: initialAudioTitle });
   const audioPreferenceAppliedRef = useRef(initialAudioLanguage == null && initialAudioTitle == null);
+  // Same idea, restart-mode subtitle — external-mode's equivalent is handled synchronously above
+  // since `subtitles` doesn't need a probe fetch to be known.
+  const subtitlePreferenceRef = useRef({ language: initialSubtitleLanguage, title: initialSubtitleTitle });
+  const subtitlePreferenceAppliedRef = useRef(
+    initialSubtitleSource !== "restart" || (initialSubtitleLanguage == null && initialSubtitleTitle == null),
+  );
   // Whether there's a subtitle/audio preference worth sending on the next (periodic, position-
   // only) progress save — true from mount if one was already loaded (so periodic saves keep
   // confirming it, harmlessly), and set true the moment the user explicitly changes either this
@@ -319,16 +341,25 @@ export default function VideoPlayer({
     const fields: {
       subtitleSource?: "off" | "external" | "restart";
       subtitleIndex?: number | null;
+      subtitleLanguage?: string | null;
+      subtitleTitle?: string | null;
       audioLanguage?: string | null;
       audioTitle?: string | null;
     } = {};
     if (subtitleTouchedRef.current) {
       if (isNative) {
+        const track = nativeSubtitleIndex != null ? subtitles.find((s) => s.index === nativeSubtitleIndex) : null;
         fields.subtitleSource = nativeSubtitleIndex != null ? "external" : "off";
         fields.subtitleIndex = nativeSubtitleIndex;
+        fields.subtitleLanguage = track?.language ?? null;
+        fields.subtitleTitle = track?.title ?? null;
       } else {
+        const track =
+          restartSubtitleIndex != null ? probe?.subtitleTracks.find((t) => t.index === restartSubtitleIndex) : null;
         fields.subtitleSource = restartSubtitleIndex != null ? "restart" : "off";
         fields.subtitleIndex = restartSubtitleIndex;
+        fields.subtitleLanguage = track?.language ?? null;
+        fields.subtitleTitle = track?.title ?? null;
       }
     }
     if (audioTouchedRef.current && !isNative) {
@@ -337,7 +368,7 @@ export default function VideoPlayer({
       fields.audioTitle = track?.title ?? null;
     }
     return fields;
-  }, [isNative, nativeSubtitleIndex, restartSubtitleIndex, audioIndex, probe]);
+  }, [isNative, nativeSubtitleIndex, restartSubtitleIndex, subtitles, audioIndex, probe]);
 
   const goToNext = useCallback(() => {
     const video = videoRef.current;
@@ -407,6 +438,16 @@ export default function VideoPlayer({
           const { language, title } = audioPreferenceRef.current;
           const match = data.audioTracks.find((t) => t.language === language && t.title === title);
           if (match) setAudioIndex(match.index);
+        }
+        // Same idea for restart-mode subtitles — prefers a name match over whatever raw index
+        // restartSubtitleIndex's initial state guessed, since name-matching also correctly handles
+        // a series-wide fallback preference (no index of its own — see the doc comment on
+        // initialSubtitleIndex) and is more robust than a raw index even for this exact video.
+        if (!subtitlePreferenceAppliedRef.current) {
+          subtitlePreferenceAppliedRef.current = true;
+          const { language, title } = subtitlePreferenceRef.current;
+          const match = data.subtitleTracks.find((t) => t.language === language && t.title === title);
+          if (match) setRestartSubtitleIndex(match.index);
         }
       })
       .catch(() => {});
@@ -835,6 +876,7 @@ export default function VideoPlayer({
   const changeNativeSubtitle = (index: number | null) => {
     setNativeSubtitleIndex(index);
     subtitleTouchedRef.current = true;
+    const track = index != null ? subtitles.find((s) => s.index === index) : null;
     apiPost("/api/progress", {
       fileId,
       parentFolderId,
@@ -842,6 +884,8 @@ export default function VideoPlayer({
       durationSeconds: effectiveDuration ?? 0,
       subtitleSource: index != null ? "external" : "off",
       subtitleIndex: index,
+      subtitleLanguage: track?.language ?? null,
+      subtitleTitle: track?.title ?? null,
     }).catch(() => {});
   };
 
@@ -884,6 +928,7 @@ export default function VideoPlayer({
     setRestartSubtitleIndex(index);
     appliedSubtitleDelayRef.current = 0; // fresh cues load unshifted; reapplied in handleSubtitleTrackLoad
     subtitleTouchedRef.current = true;
+    const track = index != null ? probe?.subtitleTracks.find((t) => t.index === index) : null;
     apiPost("/api/progress", {
       fileId,
       parentFolderId,
@@ -891,6 +936,8 @@ export default function VideoPlayer({
       durationSeconds: effectiveDuration ?? 0,
       subtitleSource: index != null ? "restart" : "off",
       subtitleIndex: index,
+      subtitleLanguage: track?.language ?? null,
+      subtitleTitle: track?.title ?? null,
     }).catch(() => {});
   };
 
