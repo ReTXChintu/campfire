@@ -138,16 +138,19 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   String? _errorMessage;
   Offset? _doubleTapLocalPosition;
 
-  // Completes on the first `position` stream tick after the *current* open/reopen — distinct from
-  // `_resumeSeekComplete` (which flips true as soon as the open()/setSubtitleTrack() await chain
-  // finishes, well before the position stream has actually caught up to a `start:`-seeded resume
-  // on a slow connection: confirmed live on Android, several seconds behind). Anything that reopens
-  // the stream automatically (not from a direct user action — currently only
-  // _maybeSeedAutoQuality's remembered-ceiling seed) must wait on this before capturing "the
-  // current position to preserve", or it captures a stale ~0 and the reopen silently resets
-  // playback to the start right after a correct resume just landed.
+  // Completes on the first `position` stream tick after the *current* open/reopen — used by
+  // _bootstrap itself to know playback has genuinely started before issuing the resume seek (see
+  // its own comment: a seek issued right after open() resolving races mpv's own already-started
+  // playback often enough on a slow connection to just silently lose).
   Completer<void> _firstPositionTickCompleter = Completer<void>();
   bool _sawFirstPositionTick = false;
+  // Completes once the *initial* bootstrap's own resume seek (if any) has actually been issued —
+  // distinct from _firstPositionTickCompleter, which that resume seek itself waits on. Anything
+  // that reopens the stream automatically on mount (not from a direct user action — currently only
+  // _maybeSeedAutoQuality's remembered-ceiling seed) must wait on *this* before capturing "the
+  // current position to preserve", or it can win the race against the resume seek and capture a
+  // stale ~0, silently resetting playback to the start right after a correct resume just landed.
+  final Completer<void> _initialSeekSettleCompleter = Completer<void>();
 
   // Watch Party sync — see watch_party_sync_controller.dart. Set true for the duration of
   // _applyInboundSyncState so the seek/play/pause calls it makes don't get re-broadcast as if they
@@ -485,27 +488,30 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       'resumeSeconds=$resumeSeconds needsResumeSeek=$needsResumeSeek streamIsSeekable=$_streamIsSeekable '
       'isRaw=${video.isRaw} usingPassthrough=$_usingPassthrough uri=${_streamUri(restartOffsetSeconds: resumeSeconds)}',
     );
-    // Media's `start:` tells mpv to begin playback already at this offset, instead of opening at 0
-    // and correcting with a seek() afterward — Player.open() defaults to play:true, so a manual
-    // post-open seek races already-started playback (loses that race often enough on a slow
-    // connection, exactly the case that matters most for MKVs streamed live from Drive) rather than
-    // reliably landing before the viewer notices. `start:` avoids the race entirely.
+    // Previously used Media's `start:` to tell mpv to begin playback already at this offset,
+    // instead of opening at 0 and correcting with a seek() afterward — but on a slow connection
+    // that raced mpv's own position-reporting often enough that the resume silently never actually
+    // landed (confirmed live via the _dbg logging below: player.state.position stayed at/near zero
+    // well after `start:` should have taken effect). Now it plays from 0 like any other open, then
+    // explicitly seeks once a real position tick confirms playback has genuinely started — the
+    // exact same seek() call a manual drag-seek already uses, which does land reliably.
     if (needsResumeSeek) _resumeSeekComplete = false;
     _firstPositionTickCompleter = Completer<void>();
     _sawFirstPositionTick = false;
-    await _player.open(
-      Media(
-        _streamUri(restartOffsetSeconds: resumeSeconds).toString(),
-        start: needsResumeSeek ? Duration(milliseconds: (resumeSeconds * 1000).round()) : null,
-      ),
-    );
+    await _player.open(Media(_streamUri(restartOffsetSeconds: resumeSeconds).toString()));
     _dbg('bootstrap: open() returned, player.state.position=${_player.state.position} duration=${_player.state.duration}');
     await _player.setRate(_speed);
     // Defaults to SubtitleTrack.no() (see _selectedSubtitleTrack's initializer) rather than
     // libmpv's own default-flag-driven auto-selection — matching the native-mode player's default
     // of no track pre-selected.
     await _player.setSubtitleTrack(_selectedSubtitleTrack);
+    if (needsResumeSeek) {
+      await _firstPositionTickCompleter.future;
+      _dbg('bootstrap: first tick landed at ${_player.state.position}, seeking to resume position $resumeSeconds');
+      await _player.seek(Duration(milliseconds: (resumeSeconds * 1000).round()));
+    }
     _resumeSeekComplete = true;
+    if (!_initialSeekSettleCompleter.isCompleted) _initialSeekSettleCompleter.complete();
     _dbg('bootstrap: done, resumeSeekComplete=true, player.state.position=${_player.state.position}');
   }
 
@@ -519,13 +525,15 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final heights = probe.availableQualities.map((q) => q.height).toList();
     final remembered = await QualityPrefsService.getCeiling();
     // Never reopen (which captures "the current position" via _applyAutoChange/_reopenAt) before
-    // the initial resume-seeded open has actually landed a real position tick — probe resolving
-    // (which triggers this) races the bootstrap open independently, and on a slow connection can
-    // easily finish first, capturing a stale ~0 and silently resetting a correct resume back to
-    // the start seconds after it landed. Confirmed live on Android.
-    _dbg('maybeSeedAutoQuality: remembered=$remembered heights=$heights waiting for first position tick...');
-    await _firstPositionTickCompleter.future;
-    _dbg('maybeSeedAutoQuality: first tick landed, position=$_position — proceeding');
+    // the initial bootstrap has actually issued its own resume seek — probe resolving (which
+    // triggers this) races bootstrap independently, and on a slow connection can easily finish
+    // first; waiting on just the first position tick (bootstrap's own resume seek also waits on
+    // that same tick, see _initialSeekSettleCompleter's doc comment) wasn't enough, since this
+    // could then win the race to seek()/reopen() with a stale ~0 right before bootstrap's real
+    // resume seek landed. Confirmed live on Android.
+    _dbg('maybeSeedAutoQuality: remembered=$remembered heights=$heights waiting for initial seek to settle...');
+    await _initialSeekSettleCompleter.future;
+    _dbg('maybeSeedAutoQuality: initial seek settled, position=$_position — proceeding');
     if (!mounted || _qualitySelection != 'auto' || _autoResolvedHeight != null) return;
     if (remembered != null && heights.contains(remembered)) {
       _applyAutoChange(remembered);
@@ -543,9 +551,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     }
     _saveProgress(force: true);
     if (!_skipOrientationRestoreOnDispose) _restoreSystemChrome();
-    // Release anything still awaiting the first tick (e.g. _maybeSeedAutoQuality) rather than
-    // leaving it dangling forever on a video that never got a chance to play.
+    // Release anything still awaiting these (e.g. _maybeSeedAutoQuality) rather than leaving it
+    // dangling forever on a video that never got a chance to play.
     if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
+    if (!_initialSeekSettleCompleter.isCompleted) _initialSeekSettleCompleter.complete();
     _player.dispose();
     widget.watchPartySync?.removeListener(_onSyncControllerChanged);
     // Navigating back to the library should never leave the OS window stuck fullscreen.
