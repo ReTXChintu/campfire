@@ -83,6 +83,18 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   // position so the thumb (and the floating timestamp tooltip) follow the drag instead of snapping
   // back to wherever real playback currently is; committed via _seekTo only once the user releases.
   double? _scrubSeconds;
+  // Completes on the first controller-value tick after the *current* _initController call —
+  // distinct from that call's own await chain finishing, since controller.seekTo()'s Future can
+  // resolve before .value.position has actually caught up to the resume target on a slow
+  // connection (the same race MediaKitVideoPlayer hit and fixed the identical way — see its
+  // _firstPositionTickCompleter). Anything that reloads the controller automatically (not from a
+  // direct user action — currently only _maybeSeedAutoQuality's remembered-ceiling seed) must wait
+  // on this before capturing "the current position to preserve", or it captures a stale ~0 and the
+  // reload silently resets playback to the start right after a correct resume just landed.
+  Completer<void> _firstPositionTickCompleter = Completer<void>();
+  bool _sawFirstPositionTick = false;
+  // See _navigateToEpisode.
+  bool _skipOrientationRestoreOnDispose = false;
 
   // restart-mode (or any downscaled quality) only
   double _baseOffsetSeconds = 0;
@@ -247,7 +259,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       onSkipNext: video.nextFileId == null ? null : _goToNext,
       onSkipPrevious: video.previousFileId == null
           ? null
-          : () => context.pushReplacement('/watch/${video.previousFileId}'),
+          : () => _navigateToEpisode(video.previousFileId!),
     );
   }
 
@@ -314,6 +326,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     if (_qualitySelection != 'auto' || _autoResolvedHeight != null) return;
     final heights = probe.availableQualities.map((q) => q.height).toList();
     final remembered = await QualityPrefsService.getCeiling();
+    // Probe (and this remembered-ceiling lookup) can resolve well before _bootstrap's own
+    // controller init + resume seek does — reloading for a remembered quality before that lands
+    // would read _absolutePosition while it's still 0 and silently resume from the start instead
+    // of the real saved position. See _firstPositionTickCompleter.
+    await _firstPositionTickCompleter.future;
     if (!mounted || _qualitySelection != 'auto' || _autoResolvedHeight != null) return;
     if (remembered != null && heights.contains(remembered)) {
       _applyAutoChange(remembered);
@@ -355,7 +372,10 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     _autoStepUpTimer?.cancel();
     _overlayHideTimer?.cancel();
     _saveProgress();
-    _restoreSystemChrome();
+    if (!_skipOrientationRestoreOnDispose) _restoreSystemChrome();
+    // Release anything still awaiting the first tick (e.g. _maybeSeedAutoQuality) rather than
+    // leaving it dangling forever on a video that never got a chance to play.
+    if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
     _controller?.removeListener(_onTick);
     _controller?.dispose();
     widget.watchPartySync?.removeListener(_onSyncControllerChanged);
@@ -394,6 +414,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   }
 
   Future<void> _initController(Uri uri) async {
+    _firstPositionTickCompleter = Completer<void>();
+    _sawFirstPositionTick = false;
     final controller = VideoPlayerController.networkUrl(uri);
     _controller = controller;
     try {
@@ -406,7 +428,6 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       controller.dispose();
       return;
     }
-    controller.addListener(_onTick);
     controller.setPlaybackSpeed(_speed);
     // A seekable resource (passthrough or a specific quality tier) has no `t=` URL param to resume
     // at (see _currentUri) — real Range seeking means a plain post-initialize seek works fine, same
@@ -421,6 +442,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
         await controller.seekTo(Duration(milliseconds: (resumeSeconds * 1000).round()));
       }
     }
+    // Attached only now, after the resume seek has already landed — attaching it earlier let
+    // _onTick's very first firing (which can happen the moment the listener is attached, before
+    // seekTo() below even runs) mark _firstPositionTickCompleter done prematurely, defeating the
+    // whole point of _maybeSeedAutoQuality waiting on it.
+    controller.addListener(_onTick);
     controller.play();
     setState(() => _isBuffering = false);
   }
@@ -532,6 +558,11 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     final controller = _controller;
     if (controller == null) return;
 
+    if (!_sawFirstPositionTick) {
+      _sawFirstPositionTick = true;
+      if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
+    }
+
     final buffering = controller.value.isBuffering;
     if (buffering != _isBuffering) {
       setState(() => _isBuffering = buffering);
@@ -588,11 +619,22 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   }
 
   void _goToNext() {
-    _saveProgress(force: true);
     final next = video.nextFileId;
-    if (next != null) {
-      context.pushReplacement('/watch/$next');
-    }
+    if (next != null) _navigateToEpisode(next);
+  }
+
+  // Every in-player way of switching to another episode (next/previous buttons, media-session
+  // skip, the episodes panel) routes through here — always saves progress first (previously the
+  // raw prev/next IconButtons skipped this, only _goToNext did), and skips this player's own
+  // dispose-time _restoreSystemChrome() since the destination is also a video player that locks
+  // landscape immediately in its own initState. Without that skip, dispose() (which fires *after*
+  // the new player's initState — it stays mounted through the route-replace transition) would
+  // relock portrait right after the new screen already locked landscape, leaving the app stuck in
+  // portrait until manually rotated.
+  void _navigateToEpisode(String fileId) {
+    _saveProgress(force: true);
+    _skipOrientationRestoreOnDispose = true;
+    context.pushReplacement('/watch/$fileId');
   }
 
   void _scheduleHide() {
@@ -1048,6 +1090,16 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                         child: Slider(
                                           value: sliderValue,
                                           max: maxMs,
+                                          // Cancel the auto-hide timer for the whole drag, not just
+                                          // on tap — otherwise a drag that outlasts
+                                          // _hideControlsDelay hides the bar (and this slider)
+                                          // out from under the user's thumb mid-scrub.
+                                          onChangeStart: duration == null || _locked
+                                              ? null
+                                              : (value) {
+                                                  _hideTimer?.cancel();
+                                                  setState(() => _scrubSeconds = value / 1000);
+                                                },
                                           onChanged: duration == null || _locked
                                               ? null
                                               : (value) => setState(() => _scrubSeconds = value / 1000),
@@ -1056,6 +1108,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                               : (value) {
                                                   _seekTo(value / 1000);
                                                   setState(() => _scrubSeconds = null);
+                                                  _showControls();
                                                 },
                                         ),
                                       ),
@@ -1088,9 +1141,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                   ),
                                   onPressed: video.previousFileId == null
                                       ? null
-                                      : () => context.pushReplacement(
-                                          '/watch/${video.previousFileId}',
-                                        ),
+                                      : () => _navigateToEpisode(video.previousFileId!),
                                 ),
                                 IconButton(
                                   icon: const Icon(
@@ -1123,11 +1174,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                                     Icons.skip_next,
                                     color: Colors.white,
                                   ),
-                                  onPressed: video.nextFileId == null
-                                      ? null
-                                      : () => context.pushReplacement(
-                                          '/watch/${video.nextFileId}',
-                                        ),
+                                  onPressed: video.nextFileId == null ? null : _goToNext,
                                 ),
                               ],
                             ),
@@ -1235,7 +1282,7 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
                 episodes: video.episodes,
                 progressByFileId: video.progressByFileId,
                 currentFileId: video.fileId,
-                onSelect: (id) => context.pushReplacement('/watch/$id'),
+                onSelect: _navigateToEpisode,
                 onClose: _closePanels,
               ),
 

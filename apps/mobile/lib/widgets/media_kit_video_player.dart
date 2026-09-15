@@ -113,6 +113,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // position so the thumb (and the floating timestamp tooltip) follow the drag instead of snapping
   // back to wherever real playback currently is; committed via _seekTo only once the user releases.
   double? _scrubSeconds;
+  // See _navigateToEpisode.
+  bool _skipOrientationRestoreOnDispose = false;
 
   // Windows only — toggles the OS window itself (there's no in-player "fullscreen" concept on
   // desktop the way the web <video> element has one). Never true/used on any other platform.
@@ -359,7 +361,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       onSkipNext: video.nextFileId == null ? null : _goToNext,
       onSkipPrevious: video.previousFileId == null
           ? null
-          : () => context.pushReplacement('/watch/${video.previousFileId}'),
+          : () => _navigateToEpisode(video.previousFileId!),
     );
   }
 
@@ -520,7 +522,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       sub.cancel();
     }
     _saveProgress(force: true);
-    _restoreSystemChrome();
+    if (!_skipOrientationRestoreOnDispose) _restoreSystemChrome();
     // Release anything still awaiting the first tick (e.g. _maybeSeedAutoQuality) rather than
     // leaving it dangling forever on a video that never got a chance to play.
     if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
@@ -578,9 +580,21 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   void _goToNext() {
-    _saveProgress(force: true);
     final next = video.nextFileId;
-    if (next != null) context.pushReplacement('/watch/$next');
+    if (next != null) _navigateToEpisode(next);
+  }
+
+  // Every in-player way of switching to another episode (next/previous buttons, media-session
+  // skip, the episodes panel) routes through here — always saves progress first, and skips this
+  // player's own dispose-time _restoreSystemChrome() since the destination is also a video player
+  // that locks landscape immediately in its own initState. Without that skip, dispose() (which
+  // fires *after* the new player's initState — it stays mounted through the route-replace
+  // transition) would relock portrait right after the new screen already locked landscape, leaving
+  // the app stuck in portrait until manually rotated. See CampfireVideoPlayer's identical fix.
+  void _navigateToEpisode(String fileId) {
+    _saveProgress(force: true);
+    _skipOrientationRestoreOnDispose = true;
+    context.pushReplacement('/watch/$fileId');
   }
 
   void _scheduleHide() {
@@ -1056,6 +1070,16 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                         child: Slider(
                                           value: sliderValue,
                                           max: maxMs,
+                                          // Cancel the auto-hide timer for the whole drag, not just
+                                          // on tap — otherwise a drag that outlasts
+                                          // _hideControlsDelay hides the bar (and this slider) out
+                                          // from under the user's thumb mid-scrub.
+                                          onChangeStart: duration.inMilliseconds <= 0 || _locked
+                                              ? null
+                                              : (value) {
+                                                  _hideTimer?.cancel();
+                                                  setState(() => _scrubSeconds = value / 1000);
+                                                },
                                           onChanged: duration.inMilliseconds <= 0 || _locked
                                               ? null
                                               : (value) => setState(() => _scrubSeconds = value / 1000),
@@ -1064,6 +1088,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                               : (value) {
                                                   _seekTo(value / 1000);
                                                   setState(() => _scrubSeconds = null);
+                                                  _showControls();
                                                 },
                                         ),
                                       ),
@@ -1088,7 +1113,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                   icon: const Icon(Icons.skip_previous, color: Colors.white),
                                   onPressed: video.previousFileId == null
                                       ? null
-                                      : () => context.pushReplacement('/watch/${video.previousFileId}'),
+                                      : () => _navigateToEpisode(video.previousFileId!),
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.replay_10, color: Colors.white),
@@ -1110,9 +1135,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.skip_next, color: Colors.white),
-                                  onPressed: video.nextFileId == null
-                                      ? null
-                                      : () => context.pushReplacement('/watch/${video.nextFileId}'),
+                                  onPressed: video.nextFileId == null ? null : _goToNext,
                                 ),
                               ],
                             ),
@@ -1212,7 +1235,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                 episodes: video.episodes,
                 progressByFileId: video.progressByFileId,
                 currentFileId: video.fileId,
-                onSelect: (id) => context.pushReplacement('/watch/$id'),
+                onSelect: _navigateToEpisode,
                 onClose: _closePanels,
               ),
 
