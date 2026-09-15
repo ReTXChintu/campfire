@@ -207,6 +207,10 @@ export default function VideoPlayer({
   // `input` event, not `change`), so we track the live drag position separately and only commit
   // it — i.e. actually seek/restart — once the user releases.
   const [scrubValue, setScrubValue] = useState<number | null>(null);
+  // Hover position on the seek bar, shown as a floating timestamp tooltip before/while dragging —
+  // separate from scrubValue since it tracks pointer position even when not actively dragging.
+  const [hoverSeconds, setHoverSeconds] = useState<number | null>(null);
+  const [hoverPercent, setHoverPercent] = useState(0);
 
   // restart-mode only
   const [audioIndex, setAudioIndex] = useState<number | null>(null);
@@ -688,6 +692,16 @@ export default function VideoPlayer({
     setScrubValue(null);
   };
 
+  // Drives the floating timestamp tooltip — computes the seconds a given pointer X position over
+  // the seek bar corresponds to, from the track's own bounding rect (so it works regardless of
+  // where on the page the bar is laid out).
+  const updateHoverFromClientX = (clientX: number, rect: DOMRect) => {
+    if (effectiveDuration == null) return;
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    setHoverSeconds(ratio * effectiveDuration);
+    setHoverPercent(ratio * 100);
+  };
+
   const changeQuality = (value: QualitySelection) => {
     const nextEffectiveHeight =
       value === "auto" ? autoResolvedHeight : value === "original" ? null : value;
@@ -1077,23 +1091,40 @@ export default function VideoPlayer({
           <span className="w-12 shrink-0 text-right text-xs tabular-nums text-white/70">
             {formatTime(shownSeconds)}
           </span>
-          <input
-            type="range"
-            min={0}
-            max={effectiveDuration ?? 0}
-            step={1}
-            value={Math.min(shownSeconds, effectiveDuration ?? shownSeconds)}
-            disabled={effectiveDuration == null || locked}
-            title={locked ? "You don't have playback control in this watch party" : undefined}
-            onChange={(e) => setScrubValue(Number(e.target.value))}
-            onMouseUp={commitSeek}
-            onTouchEnd={commitSeek}
-            onKeyUp={commitSeek}
-            style={{
-              background: `linear-gradient(to right, white ${progressPercent}%, rgba(255,255,255,0.3) ${progressPercent}%)`,
-            }}
-            className="h-1 w-full cursor-pointer appearance-none rounded-full [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-          />
+          <div className="relative flex-1">
+            {(hoverSeconds != null || scrubValue != null) && effectiveDuration != null && !locked && (
+              <div
+                className="pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/90 px-2 py-1 text-xs font-semibold tabular-nums text-white shadow-lg"
+                style={{ left: `${scrubValue != null ? progressPercent : hoverPercent}%` }}
+              >
+                {formatTime(scrubValue ?? hoverSeconds ?? 0)}
+              </div>
+            )}
+            <input
+              type="range"
+              min={0}
+              max={effectiveDuration ?? 0}
+              step={1}
+              value={Math.min(shownSeconds, effectiveDuration ?? shownSeconds)}
+              disabled={effectiveDuration == null || locked}
+              title={locked ? "You don't have playback control in this watch party" : undefined}
+              onChange={(e) => setScrubValue(Number(e.target.value))}
+              onMouseMove={(e) => updateHoverFromClientX(e.clientX, e.currentTarget.getBoundingClientRect())}
+              onMouseLeave={() => setHoverSeconds(null)}
+              onTouchStart={(e) => updateHoverFromClientX(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())}
+              onTouchMove={(e) => updateHoverFromClientX(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())}
+              onMouseUp={commitSeek}
+              onTouchEnd={() => {
+                commitSeek();
+                setHoverSeconds(null);
+              }}
+              onKeyUp={commitSeek}
+              style={{
+                background: `linear-gradient(to right, white ${progressPercent}%, rgba(255,255,255,0.3) ${progressPercent}%)`,
+              }}
+              className="h-1 w-full cursor-pointer appearance-none rounded-full [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+            />
+          </div>
           <button
             type="button"
             onClick={() => setTimeDisplayMode((m) => (m === "total" ? "remaining" : "total"))}

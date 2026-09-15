@@ -109,6 +109,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   Timer? _hideTimer;
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
   double _speed = 1;
+  // Live drag position on the seek bar — tracked separately from the controller's own playback
+  // position so the thumb (and the floating timestamp tooltip) follow the drag instead of snapping
+  // back to wherever real playback currently is; committed via _seekTo only once the user releases.
+  double? _scrubSeconds;
 
   // Windows only — toggles the OS window itself (there's no in-player "fullscreen" concept on
   // desktop the way the web <video> element has one). Never true/used on any other platform.
@@ -1004,26 +1008,68 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                             const SizedBox(width: 8),
                             Text(_formatTime(position), style: const TextStyle(color: Colors.white70, fontSize: 11)),
                             Expanded(
-                              child: SliderTheme(
-                                data: SliderTheme.of(context).copyWith(
-                                  trackHeight: 2,
-                                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                                  activeTrackColor: Colors.white,
-                                  inactiveTrackColor: Colors.white24,
-                                  thumbColor: Colors.white,
-                                ),
-                                child: Slider(
-                                  value: duration.inMilliseconds > 0
-                                      ? position.inMilliseconds.clamp(0, duration.inMilliseconds).toDouble()
-                                      : 0,
-                                  max: duration.inMilliseconds.toDouble().clamp(1, double.infinity),
-                                  onChanged:
-                                      duration.inMilliseconds <= 0 || _locked ? null : (value) => setState(() {}),
-                                  onChangeEnd: duration.inMilliseconds <= 0 || _locked
-                                      ? null
-                                      : (value) => _seekTo(value / 1000),
-                                ),
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final maxMs = duration.inMilliseconds.toDouble().clamp(1, double.infinity).toDouble();
+                                  final sliderValue = duration.inMilliseconds > 0
+                                      ? (_scrubSeconds != null
+                                                ? _scrubSeconds! * 1000
+                                                : position.inMilliseconds.toDouble())
+                                            .clamp(0, duration.inMilliseconds.toDouble())
+                                            .toDouble()
+                                      : 0.0;
+                                  final fraction = sliderValue / maxMs;
+                                  return Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      if (_scrubSeconds != null)
+                                        Positioned(
+                                          left: (fraction * constraints.maxWidth - 20)
+                                              .clamp(0.0, (constraints.maxWidth - 40).clamp(0.0, double.infinity))
+                                              .toDouble(),
+                                          bottom: 28,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.9),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              _formatTime(Duration(milliseconds: sliderValue.round())),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      SliderTheme(
+                                        data: SliderTheme.of(context).copyWith(
+                                          trackHeight: 2,
+                                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                                          activeTrackColor: Colors.white,
+                                          inactiveTrackColor: Colors.white24,
+                                          thumbColor: Colors.white,
+                                        ),
+                                        child: Slider(
+                                          value: sliderValue,
+                                          max: maxMs,
+                                          onChanged: duration.inMilliseconds <= 0 || _locked
+                                              ? null
+                                              : (value) => setState(() => _scrubSeconds = value / 1000),
+                                          onChangeEnd: duration.inMilliseconds <= 0 || _locked
+                                              ? null
+                                              : (value) {
+                                                  _seekTo(value / 1000);
+                                                  setState(() => _scrubSeconds = null);
+                                                },
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                             ),
                             Text(
