@@ -38,7 +38,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # `packages` defaults to "tools platform-tools" — the legacy standalone `tools` package no
+      # longer exists in Google's SDK repository (removed years ago), so leaving the default makes
+      # this step fail every time on `sdkmanager tools` returning exit code 1. platform-tools alone
+      # is all this needs; Gradle/AGP fetches whatever platform/build-tools version it wants itself
+      # during the actual build. log-accepted-android-sdk-licenses: false just quiets the otherwise
+      # multi-thousand-line dump of full license text on every run.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+          log-accepted-android-sdk-licenses: false
 
       - uses: subosito/flutter-action@v2
         with:
