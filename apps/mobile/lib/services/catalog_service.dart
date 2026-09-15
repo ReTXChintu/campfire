@@ -40,6 +40,8 @@ class CatalogService {
     // save actually has something to say about tracks (see apps/backend/src/lib/progress.ts).
     String? subtitleSource,
     Object? subtitleIndex = unsetProgressField,
+    Object? subtitleLanguage = unsetProgressField,
+    Object? subtitleTitle = unsetProgressField,
     Object? audioLanguage = unsetProgressField,
     Object? audioTitle = unsetProgressField,
   }) {
@@ -51,6 +53,8 @@ class CatalogService {
     };
     if (subtitleSource != null) body['subtitleSource'] = subtitleSource;
     if (!identical(subtitleIndex, unsetProgressField)) body['subtitleIndex'] = subtitleIndex;
+    if (!identical(subtitleLanguage, unsetProgressField)) body['subtitleLanguage'] = subtitleLanguage;
+    if (!identical(subtitleTitle, unsetProgressField)) body['subtitleTitle'] = subtitleTitle;
     if (!identical(audioLanguage, unsetProgressField)) body['audioLanguage'] = audioLanguage;
     if (!identical(audioTitle, unsetProgressField)) body['audioTitle'] = audioTitle;
     return ApiClient.post('/api/progress', body);

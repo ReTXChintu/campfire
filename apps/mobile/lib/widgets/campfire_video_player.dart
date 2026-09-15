@@ -114,6 +114,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
   // mpv's own track ids instead).
   String? _subtitlePreferenceSource; // "off" | "external" | null (nothing to save yet)
   int? _subtitlePreferenceIndex;
+  String? _subtitlePreferenceLanguage;
+  String? _subtitlePreferenceTitle;
   String? _audioPreferenceLanguage;
   String? _audioPreferenceTitle;
   bool _hasAudioPreference = false; // distinguishes "no preference" from "prefers null/null"
@@ -204,16 +206,35 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
     }
 
     // Seed remembered track preferences from the last time this video was watched (by this user,
-    // any player/platform — see apps/backend/src/lib/progress.ts). Subtitle applies immediately
-    // (this player's subtitle rendering is a pure Flutter-side overlay reading `_subtitleIndex`,
-    // no player-level call needed); audio needs probe data to resolve a language+title match to
-    // an ffprobe stream index, so that happens once probe resolves below.
+    // any player/platform, or — if this exact video has never been watched — the most recent
+    // pick elsewhere in the same series, see apps/backend/src/routes/catalog.ts's series-wide
+    // fallback). Subtitle applies immediately (this player's subtitle rendering is a pure
+    // Flutter-side overlay reading `_subtitleIndex`, no player-level call needed, and
+    // `video.subtitles` is already in hand — no probe wait needed the way audio needs below);
+    // audio needs probe data to resolve a language+title match to an ffprobe stream index, so
+    // that happens once probe resolves below.
     _subtitlePreferenceSource = video.initialSubtitleSource == 'off' || video.initialSubtitleSource == 'external'
         ? video.initialSubtitleSource
         : null;
     _subtitlePreferenceIndex = video.initialSubtitleIndex;
-    if (_subtitlePreferenceSource == 'external' && _subtitlePreferenceIndex != null) {
-      _subtitleIndex = _subtitlePreferenceIndex;
+    _subtitlePreferenceLanguage = video.initialSubtitleLanguage;
+    _subtitlePreferenceTitle = video.initialSubtitleTitle;
+    if (_subtitlePreferenceSource == 'external') {
+      if (_subtitlePreferenceLanguage != null || _subtitlePreferenceTitle != null) {
+        // Name match preferred — the only thing that's reliable when the preference came from a
+        // sibling episode's own (differently-ordered) subtitle list; falls back to "off"
+        // (_subtitleIndex stays null) when the name doesn't exist in this video's own list.
+        for (final s in video.subtitles) {
+          if (s.language == _subtitlePreferenceLanguage && s.title == _subtitlePreferenceTitle) {
+            _subtitleIndex = s.index;
+            break;
+          }
+        }
+      } else if (_subtitlePreferenceIndex != null) {
+        // No name recorded at all (older saved preference) — the raw index is the only thing to
+        // go on, and only ever trustworthy for this exact video anyway.
+        _subtitleIndex = _subtitlePreferenceIndex;
+      }
     }
     if (video.initialAudioLanguage != null || video.initialAudioTitle != null) {
       _hasAudioPreference = true;
@@ -613,6 +634,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
       durationSeconds: (duration?.inMilliseconds ?? 0) / 1000,
       subtitleSource: _subtitlePreferenceSource,
       subtitleIndex: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceIndex,
+      subtitleLanguage: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceLanguage,
+      subtitleTitle: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceTitle,
       audioLanguage: _hasAudioPreference ? _audioPreferenceLanguage : unsetProgressField,
       audioTitle: _hasAudioPreference ? _audioPreferenceTitle : unsetProgressField,
     ).catchError((_) {});
@@ -1443,6 +1466,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
           _subtitleIndex = value;
           _subtitlePreferenceSource = 'off';
           _subtitlePreferenceIndex = null;
+          _subtitlePreferenceLanguage = null;
+          _subtitlePreferenceTitle = null;
           _saveProgress(force: true);
         }),
       ),
@@ -1457,6 +1482,8 @@ class _CampfireVideoPlayerState extends State<CampfireVideoPlayer>
             _subtitleIndex = value;
             _subtitlePreferenceSource = 'external';
             _subtitlePreferenceIndex = value;
+            _subtitlePreferenceLanguage = s.language;
+            _subtitlePreferenceTitle = s.title;
             _saveProgress(force: true);
           }),
         );

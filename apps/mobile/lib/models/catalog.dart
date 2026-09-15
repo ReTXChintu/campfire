@@ -297,10 +297,17 @@ class VideoResponse {
   // recorded yet", not "off". initialSubtitleSource "off"|"external"|"restart"|null;
   // initialSubtitleIndex only meaningful when source is "external" (an index into `subtitles`
   // above) or "restart" (a raw ffprobe stream index — MediaKitVideoPlayer never has this source,
-  // since it doesn't use restart-mode subtitle extraction). Audio is matched by language+title
-  // rather than a raw index since the identifier space differs by player (see progress.ts).
+  // since it doesn't use restart-mode subtitle extraction) *and* the preference came from this
+  // exact video's own history — null when it's a series-wide fallback from a sibling episode,
+  // since a raw index only means something within a single video's own track list.
+  // initialSubtitleLanguage/initialSubtitleTitle are the portable name-based identity to match
+  // against `subtitles`/the probe's subtitle tracks instead (preferred even for the same-video
+  // case — more robust than a raw index). Audio is matched by language+title rather than a raw
+  // index since the identifier space differs by player (see progress.ts).
   final String? initialSubtitleSource;
   final int? initialSubtitleIndex;
+  final String? initialSubtitleLanguage;
+  final String? initialSubtitleTitle;
   final String? initialAudioLanguage;
   final String? initialAudioTitle;
 
@@ -323,6 +330,8 @@ class VideoResponse {
     this.outroStart,
     this.initialSubtitleSource,
     this.initialSubtitleIndex,
+    this.initialSubtitleLanguage,
+    this.initialSubtitleTitle,
     this.initialAudioLanguage,
     this.initialAudioTitle,
   });
@@ -351,6 +360,8 @@ class VideoResponse {
     outroStart: (json['outroStart'] as num?)?.toDouble(),
     initialSubtitleSource: json['initialSubtitleSource'] as String?,
     initialSubtitleIndex: json['initialSubtitleIndex'] as int?,
+    initialSubtitleLanguage: json['initialSubtitleLanguage'] as String?,
+    initialSubtitleTitle: json['initialSubtitleTitle'] as String?,
     initialAudioLanguage: json['initialAudioLanguage'] as String?,
     initialAudioTitle: json['initialAudioTitle'] as String?,
   );

@@ -202,6 +202,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // language+title rather than mpv's own track id, which isn't stable/portable across opens.
   String? _subtitlePreferenceSource; // "off" | "external" | null (nothing to save yet)
   int? _subtitlePreferenceIndex;
+  String? _subtitlePreferenceLanguage;
+  String? _subtitlePreferenceTitle;
   String? _audioPreferenceLanguage;
   String? _audioPreferenceTitle;
   bool _hasAudioPreference = false; // distinguishes "no preference" from "prefers null/null"
@@ -264,17 +266,35 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         ? video.initialSubtitleSource
         : null;
     _subtitlePreferenceIndex = video.initialSubtitleIndex;
+    _subtitlePreferenceLanguage = video.initialSubtitleLanguage;
+    _subtitlePreferenceTitle = video.initialSubtitleTitle;
     if (video.initialAudioLanguage != null || video.initialAudioTitle != null) {
       _hasAudioPreference = true;
       _audioPreferenceLanguage = video.initialAudioLanguage;
       _audioPreferenceTitle = video.initialAudioTitle;
     }
-    if (_subtitlePreferenceSource == 'external' &&
-        _subtitlePreferenceIndex != null &&
-        _subtitlePreferenceIndex! >= 0 &&
-        _subtitlePreferenceIndex! < video.subtitles.length) {
-      final s = video.subtitles[_subtitlePreferenceIndex!];
-      _selectedSubtitleTrack = SubtitleTrack.data(s.vtt, title: s.title, language: s.language);
+    if (_subtitlePreferenceSource == 'external') {
+      ConvertedSubtitle? match;
+      if (_subtitlePreferenceLanguage != null || _subtitlePreferenceTitle != null) {
+        // Name match preferred — the only thing that's reliable when the preference came from a
+        // sibling episode's own (differently-ordered) subtitle list; falls back to no subtitle
+        // selected when the name doesn't exist in this video's own list.
+        for (final s in video.subtitles) {
+          if (s.language == _subtitlePreferenceLanguage && s.title == _subtitlePreferenceTitle) {
+            match = s;
+            break;
+          }
+        }
+      } else if (_subtitlePreferenceIndex != null &&
+          _subtitlePreferenceIndex! >= 0 &&
+          _subtitlePreferenceIndex! < video.subtitles.length) {
+        // No name recorded at all (older saved preference) — the raw index is the only thing to
+        // go on, and only ever trustworthy for this exact video anyway.
+        match = video.subtitles[_subtitlePreferenceIndex!];
+      }
+      if (match != null) {
+        _selectedSubtitleTrack = SubtitleTrack.data(match.vtt, title: match.title, language: match.language);
+      }
     }
 
     _subs.addAll([
@@ -564,6 +584,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       durationSeconds: _effectiveDuration.inMilliseconds / 1000,
       subtitleSource: _subtitlePreferenceSource,
       subtitleIndex: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceIndex,
+      subtitleLanguage: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceLanguage,
+      subtitleTitle: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceTitle,
       audioLanguage: _hasAudioPreference ? _audioPreferenceLanguage : unsetProgressField,
       audioTitle: _hasAudioPreference ? _audioPreferenceTitle : unsetProgressField,
     ).catchError((_) {});
@@ -1391,6 +1413,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           _player.setSubtitleTrack(_selectedSubtitleTrack);
           _subtitlePreferenceSource = 'off';
           _subtitlePreferenceIndex = null;
+          _subtitlePreferenceLanguage = null;
+          _subtitlePreferenceTitle = null;
           _saveProgress(force: true);
           _closePanels();
         },
@@ -1407,6 +1431,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
             _player.setSubtitleTrack(_selectedSubtitleTrack);
             _subtitlePreferenceSource = 'external';
             _subtitlePreferenceIndex = entry.subtitle.index;
+            _subtitlePreferenceLanguage = entry.subtitle.language;
+            _subtitlePreferenceTitle = entry.subtitle.title;
             _saveProgress(force: true);
             _closePanels();
           },
