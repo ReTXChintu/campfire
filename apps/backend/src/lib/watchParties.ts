@@ -162,6 +162,16 @@ export async function endWatchParty(code: string): Promise<WatchPartyDoc | null>
   return col.findOne({ code: normalized });
 }
 
+/** Ends every still-open party on one video — the admin "Delete video" action. Participants get
+ * the same "party ended" experience as a host ending it (their LiveKit room closes on the next
+ * heartbeat/roster fetch finding the party gone). */
+export async function endWatchPartiesForFile(fileId: string): Promise<number> {
+  const col = await collection();
+  const now = new Date();
+  const res = await col.updateMany({ fileId, endedAt: null }, { $set: { endedAt: now, updatedAt: now, playing: false } });
+  return res.modifiedCount;
+}
+
 export function getEffectivePartyPositionSeconds(
   party: Pick<WatchPartyDoc, "playing" | "positionSeconds" | "updatedAt" | "playbackRate">,
 ): number {

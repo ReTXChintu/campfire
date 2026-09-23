@@ -1,4 +1,7 @@
 import express, { Router } from "express";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import { env } from "../../config/env";
 import { requireAdmin } from "../../middleware/auth";
 import {
   getCatalogVideo,
@@ -8,6 +11,7 @@ import {
   addSubtitleSetId,
   queueRenditions,
   resetVideoOverride,
+  deleteVideosByIds,
 } from "../../lib/catalogVideos";
 import { getCatalogFolder } from "../../lib/catalogFolders";
 import {
@@ -17,8 +21,11 @@ import {
   listUnlinkedSubtitleSets,
   listSubtitleSetsByIds,
   createAndLinkSubtitleSet,
+  deleteSubtitleSetsForVideo,
 } from "../../lib/subtitleSets";
-import { convertSrtTextToVtt, probeStreams } from "../../lib/drive";
+import { deleteProgressForFile } from "../../lib/progress";
+import { endWatchPartiesForFile } from "../../lib/watchParties";
+import { convertSrtTextToVtt, probeStreams, trashDriveFile } from "../../lib/drive";
 import { storableTiersFor } from "../../lib/qualityLadder";
 
 const router = Router();
@@ -173,6 +180,42 @@ router.post("/:fileId/renditions", requireAdmin, async (req, res) => {
 
   await queueRenditions(fileId, toQueue);
   res.json({ queued: toQueue });
+});
+
+// Removes a video everywhere: the Drive file itself (trashed, not permanently deleted — see
+// trashDriveFile), its subtitle sets, every user's progress on it, its on-disk renditions, any open
+// watch party on it, and finally the catalog doc. Drive goes first on purpose: if trashing fails
+// (the service account lacks Editor access on the library folder), nothing else is touched —
+// otherwise the next scan would just re-import the still-present Drive file as a fresh "pending"
+// video, silently undoing the delete.
+router.delete("/:fileId", requireAdmin, async (req, res) => {
+  const { fileId } = req.params;
+  const video = await getCatalogVideo(fileId);
+  if (!video) {
+    res.status(404).json({ error: "Video not found" });
+    return;
+  }
+
+  try {
+    await trashDriveFile(fileId);
+  } catch (error) {
+    console.error(`Failed to trash Drive file ${fileId}:`, error);
+    res.status(502).json({
+      error:
+        "Couldn't move the file to Drive's trash — check that the service account has Editor access on the library folder. Nothing was deleted.",
+    });
+    return;
+  }
+
+  await Promise.all([
+    endWatchPartiesForFile(fileId),
+    deleteSubtitleSetsForVideo(fileId),
+    deleteProgressForFile(fileId),
+    rm(join(env.renditionsDir, fileId), { recursive: true, force: true }),
+  ]);
+  await deleteVideosByIds([fileId]);
+
+  res.json({ ok: true, parentFolderId: video.parentFolderId });
 });
 
 const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024; // subtitle files are plain text — a few KB to low MB at most

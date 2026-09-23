@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../../models/admin_catalog.dart';
 import '../../services/admin_catalog_service.dart';
 import '../../services/api_client.dart';
@@ -34,6 +35,51 @@ class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
   }
 
   void _reload() => setState(() => _future = AdminCatalogService.fetchVideo(widget.fileId));
+
+  bool _deleting = false;
+  String? _deleteError;
+
+  // Mirrors AdminCatalogVideoPage.tsx's danger zone — confirm, then DELETE, then back to the
+  // parent folder (the video no longer exists to stay on).
+  Future<void> _confirmDelete(AdminVideoDetail data) async {
+    final name = data.video.title ?? data.video.driveName;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete "$name"?'),
+        content: const Text(
+          "This moves the file to Drive's trash and removes it from Campfire along with its subtitles, "
+          "everyone's watch progress on it, and its generated quality tiers. Drive keeps trashed files for "
+          '30 days; everything else is gone immediately.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _deleting = true;
+      _deleteError = null;
+    });
+    try {
+      await AdminCatalogService.deleteVideo(widget.fileId);
+      if (!mounted) return;
+      final parentId = data.parentFolder?.id;
+      context.go(parentId != null ? '/admin/folder/$parentId' : '/admin');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _deleting = false;
+        _deleteError = e is ApiException ? e.message : 'Delete failed';
+      });
+    }
+  }
 
   // Mirrors useAdminVideo's refetchInterval on the web — keeps polling while any rendition
   // tier is still being generated in the background, so the status chips update on their own.
@@ -100,6 +146,43 @@ class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
                       status: data.video.status,
                       renditions: data.video.renditions,
                       onChanged: _reload,
+                    ),
+                    const SizedBox(height: 40),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerSoft,
+                        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Danger zone',
+                            style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w600, fontSize: 14),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            "Removes this video from Campfire and moves the file to Drive's trash. Its subtitles, "
+                            "everyone's watch progress, and any generated quality tiers go with it.",
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                          ),
+                          if (_deleteError != null) ...[
+                            const SizedBox(height: 8),
+                            Text(_deleteError!, style: const TextStyle(color: AppColors.danger, fontSize: 14)),
+                          ],
+                          const SizedBox(height: 12),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.danger,
+                              side: BorderSide(color: AppColors.danger.withValues(alpha: 0.4)),
+                            ),
+                            onPressed: _deleting ? null : () => _confirmDelete(data),
+                            child: Text(_deleting ? 'Deleting…' : 'Delete video'),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),

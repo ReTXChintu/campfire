@@ -78,6 +78,13 @@ export async function getMostRecentPreferenceForFolder(
   );
 }
 
+/** Every user's progress on one video — the admin "Delete video" action. */
+export async function deleteProgressForFile(fileId: string): Promise<number> {
+  const col = await collection();
+  const res = await col.deleteMany({ fileId });
+  return res.deletedCount;
+}
+
 /** Most recently-watched, not-yet-completed videos for a user, across the whole library — powers
  * a real "Continue Watching" row (not fabricated data). */
 export async function getRecentInProgress(userId: string, limit: number) {

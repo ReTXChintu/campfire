@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { apiGet, apiPatch, apiPost, apiPostText } from "../lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostText } from "../lib/api";
 import type { CatalogFolder, CatalogVideo } from "../lib/types";
 import { useInvalidateCatalog } from "./useCatalog";
 
@@ -125,6 +125,16 @@ export function useGenerateRenditions(fileId: string) {
   const invalidate = useInvalidateCatalog();
   return useMutation({
     mutationFn: () => apiPost<{ queued: number[] }>(`/api/admin/catalog/video/${fileId}/renditions`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Trashes the Drive file and removes the video from Campfire entirely (subtitles, progress,
+ * renditions, parties) — see the DELETE route in apps/backend/src/routes/admin/catalogVideo.ts. */
+export function useDeleteVideo(fileId: string) {
+  const invalidate = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: () => apiDelete<{ ok: true; parentFolderId: string }>(`/api/admin/catalog/video/${fileId}`),
     onSuccess: invalidate,
   });
 }

@@ -103,6 +103,14 @@ export async function unlinkSubtitleSet(subtitleSetId: string): Promise<void> {
   );
 }
 
+/** The admin "Delete video" action — unlike the scan sweep below, the sets go too: they were
+ * uploaded for this specific video, and it's being removed on purpose. */
+export async function deleteSubtitleSetsForVideo(videoId: string): Promise<number> {
+  const col = await collection();
+  const res = await col.deleteMany({ linkedVideoId: videoId });
+  return res.deletedCount;
+}
+
 /** Used by the scan's deletion-sweep — returns subtitle sets to the unlinked pool rather than
  * leaving them pointing at a video that no longer exists. */
 export async function unlinkSubtitleSetsForVideos(videoIds: string[]): Promise<void> {

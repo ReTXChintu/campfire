@@ -66,6 +66,12 @@ class AdminCatalogService {
     return data['subtitleSetId'] as String;
   }
 
+  /// Trashes the Drive file and removes the video from Campfire entirely (subtitles, progress,
+  /// renditions, parties) — see the DELETE route in apps/backend/src/routes/admin/catalogVideo.ts.
+  static Future<void> deleteVideo(String fileId) {
+    return ApiClient.delete('/api/admin/catalog/video/$fileId');
+  }
+
   static Future<ScanResult> runScan() async {
     final data = await ApiClient.post('/api/admin/scan') as Map<String, dynamic>;
     return ScanResult.fromJson(data);

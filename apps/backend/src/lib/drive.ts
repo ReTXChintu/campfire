@@ -8,13 +8,15 @@ import { join, dirname } from "node:path";
 import { env } from "../config/env";
 import { videoBitrateKbpsFor, audioBitrateKbpsFor } from "./qualityLadder";
 
-// Read-only: the app no longer writes to Drive at all. (It briefly did, for an in-app upload
-// flow — abandoned because service accounts have no storage quota of their own, so any write
-// under a regular "My Drive" folder fails with "Service Accounts do not have storage quota" —
-// only shared drives or real-user OAuth delegation can write, neither of which fits a personal
-// account. Uploads now happen by hand in Drive's own UI; the admin panel is a local
-// convert-and-download tool that never touches Drive.)
-const DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"];
+// The app never *uploads* to Drive. (It briefly did, for an in-app upload flow — abandoned
+// because service accounts have no storage quota of their own, so any byte-upload under a regular
+// "My Drive" folder fails with "Service Accounts do not have storage quota" — only shared drives
+// or real-user OAuth delegation can, neither of which fits a personal account. Uploads happen by
+// hand in Drive's own UI; the admin panel is a local convert-and-download tool.) The one write it
+// does do is trashing a file from the admin "Delete video" action (see trashDriveFile) — a
+// metadata update, no storage involved, so it works fine as long as the service account has
+// Editor access on the shared library folder. Hence the full scope rather than drive.readonly.
+const DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"];
 
 let driveClient: drive_v3.Drive | undefined;
 let jwtClient: InstanceType<typeof google.auth.JWT> | undefined;
@@ -41,6 +43,14 @@ function getDrive(): drive_v3.Drive {
 }
 
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+
+/** Moves a file to Drive's trash (recoverable there for 30 days) rather than deleting it outright
+ * — permanent deletion needs file ownership, which a service account never has on a personal
+ * account's files. Throws on a Drive error (typically 403: the service account only has Viewer
+ * access on the library folder, so it can't modify files there). */
+export async function trashDriveFile(fileId: string): Promise<void> {
+  await getDrive().files.update({ fileId, requestBody: { trashed: true } });
+}
 
 export type DriveVideoItem = {
   kind: "video";
