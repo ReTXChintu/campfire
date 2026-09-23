@@ -159,7 +159,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
 
   // Sync only ever applies to native-mode content (matches web's seekMode === "native" gate) — MKV
   // ("raw") and "restart" mode content never sync, same as web.
-  bool get _syncEnabled => video.isNative && widget.watchPartySync != null;
+  // Checks the controller's `enabled` (only true while a party is actually connected — see
+  // WatchPartyOverlay._reconfigureSyncController), not just its presence: WatchScreen always hands
+  // the controller over, party or not, and a non-null check alone left every native video locked
+  // ("someone else has the remote", seek/skip disabled) with no party anywhere in sight.
+  bool get _syncEnabled => video.isNative && (widget.watchPartySync?.enabled ?? false);
   // Anyone without playback control can't seek/skip/change speed during a synced party — those
   // actions would silently desync them until the controller's next broadcast, with no indication
   // anything "failed". Doesn't lock play/pause — pausing locally is harmless, it just won't stick
