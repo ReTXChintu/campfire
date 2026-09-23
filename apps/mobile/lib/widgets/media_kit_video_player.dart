@@ -95,7 +95,17 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
           )
         : PlayerConfiguration(libass: Platform.isWindows),
   );
-  late final VideoController _controller = VideoController(_player);
+  // Android TV: `hwdec=mediacodec-copy` instead of media_kit's default `auto-safe` (which picks
+  // plain `mediacodec`, the zero-copy path that hands MediaCodec's output surface straight to GL).
+  // On a fair number of TV SoCs (Amlogic/MediaTek/Realtek boxes especially) that path silently
+  // produces no frames for certain streams — HEVC 10-bit, AV1, high-bitrate 4K — and the texture
+  // stays at its all-zero YUV initial state, which renders as solid green while audio plays fine.
+  // `-copy` still decodes in hardware but copies each frame back through CPU memory before the GL
+  // upload, which works everywhere at a small bandwidth cost. Phones keep the faster default.
+  late final VideoController _controller = VideoController(
+    _player,
+    configuration: VideoControllerConfiguration(hwdec: isAndroidTv ? 'mediacodec-copy' : null),
+  );
   final List<StreamSubscription> _subs = [];
 
   bool _isBuffering = true;
