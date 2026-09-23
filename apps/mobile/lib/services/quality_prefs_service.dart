@@ -1,7 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Persists a single "remembered Auto-mode ceiling height" per device — shared by both mobile
-/// players (CampfireVideoPlayer, MediaKitVideoPlayer) so a known-weak device doesn't have to
+/// player (MediaKitVideoPlayer) so a known-weak device doesn't have to
 /// rediscover its ceiling via a rough patch on every video. Mirrors the web player's
 /// localStorage-based equivalent (kept in sync by hand, no shared code across TS/Dart).
 class QualityPrefsService {

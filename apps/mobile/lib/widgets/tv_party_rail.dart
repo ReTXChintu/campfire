@@ -25,7 +25,7 @@ class TvPartyRail extends StatefulWidget {
   // Called when Back is pressed while focus is somewhere inside this rail — walks focus back down
   // to the player's own chrome instead of letting Back exit the player outright (see
   // design.html's "Back always walks up exactly one level" rule, and the two-mode focus handling
-  // in campfire_video_player.dart / media_kit_video_player.dart).
+  // in media_kit_video_player.dart).
   final VoidCallback onExitToChrome;
 
   const TvPartyRail({

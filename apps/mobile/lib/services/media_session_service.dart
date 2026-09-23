@@ -31,9 +31,9 @@ class CampfireAudioHandler extends BaseAudioHandler {
 
 /// Android only — gives connected Bluetooth earphones/smartwatches (and the lock screen) real
 /// "now playing" awareness: a MediaSession with play/pause/skip controls they can trigger from
-/// their own hardware buttons, kept in sync with whichever of CampfireVideoPlayer/
-/// MediaKitVideoPlayer is actually on screen. All real playback logic stays inside those two
-/// widgets — this service only relays state in and control actions out.
+/// their own hardware buttons, kept in sync with the MediaKitVideoPlayer on screen. All real
+/// playback logic stays inside that widget — this service only relays state in and control
+/// actions out.
 class MediaSessionService {
   MediaSessionService._();
   static CampfireAudioHandler? _handler;

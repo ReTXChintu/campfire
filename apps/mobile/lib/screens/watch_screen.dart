@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../models/catalog.dart';
-import '../platform_info.dart';
 import '../services/catalog_service.dart';
 import '../services/watch_party_sync_controller.dart';
-import '../theme/app_theme.dart';
-import '../widgets/campfire_video_player.dart';
 import '../widgets/media_kit_video_player.dart';
 import '../widgets/watch_party_overlay.dart';
 
@@ -74,34 +71,19 @@ class _WatchScreenState extends State<WatchScreen> {
           }
           final video = snapshot.data!;
 
-          // Rebuilding with a fresh key on fileId change (episode nav via pushReplacement)
-          // forces the player to tear down and recreate its controller for the new video.
-          // Not wrapped in SafeArea/Center: the player fills the whole screen edge-to-edge
-          // and letterboxes only the video itself, so its overlaid controls stay pinned to
-          // the true screen edges instead of centering within a fixed 16:9 box.
-          final Widget player;
-          if (video.isRaw) {
-            // MKV — a completely different player (libmpv via media_kit, see
-            // widgets/media_kit_video_player.dart), only wired up on Windows/Android (see
-            // platform_info.dart). Anywhere else this build could theoretically run (iOS), there's
-            // no native MKV decoder plugged in, so it gets the same "get the app" messaging web
-            // shows rather than a broken player.
-            player = supportsMkvPlayback
-                ? MediaKitVideoPlayer(key: ValueKey(widget.fileId), video: video, watchPartySync: _syncController)
-                : const _MkvUnsupportedNotice();
-          } else if (requiresMediaKitPlayer) {
-            // Windows — video_player (CampfireVideoPlayer's engine) has no Windows implementation
-            // at all, so every video goes through media_kit here, not just MKV.
-            player = MediaKitVideoPlayer(key: ValueKey(widget.fileId), video: video, watchPartySync: _syncController);
-          } else {
-            player = CampfireVideoPlayer(key: ValueKey(widget.fileId), video: video, watchPartySync: _syncController);
-          }
-
           // Wraps the player rather than sitting beside it in a Stack — keeps Watch Party
-          // deliberately isolated from CampfireVideoPlayer/MediaKitVideoPlayer's own internals (the
-          // two only ever talk to each other through _syncController), while letting the overlay
-          // itself decide per-platform whether party chrome floats over the player or narrows it in
-          // a docked side panel (see watch_party_overlay.dart's usesDockedPartyPanel branch).
+          // deliberately isolated from MediaKitVideoPlayer's own internals (the two only ever talk
+          // to each other through _syncController), while letting the overlay itself decide
+          // per-platform whether party chrome floats over the player or narrows it in a docked side
+          // panel (see watch_party_overlay.dart's usesDockedPartyPanel branch).
+          //
+          // One player for everything (libmpv via media_kit — see media_kit_video_player.dart):
+          // it decodes any container directly, so MKV, native mp4 and restart-mode content all go
+          // through it on every platform. Rebuilding with a fresh key on fileId change (episode nav
+          // via pushReplacement) forces it to tear down and recreate its controller for the new
+          // video. Not wrapped in SafeArea/Center: the player fills the whole screen edge-to-edge
+          // and letterboxes only the video itself, so its overlaid controls stay pinned to the true
+          // screen edges instead of centering within a fixed 16:9 box.
           return WatchPartyOverlay(
             key: ValueKey(widget.fileId),
             fileId: video.fileId,
@@ -109,36 +91,9 @@ class _WatchScreenState extends State<WatchScreen> {
             partyId: _partyId,
             onPartyIdChanged: _handlePartyIdChanged,
             syncController: _syncController,
-            child: player,
+            child: MediaKitVideoPlayer(key: ValueKey(widget.fileId), video: video, watchPartySync: _syncController),
           );
         },
-      ),
-    );
-  }
-}
-
-class _MkvUnsupportedNotice extends StatelessWidget {
-  const _MkvUnsupportedNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('This video needs the Windows or Android app', style: AppTheme.display(fontSize: 22)),
-              const SizedBox(height: 8),
-              const Text(
-                'This video is an MKV file and isn\'t supported on this platform yet.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textSecondary),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

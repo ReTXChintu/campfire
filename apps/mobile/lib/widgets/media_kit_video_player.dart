@@ -50,22 +50,21 @@ String _formatTime(Duration d) {
   return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
 }
 
-/// A libmpv-backed player (via media_kit) — CampfireVideoPlayer's alternative engine, used in two
-/// situations: always on Windows (video_player has no Windows implementation at all — see
-/// platform_info.dart's requiresMediaKitPlayer), and for MKV specifically everywhere else it's
-/// supported (Android — see supportsMkvPlayback), since MKV's raw bytes are truly Range-seekable
-/// (seekMode: "raw") and libmpv can demux the real container itself, unlike video_player.
+/// The one and only player, on every platform (libmpv via media_kit) — it decodes any container
+/// directly, exposes whatever audio/subtitle tracks are embedded in it, and seeks MKV's raw bytes
+/// for real (seekMode: "raw"). It replaced a second, `video_player`-based engine that was limited
+/// to native mp4, had no audio-track picker, and had no Windows implementation at all.
 ///
 /// Handles all three seekModes:
 /// - "native"/"raw": real seeking via player.seek() — the backend serves true Range-seekable bytes
 ///   for both (see isRawStreamable in apps/backend/src/lib/drive.ts).
 /// - "restart": the ffmpeg-remux fallback for anything else — no real Range support, so seeking
-///   reopens the stream at a new `t=` offset instead, same trick CampfireVideoPlayer uses, and
+///   reopens the stream at a new `t=` offset instead (same trick the web player used), and
 ///   duration/track info comes from a probe fetch rather than the (unreliable) live stream.
 ///
 /// Known simplification: subtitle/audio tracks come from whatever libmpv finds embedded in the
 /// container, not from `video.subtitles` (separately-uploaded/linked SubtitleSet VTT text) —
-/// CampfireVideoPlayer's native-mode subtitle track list isn't reproduced here.
+/// the admin-curated `video.subtitles` VTT sets are offered alongside via SubtitleTrack.data().
 class MediaKitVideoPlayer extends StatefulWidget {
   final VideoResponse video;
   // Set by WatchScreen only while a watch party is active for this video — see
@@ -163,14 +162,16 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // WatchPartyOverlay._reconfigureSyncController), not just its presence: WatchScreen always hands
   // the controller over, party or not, and a non-null check alone left every native video locked
   // ("someone else has the remote", seek/skip disabled) with no party anywhere in sight.
-  bool get _syncEnabled => video.isNative && (widget.watchPartySync?.enabled ?? false);
+  // Native *and* raw (MKV) — both are truly Range-seekable through libmpv, so another device's
+  // position is precise here. Only "restart" mode (reload-at-t= seeking) stays excluded.
+  bool get _syncEnabled => (video.isNative || video.isRaw) && (widget.watchPartySync?.enabled ?? false);
   // Anyone without playback control can't seek/skip/change speed during a synced party — those
   // actions would silently desync them until the controller's next broadcast, with no indication
   // anything "failed". Doesn't lock play/pause — pausing locally is harmless, it just won't stick
   // once the next inbound sync arrives.
   bool get _locked => _syncEnabled && !(widget.watchPartySync?.canControl ?? false);
 
-  // Android brightness/volume swipe gestures — see campfire_video_player.dart's identical fields
+  // Android brightness/volume swipe gestures — see the field docs below
   // for the full rationale (app-window-only brightness, system volume with the OS's own HUD).
   bool? _dragIsLeftSide;
   double _dragAccumulatedDy = 0;
@@ -625,7 +626,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // that locks landscape immediately in its own initState. Without that skip, dispose() (which
   // fires *after* the new player's initState — it stays mounted through the route-replace
   // transition) would relock portrait right after the new screen already locked landscape, leaving
-  // the app stuck in portrait until manually rotated. See CampfireVideoPlayer's identical fix.
+  // the app stuck in portrait until manually rotated.
   void _navigateToEpisode(String fileId) {
     _saveProgress(force: true);
     _skipOrientationRestoreOnDispose = true;

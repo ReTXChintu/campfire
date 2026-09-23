@@ -667,7 +667,10 @@ export default function WatchPage() {
       <PartyRoomProvider room={partyId && !partyLoadFailed ? room : null}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="relative min-w-0 flex-1">
-            {video.seekMode === "raw" ? (
+            {/* Only browser-native formats play here; everything else (MKV, or anything that would
+                need the live ffmpeg remux) is handed off to the apps, which play any container
+                directly via libmpv. */}
+            {video.seekMode !== "native" ? (
               <DesktopAppRequiredNotice title={video.title ?? "This video"} />
             ) : (
               <VideoPlayer

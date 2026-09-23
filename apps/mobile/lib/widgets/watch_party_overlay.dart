@@ -24,7 +24,7 @@ import 'watch_party_video_grid.dart';
 /// Watch Party entry point + live session chrome — voice/video calling, text chat, the participant
 /// roster with host grant/revoke controls, and (via `syncController`) playback sync for whichever
 /// player widget WatchScreen currently has on screen. Deliberately separate from
-/// CampfireVideoPlayer/MediaKitVideoPlayer internals — it wraps the player as `child` so it can
+/// MediaKitVideoPlayer's internals — it wraps the player as `child` so it can
 /// decide, per platform, whether party chrome floats over the video (phone/TV, a `Stack`) or narrows
 /// it as a docked side panel (Windows, a `Row` — see [usesDockedPartyPanel]); the sync controller
 /// remains the only channel through which the player widget and this overlay talk to each other.

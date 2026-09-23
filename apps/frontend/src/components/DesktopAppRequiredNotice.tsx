@@ -6,8 +6,8 @@ export default function DesktopAppRequiredNotice({ title }: { title: string }) {
     <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-lg border border-divider bg-surface px-6 text-center">
       <h2 className="font-display text-2xl tracking-wide text-white">{title}</h2>
       <p className="max-w-md text-sm text-text-secondary">
-        This video is an MKV file and isn&apos;t supported in the browser. Watch it in the Campfire
-        desktop app (Windows) or the Campfire mobile app (Android), which play MKV natively.
+        This video&apos;s format isn&apos;t supported in the browser. Watch it in the Campfire desktop
+        app (Windows) or the Campfire mobile app (Android), which play any format natively.
       </p>
       {(desktopAppDownloadUrl || mobileAppDownloadUrl) && (
         <div className="mt-1 flex flex-wrap items-center justify-center gap-3">

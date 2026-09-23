@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import '../models/watch_party.dart';
 
 /// Bridges a connected WatchPartyOverlay (owns the LiveKit room + backend party session) to
-/// whichever player widget (CampfireVideoPlayer/MediaKitVideoPlayer) is on screen — created once by
+/// the player widget (MediaKitVideoPlayer) on screen — created once by
 /// WatchScreen and handed to both, so the overlay and the player never need to know about each
 /// other directly. Mirrors apps/frontend/src/routes/WatchPage.tsx's watchPartySync prop shape
 /// (enabled/canControl/inboundState/onStateChange), just as a ChangeNotifier instead of React state.

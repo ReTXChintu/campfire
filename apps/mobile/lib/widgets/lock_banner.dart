@@ -3,7 +3,7 @@ import '../theme/app_theme.dart';
 
 /// Explains the "locked" (no playback control) watch-party state in the chrome itself, instead of
 /// just silently greying out the seek/skip/speed buttons — see design.html's lock-banner component.
-/// Shown by both CampfireVideoPlayer and MediaKitVideoPlayer whenever `_locked` is true.
+/// Shown by MediaKitVideoPlayer whenever `_locked` is true.
 ///
 /// Doesn't know *who* currently holds control by name — the watch-party roster only carries a
 /// device label (see models/watch_party.dart's WatchPartyParticipant), not the account's display
