@@ -96,12 +96,13 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         : PlayerConfiguration(libass: Platform.isWindows),
   );
   // Android TV: `hwdec=mediacodec-copy` instead of media_kit's default `auto-safe` (which picks
-  // plain `mediacodec`, the zero-copy path that hands MediaCodec's output surface straight to GL).
-  // On a fair number of TV SoCs (Amlogic/MediaTek/Realtek boxes especially) that path silently
-  // produces no frames for certain streams — HEVC 10-bit, AV1, high-bitrate 4K — and the texture
-  // stays at its all-zero YUV initial state, which renders as solid green while audio plays fine.
-  // `-copy` still decodes in hardware but copies each frame back through CPU memory before the GL
-  // upload, which works everywhere at a small bandwidth cost. Phones keep the faster default.
+  // plain `mediacodec`, the zero-copy path that hands MediaCodec's output Surface straight to a GL
+  // texture). On some TV firmwares that Surface handoff intermittently loses a race against the
+  // first decoded frames, the texture is never written, and its all-zero YUV initial state renders
+  // as solid green while audio plays fine. It is *not* codec-related — a file confirmed green was
+  // plain 8-bit H.264 High 1080p, the most universally hardware-decodable stream there is. `-copy`
+  // still decodes in hardware but copies each frame back through CPU memory before the GL upload,
+  // so there's no shared-Surface handoff left to race. Phones keep the faster default.
   late final VideoController _controller = VideoController(
     _player,
     configuration: VideoControllerConfiguration(hwdec: isAndroidTv ? 'mediacodec-copy' : null),
