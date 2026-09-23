@@ -61,14 +61,34 @@ jobs:
       # Baked into the app itself (apps/mobile/lib/config.dart) so it's visible in-app (top bar /
       # login screen) — read from pubspec.yaml, the single source of truth `npm run release` keeps
       # in sync across all three apps.
+      # versionCode must grow with every release for Android to treat a new APK as an update —
+      # pubspec's "+N" build number never changes (see scripts/sync-mobile-version.mjs), so derive
+      # it from the version instead: 1.2.3 -> 10203. Monotonic as long as minor/patch stay < 100.
       - name: Determine app version
         run: |
           version=$(grep -oP '^version:\s*\K[0-9]+\.[0-9]+\.[0-9]+' apps/mobile/pubspec.yaml || echo "0.0.0")
+          IFS=. read -r major minor patch <<< "$version"
           echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$(( major * 10000 + minor * 100 + patch ))" >> "$GITHUB_ENV"
+
+      # The one persistent release keystore, base64-encoded in a repository secret (Settings ->
+      # Secrets and variables -> Actions). Every release MUST be signed with this same key, or
+      # Android refuses to install the new APK over the old one (see
+      # apps/mobile/android/app/build.gradle.kts). Keep an offline backup of the .jks + password —
+      # if it's ever lost, every installed copy has to be uninstalled and reinstalled once more.
+      - name: Set up release signing
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > apps/mobile/android/app/campfire-release.jks
+          cat > apps/mobile/android/key.properties <<EOF
+          storeFile=campfire-release.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
 
       - name: Build APK
         working-directory: apps/mobile
-        run: flutter build apk --release --dart-define=API_URL=${{ env.API_URL }} --dart-define=WEB_URL=${{ env.WEB_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
+        run: flutter build apk --release --build-number=${{ env.BUILD_NUMBER }} --dart-define=API_URL=${{ env.API_URL }} --dart-define=WEB_URL=${{ env.WEB_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
 
       - name: Stage artifact under its fixed deploy name
         run: cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk ${{ env.APK_NAME }}
