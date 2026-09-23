@@ -322,7 +322,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         if ((p - _position).abs() > const Duration(seconds: 2)) {
           _dbg('position JUMP: $_position -> $p (resumeSeekComplete=$_resumeSeekComplete)');
         }
-        if (!_sawFirstPositionTick) {
+        // Only a *non-zero* position counts as "playback has genuinely started": open() resets
+        // this stream and emits Duration.zero synchronously, before the file is even loaded, and
+        // mpv silently drops a seek issued in that window — which is exactly what made
+        // _bootstrap's resume seek fire too early and every video start from 0.
+        if (!_sawFirstPositionTick && p > Duration.zero) {
           _sawFirstPositionTick = true;
           if (!_firstPositionTickCompleter.isCompleted) _firstPositionTickCompleter.complete();
         }
