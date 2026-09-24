@@ -25,12 +25,10 @@ export default function FolderPublishRule({
   folderId,
   childVideos,
   initialRule,
-  folderStatus,
 }: {
   folderId: string;
   childVideos: CatalogVideo[];
   initialRule: CatalogFolderPublishRule | null;
-  folderStatus: "pending" | "curated" | "published";
 }) {
   const [order, setOrder] = useState<CatalogVideo[]>(() => initialOrder(childVideos));
   const [namePattern, setNamePattern] = useState(initialRule?.namePattern ?? "");
@@ -77,7 +75,6 @@ export default function FolderPublishRule({
   };
 
   const error = applyMutation.error?.message ?? publishMutation.error?.message ?? null;
-  const anyCurated = childVideos.some((v) => v.status !== "pending") || folderStatus !== "pending";
 
   return (
     <div className="mb-8 rounded-lg border border-divider p-4">
@@ -183,8 +180,8 @@ export default function FolderPublishRule({
         </button>
         <button
           onClick={() => publishMutation.mutate()}
-          disabled={publishMutation.isPending || !anyCurated}
-          title={!anyCurated ? "Nothing here is curated yet — apply the rule first" : undefined}
+          disabled={publishMutation.isPending}
+          title="Anything not yet named uses its Drive filename as a placeholder title, so this always works — rename later if you want."
           className="rounded-md border border-divider px-4 py-2 text-sm font-bold text-white/90 transition hover:bg-white/5 disabled:opacity-50"
         >
           {publishMutation.isPending ? "Publishing…" : "Publish all in this folder"}

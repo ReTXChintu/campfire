@@ -56,7 +56,6 @@ export default function AdminCatalogFolderPage() {
           folderId={folderId!}
           childVideos={childVideos}
           initialRule={folder.publishRule}
-          folderStatus={folder.status}
         />
       )}
 

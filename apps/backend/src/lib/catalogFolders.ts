@@ -145,6 +145,19 @@ export async function curateFolder(
   );
 }
 
+/** Falls back to the Drive folder name as a still-untitled folder's title — the folder-level
+ * counterpart to catalogVideos.ts's curateVideoWithDriveNameFallback, for the same "Publish all"
+ * one-click flow. No-op once the folder already has any title. */
+export async function curateFolderWithDriveNameFallback(folderId: string): Promise<void> {
+  const col = await collection();
+  const folder = await col.findOne({ _id: folderId, status: "pending" });
+  if (!folder) return;
+  await col.updateOne(
+    { _id: folderId, status: "pending" },
+    { $set: { title: folder.driveName, status: "curated", curatedAt: new Date(), updatedAt: new Date() } },
+  );
+}
+
 /** Saves/overwrites this folder's batch-publish rule, independent of curation status. */
 export async function setFolderPublishRule(
   folderId: string,

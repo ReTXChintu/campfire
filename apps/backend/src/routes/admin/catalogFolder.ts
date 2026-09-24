@@ -6,12 +6,18 @@ import {
   getBreadcrumbChain,
   listChildFolders,
   curateFolder,
+  curateFolderWithDriveNameFallback,
   publishFolder,
   unpublishFolder,
   setFolderPublishRule,
   type CatalogFolderPublishRule,
 } from "../../lib/catalogFolders";
-import { listVideosByParent, applyRuleToVideo, publishVideo } from "../../lib/catalogVideos";
+import {
+  listVideosByParent,
+  applyRuleToVideo,
+  publishVideo,
+  curateVideoWithDriveNameFallback,
+} from "../../lib/catalogVideos";
 
 const router = Router();
 
@@ -140,7 +146,10 @@ router.post("/:folderId/publish-rule/apply", requireAdmin, async (req, res) => {
   res.json({ ok: true, updated, skippedTitle, skippedIntro });
 });
 
-// Publishes the folder (if curated) and every currently-curated child video in one click.
+// Publishes the folder and every child video in one click — including anything still "pending"
+// (never renamed/curated), which falls back to its own Drive filename as a placeholder title
+// rather than blocking the publish. That title isn't locked in: it's not marked as an override, so
+// a naming-pattern apply (or a manual edit) still renames it normally afterwards.
 router.post("/:folderId/publish-rule/publish-all", requireAdmin, async (req, res) => {
   const { folderId } = req.params;
   const folder = await getCatalogFolder(folderId);
@@ -149,12 +158,13 @@ router.post("/:folderId/publish-rule/publish-all", requireAdmin, async (req, res
     return;
   }
 
+  await curateFolderWithDriveNameFallback(folderId);
   const { matched: folderPublished } = await publishFolder(folderId);
 
   const children = await listVideosByParent(folderId);
   let publishedVideos = 0;
   for (const video of children) {
-    if (video.status !== "curated") continue;
+    if (video.status === "pending") await curateVideoWithDriveNameFallback(video._id);
     const { matched } = await publishVideo(video._id);
     if (matched) publishedVideos++;
   }

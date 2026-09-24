@@ -220,6 +220,31 @@ export async function applyRuleToVideo(
   return { titleApplied, introApplied };
 }
 
+const VIDEO_EXTENSION_RE = /\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ts|m2ts)$/i;
+
+/** Falls back to the Drive filename (extension stripped) as a still-untitled video's title — lets
+ * "Publish all" (see routes/admin/catalogFolder.ts's publish-rule/publish-all) publish a folder's
+ * videos immediately without first requiring a rename or a batch naming-pattern apply. Deliberately
+ * does *not* set titleOverridden: unlike a real curation, this is just a placeholder, so a later
+ * publish-rule apply (or manual edit) still renames it normally. No-op once the video already has
+ * any title (curated or published) — never overwrites a real one. */
+export async function curateVideoWithDriveNameFallback(fileId: string): Promise<void> {
+  const col = await collection();
+  const video = await col.findOne({ _id: fileId, status: "pending" });
+  if (!video) return;
+  await col.updateOne(
+    { _id: fileId, status: "pending" },
+    {
+      $set: {
+        title: video.driveName.replace(VIDEO_EXTENSION_RE, ""),
+        status: "curated",
+        curatedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    },
+  );
+}
+
 /** Clears one override flag (from the video's own curation page's "Reset to folder rule" link) — the
  * field's value itself is refreshed the next time the parent folder's rule is (re-)applied, not here. */
 export async function resetVideoOverride(fileId: string, field: "title" | "intro"): Promise<void> {
