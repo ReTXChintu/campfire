@@ -15,9 +15,25 @@ export type WatchPartyDoc = {
   playing: boolean;
   positionSeconds: number;
   playbackRate: number;
+  // The party-wide audio/subtitle choice of whoever last drove playback, so everyone hears the
+  // same language and reads the same subtitles — and so a late joiner starts on it too.
+  audioTrack: PartyTrackChoice | null;
+  subtitleTrack: PartyTrackChoice | null;
   createdAt: Date;
   updatedAt: Date;
   endedAt: Date | null;
+};
+
+/** A track pick, described portably. `id` is libmpv's own track id, which is deterministic for the
+ * same file on every device; language/title are the fallback when ids don't line up. `source` is
+ * only meaningful for subtitles: "off", an "external" uploaded VTT set (`index` into
+ * video.subtitles), or an "embedded" track muxed into the file. */
+export type PartyTrackChoice = {
+  source?: "off" | "external" | "embedded" | null;
+  id?: string | null;
+  index?: number | null;
+  language?: string | null;
+  title?: string | null;
 };
 
 export type WatchPartySnapshot = {
@@ -31,6 +47,12 @@ export type WatchPartySnapshot = {
   positionSeconds: number;
   effectivePositionSeconds: number;
   playbackRate: number;
+  audioTrack: PartyTrackChoice | null;
+  subtitleTrack: PartyTrackChoice | null;
+  // The server clock (epoch ms) at the instant effectivePositionSeconds was computed. Clients
+  // extrapolate from this using their own estimate of the server clock, never their local clock
+  // directly — two phones' clocks can disagree by seconds.
+  serverTimeMs: number;
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;
@@ -92,6 +114,8 @@ export async function createWatchParty(input: {
     playing: false,
     positionSeconds: 0,
     playbackRate: 1,
+    audioTrack: null,
+    subtitleTrack: null,
     createdAt: now,
     updatedAt: now,
     endedAt: null,
@@ -115,6 +139,9 @@ export async function updateWatchPartyState(
     playing: boolean;
     positionSeconds: number;
     playbackRate?: number;
+    fileId?: string;
+    audioTrack?: PartyTrackChoice | null;
+    subtitleTrack?: PartyTrackChoice | null;
   },
 ): Promise<WatchPartyDoc | null> {
   const col = await collection();
@@ -128,6 +155,11 @@ export async function updateWatchPartyState(
         positionSeconds: Math.max(0, input.positionSeconds),
         updatedAt: now,
         ...(typeof input.playbackRate === "number" ? { playbackRate: input.playbackRate } : {}),
+        // The party follows the controller onto the next episode — guests see the new fileId in
+        // the next sync broadcast (or in join-token's snapshot) and open it themselves.
+        ...(typeof input.fileId === "string" && input.fileId ? { fileId: input.fileId } : {}),
+        ...(input.audioTrack !== undefined ? { audioTrack: input.audioTrack } : {}),
+        ...(input.subtitleTrack !== undefined ? { subtitleTrack: input.subtitleTrack } : {}),
       },
     },
   );
@@ -174,13 +206,15 @@ export async function endWatchPartiesForFile(fileId: string): Promise<number> {
 
 export function getEffectivePartyPositionSeconds(
   party: Pick<WatchPartyDoc, "playing" | "positionSeconds" | "updatedAt" | "playbackRate">,
+  nowMs: number = Date.now(),
 ): number {
   if (!party.playing) return party.positionSeconds;
-  const elapsedSeconds = Math.max(0, Date.now() - party.updatedAt.getTime()) / 1000;
+  const elapsedSeconds = Math.max(0, nowMs - party.updatedAt.getTime()) / 1000;
   return party.positionSeconds + elapsedSeconds * party.playbackRate;
 }
 
 export function serializeWatchParty(party: WatchPartyDoc): WatchPartySnapshot {
+  const serverTimeMs = Date.now();
   return {
     id: party.code,
     roomName: party.roomName,
@@ -190,8 +224,12 @@ export function serializeWatchParty(party: WatchPartyDoc): WatchPartySnapshot {
     hostParticipantIdentity: party.hostParticipantIdentity,
     playing: party.playing,
     positionSeconds: party.positionSeconds,
-    effectivePositionSeconds: getEffectivePartyPositionSeconds(party),
+    effectivePositionSeconds: getEffectivePartyPositionSeconds(party, serverTimeMs),
     playbackRate: party.playbackRate,
+    // Older party docs predate these fields.
+    audioTrack: party.audioTrack ?? null,
+    subtitleTrack: party.subtitleTrack ?? null,
+    serverTimeMs,
     createdAt: party.createdAt.toISOString(),
     updatedAt: party.updatedAt.toISOString(),
     endedAt: party.endedAt?.toISOString() ?? null,

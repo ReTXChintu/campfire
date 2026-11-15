@@ -3,6 +3,7 @@ import { AccessToken, DataPacket_Kind, RoomServiceClient } from "livekit-server-
 import { env } from "../config/env";
 import { requireAuth } from "../middleware/auth";
 import {
+  type PartyTrackChoice,
   createWatchParty,
   endWatchParty,
   getWatchPartyByCode,
@@ -62,6 +63,44 @@ function isDesktopClient(kind: WatchPartyClientKind): boolean {
   return DESKTOP_CLIENT_KINDS.has(kind);
 }
 
+/** The server clock, for clients to estimate their offset from it (NTP-style: they time the round
+ * trip and assume the reply was stamped halfway through). Every sync timestamp in a party is
+ * expressed on this clock, so two phones whose own clocks disagree by seconds still agree on
+ * "where the video should be now". Registered before `/:partyId` so "time" isn't read as a code. */
+router.get("/time", requireAuth, (_req, res) => {
+  res.setHeader("cache-control", "no-store");
+  res.json({ serverTimeMs: Date.now() });
+});
+
+const TRACK_SOURCES = new Set(["off", "external", "embedded"]);
+function optionalString(value: unknown, max = 200): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === "string") return value.slice(0, max);
+  throw new Error("invalid");
+}
+
+/** undefined = "not sent, leave alone"; null = "no choice"; otherwise a cleaned-up choice. Throws on
+ * anything malformed so the route can answer 400 instead of storing junk every guest then parses. */
+function parseTrackChoice(value: unknown): PartyTrackChoice | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("invalid");
+  const v = value as Record<string, unknown>;
+  const source = optionalString(v.source, 16);
+  if (source != null && !TRACK_SOURCES.has(source)) throw new Error("invalid");
+  if (v.index !== undefined && v.index !== null && !(typeof v.index === "number" && Number.isInteger(v.index))) {
+    throw new Error("invalid");
+  }
+  return {
+    source: (source ?? null) as PartyTrackChoice["source"],
+    id: optionalString(v.id, 32) ?? null,
+    index: (v.index as number | null | undefined) ?? null,
+    language: optionalString(v.language) ?? null,
+    title: optionalString(v.title) ?? null,
+  };
+}
+
 router.post("/", requireAuth, async (req, res) => {
   const { fileId, title } = req.body as { fileId?: string; title?: string | null };
   if (!fileId) {
@@ -109,21 +148,42 @@ router.patch("/:partyId/state", requireAuth, async (req, res) => {
     return;
   }
 
-  const { playing, positionSeconds, playbackRate } = req.body as {
+  const { playing, positionSeconds, playbackRate, fileId } = req.body as {
     playing?: boolean;
     positionSeconds?: number;
     playbackRate?: number;
+    fileId?: unknown;
   };
-  if (typeof playing !== "boolean" || typeof positionSeconds !== "number") {
+  if (typeof playing !== "boolean" || typeof positionSeconds !== "number" || !Number.isFinite(positionSeconds)) {
     res.status(400).json({ error: "Invalid payload" });
     return;
   }
-  if (typeof playbackRate !== "undefined" && typeof playbackRate !== "number") {
+  if (typeof playbackRate !== "undefined" && (typeof playbackRate !== "number" || !(playbackRate > 0 && playbackRate <= 4))) {
     res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  if (typeof fileId !== "undefined" && (typeof fileId !== "string" || !fileId || fileId.length > 200)) {
+    res.status(400).json({ error: "Invalid payload" });
+    return;
+  }
+  let audioTrack: PartyTrackChoice | null | undefined;
+  let subtitleTrack: PartyTrackChoice | null | undefined;
+  try {
+    audioTrack = parseTrackChoice((req.body as Record<string, unknown>).audioTrack);
+    subtitleTrack = parseTrackChoice((req.body as Record<string, unknown>).subtitleTrack);
+  } catch {
+    res.status(400).json({ error: "Invalid track choice" });
     return;
   }
 
-  const updated = await updateWatchPartyState(req.params.partyId, { playing, positionSeconds, playbackRate });
+  const updated = await updateWatchPartyState(req.params.partyId, {
+    playing,
+    positionSeconds,
+    playbackRate,
+    fileId,
+    audioTrack,
+    subtitleTrack,
+  });
   if (!updated || updated.endedAt) {
     res.status(404).json({ error: "Watch party not found" });
     return;
@@ -260,6 +320,7 @@ router.post("/:partyId/join-token", requireAuth, async (req, res) => {
     userId,
     deviceId,
     deviceLabel,
+    displayName: user?.name?.trim() || null,
     clientKind,
     participantIdentity,
     role,
@@ -356,7 +417,7 @@ router.post("/:partyId/heartbeat", requireAuth, async (req, res) => {
     return;
   }
   await touchSession(party.code, req.authUser!.userId, deviceId);
-  res.json({ ok: true });
+  res.json({ ok: true, serverTimeMs: Date.now() });
 });
 
 router.post("/:partyId/leave", requireAuth, async (req, res) => {

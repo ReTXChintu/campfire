@@ -11,7 +11,13 @@ import {
   getCatalogVideo,
   listPublishedVideosByParent,
 } from "../lib/catalogVideos";
-import { getProgress, getProgressForFolder, getMostRecentPreferenceForFolder, getRecentInProgress } from "../lib/progress";
+import {
+  getProgress,
+  getProgressForFiles,
+  getProgressForFolder,
+  getMostRecentPreferenceForFolder,
+  getRecentInProgress,
+} from "../lib/progress";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
@@ -225,6 +231,12 @@ router.get("/library", requireAuth, async (req, res) => {
     continueWatching: continueWatchingItems,
     folders,
     videos,
+    // Progress for the library's own videos, finished ones included, so a movie card can show it
+    // was watched. Older clients ignore it.
+    progress: await getProgressForFiles(
+      req.authUser!.userId,
+      videos.map((v) => v.id),
+    ),
   });
 });
 
@@ -280,7 +292,7 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
   const [seasonVideoDocs, specialVideoDocs, progressList] = await Promise.all([
     listPublishedVideosByParent(selectedSeasonId),
     listPublishedVideosByParent(folderId),
-    getProgressForFolder(req.authUser!.userId, folderId),
+    getProgressForFolder(req.authUser!.userId, selectedSeasonId, folderId),
   ]);
 
   const seasonItems = orderEpisodes(
@@ -335,7 +347,7 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   let nextFileId: string | null = null;
   let previousFileId: string | null = null;
   let episodes: { id: string; name: string }[] = [];
-  let progressByFileId: Record<string, { positionSeconds: number; completed: boolean }> = {};
+  let progressByFileId: Record<string, { positionSeconds: number; durationSeconds: number; completed: boolean }> = {};
 
   if (!isStandalone) {
     const [episodeDocs, progressList] = await Promise.all([
@@ -350,7 +362,10 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     previousFileId = index >= 0 ? (episodeList[index - 1]?.id ?? null) : null;
     episodes = episodeList;
     progressByFileId = Object.fromEntries(
-      progressList.map((p) => [p.fileId, { positionSeconds: p.positionSeconds, completed: p.completed }]),
+      progressList.map((p) => [
+        p.fileId,
+        { positionSeconds: p.positionSeconds, durationSeconds: p.durationSeconds ?? 0, completed: p.completed },
+      ]),
     );
   }
 

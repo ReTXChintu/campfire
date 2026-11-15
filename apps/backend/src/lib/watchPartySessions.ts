@@ -17,6 +17,9 @@ export type WatchPartySessionDoc = {
   userId: string;
   deviceId: string;
   deviceLabel: string;
+  // The account's display name at join time — what the roster shows, since a device label alone
+  // ("Pixel 7") doesn't say who is actually there. Absent on rows written before it existed.
+  displayName?: string | null;
   clientKind: WatchPartyClientKind;
   participantIdentity: string; // `${role}-${userId}-${deviceId}` — the LiveKit identity minted for this session
   role: WatchPartyParticipantRole;
@@ -31,6 +34,7 @@ export type WatchPartySessionSnapshot = {
   userId: string;
   deviceId: string;
   deviceLabel: string;
+  displayName: string | null;
   clientKind: WatchPartyClientKind;
   role: WatchPartyParticipantRole;
   deviceRole: WatchPartyDeviceRole;
@@ -49,6 +53,7 @@ function serialize(doc: WatchPartySessionDoc): WatchPartySessionSnapshot {
     userId: doc.userId,
     deviceId: doc.deviceId,
     deviceLabel: doc.deviceLabel,
+    displayName: doc.displayName ?? null,
     clientKind: doc.clientKind,
     role: doc.role,
     deviceRole: doc.deviceRole,
@@ -102,6 +107,7 @@ export async function upsertSession(input: {
   userId: string;
   deviceId: string;
   deviceLabel: string;
+  displayName: string | null;
   clientKind: WatchPartyClientKind;
   participantIdentity: string;
   role: WatchPartyParticipantRole;
@@ -114,6 +120,7 @@ export async function upsertSession(input: {
     {
       $set: {
         deviceLabel: input.deviceLabel,
+        displayName: input.displayName,
         clientKind: input.clientKind,
         participantIdentity: input.participantIdentity,
         role: input.role,

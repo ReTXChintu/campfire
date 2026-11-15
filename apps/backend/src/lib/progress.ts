@@ -52,9 +52,21 @@ export async function getProgress(userId: string, fileId: string) {
   return col.findOne({ userId, fileId });
 }
 
-export async function getProgressForFolder(userId: string, parentFolderId: string) {
+/** Every progress doc for videos directly inside any of these folders. Takes several because a
+ * series page lists its selected season *and* the specials sitting in the series folder itself,
+ * and the player files each video's progress under its own immediate parent (the season), never
+ * the series — querying the series folder alone is why season episodes never showed any. */
+export async function getProgressForFolder(userId: string, ...parentFolderIds: string[]) {
   const col = await collection();
-  return col.find({ userId, parentFolderId }).toArray();
+  return col.find({ userId, parentFolderId: { $in: parentFolderIds } }).toArray();
+}
+
+/** Progress for an explicit set of videos, completed ones included — the library's movie cards
+ * need "you finished this", which the in-progress-only Continue Watching list can never carry. */
+export async function getProgressForFiles(userId: string, fileIds: string[]) {
+  if (fileIds.length === 0) return [];
+  const col = await collection();
+  return col.find({ userId, fileId: { $in: fileIds } }).toArray();
 }
 
 /** The most recently-touched track preference anywhere else in this series (folder) — powers
