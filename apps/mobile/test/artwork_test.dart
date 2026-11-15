@@ -75,7 +75,7 @@ void main() {
     final artwork = CatalogArtwork.tryParse(_artworkJson);
 
     for (final width in [1000.0, 380.0]) {
-      testWidgets('matched, Drive image winning — fits at ${width.toInt()}px', (tester) async {
+      testWidgets('matched folder with a Drive image — fits at ${width.toInt()}px', (tester) async {
         tester.view.physicalSize = Size(width, 1400);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
@@ -93,7 +93,8 @@ void main() {
         await tester.pump();
         expect(tester.takeException(), isNull);
         expect(find.text('House of the Dragon (2022)'), findsOneWidget);
-        expect(find.textContaining("own thumbnail image in Drive is shown instead"), findsOneWidget);
+        // Matched, so TMDb's image is what viewers see: no Drive note.
+        expect(find.textContaining('thumbnail image in this folder in Drive'), findsNothing);
         expect(find.text('Remove'), findsOneWidget);
         // "Use link" stays disabled until something is typed.
         final useLink = tester.widget<ElevatedButton>(find.widgetWithText(ElevatedButton, 'Use link'));

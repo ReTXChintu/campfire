@@ -14,14 +14,19 @@ function initialFor(title: string): string {
   return (title.replace(/^(the|a|an)\s+/i, "").trim().charAt(0) || "?").toUpperCase();
 }
 
+/** Asks the thumbnail routes for a 2:3 poster (TMDb's, when the title is matched; otherwise the
+ * route just returns its usual image). */
+function posterPath(path: string): string {
+  return `${path}${path.includes("?") ? "&" : "?"}shape=poster`;
+}
+
 /**
  * The artwork frame every card, rail and detail header shares.
  *
- * Campfire's only image for a title is a Drive video thumbnail, which is 16:9 — there is no 2:3
- * poster art anywhere in the data. So in `poster` mode the still is *contained* inside the 2:3
- * frame over a blurred, scaled copy of itself, which keeps the poster rhythm the design calls for
- * without cropping two thirds of the frame away. `still` mode (16:9) is used where the shape is
- * naturally wide: continue-watching and episode rows.
+ * `poster` mode (2:3) asks for the title's TMDb poster; `still` mode (16:9) gets the backdrop or
+ * Drive frame and is used where the shape is naturally wide: continue-watching and episode rows.
+ * Either way the image fills the frame, cropped around its centre — an image of the other shape
+ * (an unmatched title's Drive frame in a poster card) loses its edges, never gets bars.
  */
 export default function Poster({
   path,
@@ -41,7 +46,7 @@ export default function Poster({
   /** Badges, progress bars and hover affordances, absolutely positioned over the frame. */
   children?: ReactNode;
 }) {
-  const { url, failed } = useAuthedImage(path);
+  const { url, failed } = useAuthedImage(path && ratio === "poster" ? posterPath(path) : path);
   const shape = ratio === "poster" ? "aspect-[2/3]" : "aspect-video";
   const hue = hueFor(id);
 
@@ -57,23 +62,11 @@ export default function Poster({
       }
     >
       {url ? (
-        <>
-          {ratio === "poster" && (
-            <img
-              src={url}
-              alt=""
-              aria-hidden="true"
-              className="absolute inset-0 h-full w-full scale-125 object-cover opacity-45 blur-xl"
-            />
-          )}
-          <img
-            src={url}
-            alt={title}
-            className={`absolute inset-0 h-full w-full transition duration-300 ease-out ${
-              ratio === "poster" ? "object-contain" : "object-cover group-hover:scale-105"
-            }`}
-          />
-        </>
+        <img
+          src={url}
+          alt={title}
+          className="absolute inset-0 h-full w-full object-cover object-center transition duration-300 ease-out group-hover:scale-105"
+        />
       ) : failed || !path ? (
         <div className="absolute inset-0 grid place-items-center">
           <span className="font-display text-5xl leading-none tracking-wide text-white/15" aria-hidden="true">

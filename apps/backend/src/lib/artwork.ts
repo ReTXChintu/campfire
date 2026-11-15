@@ -334,38 +334,53 @@ async function runAutoMatch(retry: boolean): Promise<AutoMatchResult> {
 
 // --- Images -------------------------------------------------------------------------------------
 
-// Backdrops are 16:9 — the shape every card and hero in the apps already uses. w1280 is enough
-// for the desktop hero; a poster is only the fallback for a title with no backdrop.
+// Backdrops are 16:9, for wide cards and the hero (w1280 is enough for a desktop hero). Posters are
+// 2:3, for the web's poster-shaped cards, which ask for them with ?shape=poster.
 const BACKDROP_SIZE = "w1280";
 const POSTER_SIZE = "w780";
+
+/** The frame an image is for: "wide" (16:9 cards, heroes — the default, and all older clients ask
+ * for) or "poster" (2:3 cards). */
+export type ArtworkShape = "wide" | "poster";
+
+export function parseArtworkShape(value: unknown): ArtworkShape {
+  return value === "poster" ? "poster" : "wide";
+}
 const TMDB_PATH_RE = /^\/[A-Za-z0-9_-]{4,64}\.(jpg|jpeg|png|webp)$/;
 const DOWNLOAD_TIMEOUT_MS = 15000;
 
 export type ArtworkImage = { tmdbPath: string; size: string };
 
-/** Which image a title shows, or null when its artwork has neither. The path is validated here
- * because it becomes part of a filename. */
-export function artworkImage(artwork: CatalogArtwork | null | undefined): ArtworkImage | null {
-  if (artwork?.backdropPath && TMDB_PATH_RE.test(artwork.backdropPath)) {
-    return { tmdbPath: artwork.backdropPath, size: BACKDROP_SIZE };
-  }
-  if (artwork?.posterPath && TMDB_PATH_RE.test(artwork.posterPath)) {
-    return { tmdbPath: artwork.posterPath, size: POSTER_SIZE };
-  }
-  return null;
+/** Which image a title shows in a frame of this shape — the matching one when TMDb has it, else
+ * the other — or null when its artwork has neither. The path is validated here because it becomes
+ * part of a filename. */
+export function artworkImage(
+  artwork: CatalogArtwork | null | undefined,
+  shape: ArtworkShape = "wide",
+): ArtworkImage | null {
+  const backdrop =
+    artwork?.backdropPath && TMDB_PATH_RE.test(artwork.backdropPath)
+      ? { tmdbPath: artwork.backdropPath, size: BACKDROP_SIZE }
+      : null;
+  const poster =
+    artwork?.posterPath && TMDB_PATH_RE.test(artwork.posterPath)
+      ? { tmdbPath: artwork.posterPath, size: POSTER_SIZE }
+      : null;
+  return shape === "poster" ? (poster ?? backdrop) : (backdrop ?? poster);
 }
 
 type FolderImageFields = { thumbnailFileId: string | null } & ArtworkFields;
 
-/** What a folder's card loads: a pasted link beats an image dropped in the Drive folder (pasting
- * is the newer, deliberate choice), which beats an automatic match. */
+/** What a folder's card loads: its TMDb artwork whenever it has some (one consistent look across
+ * the library), else the thumbnail.* image dropped in its Drive folder. Removing the artwork in
+ * admin brings the Drive image back. */
 export function folderImageSource(
   folder: FolderImageFields,
+  shape: ArtworkShape = "wide",
 ): { kind: "artwork"; image: ArtworkImage } | { kind: "drive"; fileId: string } | null {
-  const image = artworkImage(folder.artwork);
-  if (image && folder.artwork?.source === "link") return { kind: "artwork", image };
-  if (folder.thumbnailFileId) return { kind: "drive", fileId: folder.thumbnailFileId };
+  const image = artworkImage(folder.artwork, shape);
   if (image) return { kind: "artwork", image };
+  if (folder.thumbnailFileId) return { kind: "drive", fileId: folder.thumbnailFileId };
   return null;
 }
 

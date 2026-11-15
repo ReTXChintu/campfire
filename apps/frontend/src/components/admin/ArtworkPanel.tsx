@@ -47,7 +47,8 @@ export default function ArtworkPanel({
     if (link.trim()) run({ type: "link", link: link.trim() }, "Artwork updated from the link.");
   };
 
-  const driveWins = kind === "folder" && hasDriveThumbnail && artwork?.source !== "link";
+  // TMDb artwork wins whenever there is some; the Drive image is only the fallback.
+  const showingDrive = kind === "folder" && hasDriveThumbnail && !artwork;
   const tmdbUrl = artwork ? `https://www.themoviedb.org/${artwork.tmdbType}/${artwork.tmdbId}` : null;
 
   return (
@@ -83,9 +84,9 @@ export default function ArtworkPanel({
                 : "Not matched yet. Paste the title's IMDb or TMDb link, or search for it."}
             </p>
           )}
-          {driveWins && (
+          {showingDrive && (
             <p className="mt-1 text-xs text-text-tertiary">
-              This folder&apos;s own thumbnail image in Drive is shown instead. Paste a link to use TMDb&apos;s artwork.
+              Until it&apos;s matched, viewers see the thumbnail image in this folder in Drive.
             </p>
           )}
           {artwork?.overview && (

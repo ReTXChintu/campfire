@@ -4,7 +4,13 @@ import { getThumbnail, streamFile, readDriveHeader } from "../lib/drive";
 import { getCatalogFolder } from "../lib/catalogFolders";
 import { getCatalogVideo } from "../lib/catalogVideos";
 import { requireMediaAccess } from "../middleware/mediaAuth";
-import { artworkImage, artworkImageFile, folderImageSource, type ArtworkImage } from "../lib/artwork";
+import {
+  artworkImage,
+  artworkImageFile,
+  folderImageSource,
+  parseArtworkShape,
+  type ArtworkImage,
+} from "../lib/artwork";
 
 const IMAGE_CACHE = "private, max-age=3600";
 
@@ -23,7 +29,7 @@ router.get("/:fileId", requireMediaAccess("fileId"), async (req, res) => {
   const { fileId } = req.params;
   // A movie matched to TMDb shows its backdrop; everything else (episodes, unmatched titles, or
   // TMDb unreachable) keeps Drive's own frame grab.
-  const image = artworkImage((await getCatalogVideo(fileId))?.artwork);
+  const image = artworkImage((await getCatalogVideo(fileId))?.artwork, parseArtworkShape(req.query.shape));
   if (image && (await sendArtwork(res, image))) return;
   try {
     const thumbRes = await getThumbnail(fileId);
@@ -49,7 +55,7 @@ export const folderThumbnailRouter = Router();
 folderThumbnailRouter.get("/:folderId", requireMediaAccess("folderId"), async (req, res) => {
   const { folderId } = req.params;
   const folder = await getCatalogFolder(folderId);
-  const source = folder ? folderImageSource(folder) : null;
+  const source = folder ? folderImageSource(folder, parseArtworkShape(req.query.shape)) : null;
   if (source?.kind === "artwork" && (await sendArtwork(res, source.image))) return;
   // TMDb unreachable: a Drive image, if the folder has one, still beats a blank card.
   const driveFileId = folder?.thumbnailFileId;

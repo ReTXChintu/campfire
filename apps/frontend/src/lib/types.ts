@@ -114,7 +114,7 @@ export type SpotlightSlide = {
   playHref: string;
   infoHref: string | null;
   // A ready-to-fetch backend path (e.g. "/api/thumbnail/<id>"), or null when a folder simply has
-  // no thumbnail yet — not rendered on web, where the carousel keeps the old hero's gradient
+  // no thumbnail yet — the carousel then keeps its coloured gradient
   // backdrop by design; included so the type matches what the backend actually sends.
   thumbnailPath: string | null;
   requestId?: string;

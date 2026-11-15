@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { SpotlightSlide } from "../lib/types";
+import { useAuthedImage } from "../hooks/useAuthedImage";
 
 const AUTO_ADVANCE_MS = 7000;
 
@@ -9,6 +10,20 @@ const AUTO_ADVANCE_MS = 7000;
 function backdrop(index: number): string {
   const hue = (index * 37) % 360;
   return `radial-gradient(circle at 75% 30%, hsl(${(18 + hue) % 360} 52% 16%) 0%, hsl(${(330 + hue) % 360} 30% 8%) 40%, #0A0B0F 75%)`;
+}
+
+/** A slide's artwork (the title's TMDb backdrop, or its Drive image), filling the slide and cropped
+ * around its centre, darkened toward the bottom and the text side so the title stays legible. The
+ * coloured gradient behind it shows while it loads, or when a title has no image. */
+function SlideImage({ path }: { path: string | null }) {
+  const { url } = useAuthedImage(path);
+  if (!url) return null;
+  return (
+    <>
+      <img src={url} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover object-center" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-background/85 via-background/35 to-transparent" />
+    </>
+  );
 }
 
 function useReducedMotion(): boolean {
@@ -132,6 +147,7 @@ export default function SpotlightCarousel({ slides }: { slides: SpotlightSlide[]
             className="relative flex h-[56vh] min-h-[380px] w-full shrink-0 snap-start snap-always items-end sm:h-[64vh] sm:min-h-[440px]"
             style={{ background: backdrop(i) }}
           >
+            <SlideImage path={slide.thumbnailPath} />
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
             <div className="relative z-10 max-w-xl px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
               <div className="mb-4 inline-flex items-center gap-2 rounded border border-amber/30 bg-amber/10 px-2.5 py-1 font-mono text-xs uppercase tracking-wide text-amber">

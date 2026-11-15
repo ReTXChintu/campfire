@@ -226,7 +226,7 @@ try {
   const library = (await api("/api/library", { token: viewer })).json;
   const listed = Object.fromEntries((library?.folders ?? []).map((f) => [f.id, f.thumbnailFileId]));
   check("artwork-only series is listed with a non-null thumbnailFileId (old apps load it)", listed["f-latent"] === "tmdb", JSON.stringify(listed));
-  check("a Drive thumbnail.* still wins over an automatic match", listed["f-hotd"] === "drive-thumb-hotd");
+  check("TMDb artwork wins over a Drive thumbnail.*", listed["f-hotd"] === "tmdb");
   check("a series with neither stays null", listed["f-unknown"] === null);
   const spotlightLatent = library?.spotlight?.find((s) => s.id === "f-latent");
   check("spotlight slide gets an image path for the artwork-only series", spotlightLatent?.thumbnailPath === "/api/thumbnail-folder/f-latent", JSON.stringify(spotlightLatent));
@@ -238,6 +238,9 @@ try {
   check("cache is a plain file in ARTWORK_DIR", readdirSync(artworkDir).includes("w1280_latentBackdrop.jpg"), readdirSync(artworkDir).join(","));
   const movieImage = await api("/api/thumbnail/v-weapons", { token: viewer });
   check("movie image route serves its backdrop", movieImage.status === 200 && movieImage.buffer.equals(jpeg("w1280/weaponsBackdrop.jpg")));
+  check("?shape=poster serves the 2:3 poster instead", (await api("/api/thumbnail/v-weapons?shape=poster", { token: viewer })).buffer.equals(jpeg("w780/weaponsPoster.jpg")));
+  check("folder ?shape=poster too", (await api("/api/thumbnail-folder/f-hotd?shape=poster", { token: viewer })).buffer.equals(jpeg("w780/hotdPoster.jpg")));
+  check("unknown shape is treated as wide", (await api("/api/thumbnail/v-weapons?shape=../../x", { token: viewer })).buffer.equals(jpeg("w1280/weaponsBackdrop.jpg")));
   check("image routes still require sign-in", (await api("/api/thumbnail/v-weapons")).status === 401);
 
   const seriesPage = (await api("/api/folder/f-latent", { token: viewer })).json;
@@ -260,7 +263,9 @@ try {
 
   const hotdLink = await api("/api/admin/catalog/artwork/folder/f-hotd", { token: admin, method: "PUT", body: { link: "https://www.themoviedb.org/tv/94997-house-of-the-dragon" } });
   check("pasted TMDb TV link resolves", hotdLink.json?.artwork?.tmdbType === "tv" && hotdLink.json.artwork.tmdbId === "94997");
-  check("a pasted link wins over the Drive thumbnail.*", (await api("/api/thumbnail-folder/f-hotd", { token: viewer })).buffer.equals(jpeg("w1280/hotdLinkBackdrop.jpg")));
+  check("a pasted link replaces the automatic match", (await api("/api/thumbnail-folder/f-hotd", { token: viewer })).buffer.equals(jpeg("w1280/hotdLinkBackdrop.jpg")));
+  await api("/api/admin/catalog/artwork/folder/f-hotd", { token: admin, method: "DELETE" });
+  check("removing artwork brings the Drive thumbnail.* back", (await api("/api/library", { token: viewer })).json.folders.find((f) => f.id === "f-hotd")?.thumbnailFileId === "drive-thumb-hotd");
 
   const removed = await api("/api/admin/catalog/artwork/folder/f-latent", { token: admin, method: "DELETE" });
   check("artwork can be removed", removed.status === 200 && (await doc("folder", "f-latent"))?.artworkAutoOff === true);

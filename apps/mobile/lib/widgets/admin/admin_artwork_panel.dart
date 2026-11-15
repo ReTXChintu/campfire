@@ -82,7 +82,8 @@ class _AdminArtworkPanelState extends State<AdminArtworkPanel> {
     final artwork = widget.artwork;
     // The version makes the preview refetch after a change; the server ignores it.
     final version = Uri.encodeQueryComponent(artwork?.matchedAt ?? (widget.autoOff ? 'off' : 'none'));
-    final driveWins = widget.kind == 'folder' && widget.hasDriveThumbnail && artwork?.source != 'link';
+    // TMDb artwork wins whenever there is some; the Drive image is only the fallback.
+    final showingDrive = widget.kind == 'folder' && widget.hasDriveThumbnail && artwork == null;
     const secondary = TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4);
     const tertiary = TextStyle(color: AppColors.textTertiary, fontSize: 12, height: 1.4);
 
@@ -122,10 +123,10 @@ class _AdminArtworkPanelState extends State<AdminArtworkPanel> {
                 : 'Not matched yet. Paste the title\'s IMDb or TMDb link, or search for it.',
             style: secondary,
           ),
-        if (driveWins) ...[
+        if (showingDrive) ...[
           const SizedBox(height: 4),
           const Text(
-            "This folder's own thumbnail image in Drive is shown instead. Paste a link to use TMDb's artwork.",
+            "Until it's matched, viewers see the thumbnail image in this folder in Drive.",
             style: tertiary,
           ),
         ],
