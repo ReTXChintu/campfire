@@ -129,11 +129,11 @@ export default function SpotlightCarousel({ slides }: { slides: SpotlightSlide[]
             role="group"
             aria-roledescription="slide"
             aria-label={`${i + 1} of ${count}: ${slide.title}`}
-            className="relative flex h-[62vh] min-h-[420px] w-full shrink-0 snap-start snap-always items-end sm:h-[70vh] sm:min-h-[460px]"
+            className="relative flex h-[56vh] min-h-[380px] w-full shrink-0 snap-start snap-always items-end sm:h-[64vh] sm:min-h-[440px]"
             style={{ background: backdrop(i) }}
           >
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent" />
-            <div className="relative z-10 max-w-xl px-4 pb-20 sm:px-6 sm:pb-24">
+            <div className="relative z-10 max-w-xl px-4 pb-20 sm:px-6 sm:pb-24 lg:px-8">
               <div className="mb-4 inline-flex items-center gap-2 rounded border border-amber/30 bg-amber/10 px-2.5 py-1 font-mono text-xs uppercase tracking-wide text-amber">
                 {slide.badge}
               </div>
@@ -143,14 +143,14 @@ export default function SpotlightCarousel({ slides }: { slides: SpotlightSlide[]
               <div className="flex flex-wrap gap-3">
                 <Link
                   to={slide.playHref}
-                  className="flex items-center gap-2 rounded-md bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-white/90"
+                  className="flex min-h-12 items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-bold text-black transition hover:brightness-110"
                 >
                   ▶ Play
                 </Link>
                 {slide.infoHref && (
                   <Link
                     to={slide.infoHref}
-                    className="flex items-center gap-2 rounded-md border border-white/15 bg-white/10 px-6 py-3 text-sm font-bold text-white transition hover:bg-white/15"
+                    className="flex min-h-12 items-center gap-2 rounded-lg border border-divider-strong bg-white/5 px-6 py-3 text-sm font-bold text-white transition hover:bg-surface-hover"
                   >
                     More Info
                   </Link>
@@ -158,7 +158,7 @@ export default function SpotlightCarousel({ slides }: { slides: SpotlightSlide[]
                 {slide.kind === "request" && slide.requestId && (
                   <Link
                     to={`/requests?request=${encodeURIComponent(slide.requestId)}`}
-                    className="flex items-center gap-2 rounded-md border border-white/15 px-6 py-3 text-sm font-bold text-text-secondary transition hover:text-white"
+                    className="flex min-h-12 items-center gap-2 rounded-lg px-5 py-3 text-sm font-bold text-text-secondary transition hover:text-white"
                   >
                     See the request
                   </Link>
@@ -188,7 +188,7 @@ export default function SpotlightCarousel({ slides }: { slides: SpotlightSlide[]
             <span aria-hidden="true">›</span>
           </button>
 
-          <div className="absolute bottom-6 left-4 z-10 flex gap-2 sm:left-6">
+          <div className="absolute bottom-6 left-4 z-10 flex gap-2 sm:left-6 lg:left-8">
             {slides.map((slide, i) => (
               <button
                 key={`${slide.id}-dot-${i}`}

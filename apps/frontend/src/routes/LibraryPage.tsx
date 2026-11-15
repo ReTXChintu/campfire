@@ -1,48 +1,73 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useLibrary } from "../hooks/useCatalog";
 import SpotlightCarousel from "../components/SpotlightCarousel";
-import Rail from "../components/Rail";
+import Rail, { RailItem } from "../components/Rail";
 import VideoCard from "../components/VideoCard";
 import FolderCard from "../components/FolderCard";
+import RequestModal from "../components/requests/RequestModal";
+import { CardSkeletonRail, EmptyState, ErrorCard, Skeleton } from "../components/ui/States";
+import { PAGE_X } from "../lib/layout";
 import type { CatalogFolderListItem, CatalogVideoListItem } from "../lib/catalogListItem";
 
+/** How many items a rail shows before "See all" takes over — a rail is a sampler, the grid is the
+ * whole shelf. */
+const RAIL_LIMIT = 18;
+
 export default function LibraryPage() {
-  const { data, isLoading, error } = useLibrary();
+  const { data, isLoading, error, refetch, isFetching } = useLibrary();
+  const [requestOpen, setRequestOpen] = useState(false);
 
   if (isLoading) {
     return (
-      <div className="w-full flex-1 px-4 py-16 sm:px-6">
-        <div className="h-[50vh] animate-pulse rounded-lg bg-surface" />
-      </div>
+      <main className="w-full flex-1 pb-16">
+        <Skeleton className="h-[52vh] min-h-[360px] w-full rounded-none" />
+        <div className={`${PAGE_X} mt-8 grid gap-10`}>
+          <CardSkeletonRail />
+          <CardSkeletonRail />
+        </div>
+      </main>
     );
   }
 
   if (error) {
     return (
-      <div className="w-full flex-1 px-4 py-16 sm:px-6">
-        <p className="text-red-400">Failed to load your library: {error.message}</p>
-      </div>
+      <main className={`w-full flex-1 ${PAGE_X} py-10`}>
+        <ErrorCard
+          title="Your library did not load"
+          message={error.message}
+          onRetry={() => refetch()}
+          retrying={isFetching}
+        />
+      </main>
     );
   }
 
   if (!data || data.empty) {
     return (
-      <div className="w-full flex-1 px-4 py-16 sm:px-6">
-        <p className="text-text-secondary">
-          Your library is empty — curate something in the admin Catalog to get started, or{" "}
-          <Link to="/requests" className="font-semibold text-amber underline">
-            ask for a title
-          </Link>
-          .
-        </p>
-      </div>
+      <main className={`w-full flex-1 ${PAGE_X} py-10`}>
+        <EmptyState
+          title="Nothing to watch yet"
+          message="Once something is published in the admin Catalog it shows up here. In the meantime you can ask for a title."
+          action={
+            <button
+              type="button"
+              onClick={() => setRequestOpen(true)}
+              className="min-h-10 rounded-lg bg-accent px-5 py-2.5 text-sm font-bold text-black transition hover:brightness-110"
+            >
+              Request a title
+            </button>
+          }
+        />
+        <RequestModal open={requestOpen} onClose={() => setRequestOpen(false)} />
+      </main>
     );
   }
 
   const { spotlight, continueWatching, folders, videos } = data;
 
   return (
-    <>
+    <main className="w-full flex-1 pb-16">
       {spotlight.length > 0 && (
         <>
           <SpotlightCarousel slides={spotlight} />
@@ -50,37 +75,66 @@ export default function LibraryPage() {
         </>
       )}
 
-      <main className="pb-16">
-        {continueWatching.length > 0 && (
-          <Rail title="Continue Watching">
-            {continueWatching.map(({ item, progress }) => (
-              <div key={item.id} className="w-56 shrink-0">
-                <VideoCard item={item as CatalogVideoListItem} progress={progress} />
-              </div>
-            ))}
-          </Rail>
-        )}
+      {continueWatching.length > 0 && (
+        <Rail title="Continue watching" eyebrow="Pick up where you left off">
+          {continueWatching.map(({ item, progress }) => (
+            <RailItem key={item.id} wide>
+              <VideoCard item={item as CatalogVideoListItem} progress={progress} ratio="still" />
+            </RailItem>
+          ))}
+        </Rail>
+      )}
 
-        {folders.length > 0 && (
-          <Rail title="Series">
-            {folders.map((folder) => (
-              <div key={folder.id} className="w-56 shrink-0">
-                <FolderCard item={folder as CatalogFolderListItem} />
-              </div>
-            ))}
-          </Rail>
-        )}
+      {folders.length > 0 && (
+        <Rail title="Series" eyebrow={`${folders.length} in your library`} seeAllHref="/series">
+          {folders.slice(0, RAIL_LIMIT).map((folder) => (
+            <RailItem key={folder.id}>
+              <FolderCard item={folder as CatalogFolderListItem} />
+            </RailItem>
+          ))}
+        </Rail>
+      )}
 
-        {videos.length > 0 && (
-          <Rail title="Movies">
-            {videos.map((video) => (
-              <div key={video.id} className="w-56 shrink-0">
+      {videos.length > 0 && (
+        <>
+          <div className="filmstrip" />
+          <Rail title="Films" eyebrow={`${videos.length} in your library`} seeAllHref="/movies">
+            {videos.slice(0, RAIL_LIMIT).map((video) => (
+              <RailItem key={video.id}>
                 <VideoCard item={video as CatalogVideoListItem} />
-              </div>
+              </RailItem>
             ))}
           </Rail>
-        )}
-      </main>
-    </>
+        </>
+      )}
+
+      <section className={`${PAGE_X} mt-6`}>
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-divider bg-surface p-5">
+          <div>
+            <h2 className="font-display text-xl tracking-wide text-white">Missing something?</h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              Ask for a film or a series and follow it from New through Added on the requests board.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to="/requests"
+              className="min-h-10 rounded-lg border border-divider-strong px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-surface-hover"
+            >
+              Open requests
+            </Link>
+            <button
+              type="button"
+              onClick={() => setRequestOpen(true)}
+              className="min-h-10 rounded-lg bg-accent px-4 py-2.5 text-sm font-bold text-black transition hover:brightness-110"
+            >
+              Request a title
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <RequestModal open={requestOpen} onClose={() => setRequestOpen(false)} />
+    </main>
   );
 }

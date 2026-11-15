@@ -30,6 +30,7 @@ import type {
   WatchPartySyncState,
 } from "../lib/types";
 import NotFoundPage from "./NotFoundPage";
+import { PAGE_X } from "../lib/layout";
 
 type PartyParticipant = {
   identity: string;
@@ -486,8 +487,8 @@ export default function WatchPage() {
 
   if (isLoading) {
     return (
-      <div className="w-full flex-1 px-4 py-6 sm:px-6">
-        <div className="aspect-video w-full animate-pulse rounded-lg bg-surface" />
+      <div className={`w-full flex-1 ${PAGE_X} py-6`}>
+        <div className="skeleton aspect-video w-full rounded-2xl" />
       </div>
     );
   }
@@ -495,9 +496,83 @@ export default function WatchPage() {
   if (error || !video) return <NotFoundPage />;
 
   return (
-    <div className="w-full flex-1 px-4 py-6 sm:px-6">
+    <div className={`w-full flex-1 ${PAGE_X} py-6`}>
       <WatchPartyToastStack toasts={toasts} />
-      <section className="mb-6 rounded-2xl border border-white/10 bg-surface/70 p-4 backdrop-blur">
+
+      <PartyRoomProvider room={partyId && !partyLoadFailed ? room : null}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="relative min-w-0 flex-1">
+            {/* Only browser-native formats play here; everything else (MKV, or anything that would
+                need the live ffmpeg remux) is handed off to the apps, which play any container
+                directly via libmpv. */}
+            {video.seekMode !== "native" ? (
+              <DesktopAppRequiredNotice
+                title={video.title ?? "This video"}
+                fileId={video.fileId}
+                backHref={video.backHref}
+              />
+            ) : (
+              <VideoPlayer
+                fileId={video.fileId}
+                title={video.title!}
+                backHref={video.backHref}
+                parentFolderId={video.parentFolderId}
+                nextFileId={video.nextFileId}
+                previousFileId={video.previousFileId}
+                episodes={video.episodes}
+                progressByFileId={video.progressByFileId}
+                initialPositionSeconds={video.initialPositionSeconds}
+                initialCompleted={video.initialCompleted}
+                seekMode={video.seekMode}
+                durationSeconds={video.durationSeconds}
+                subtitles={video.subtitles}
+                introStart={video.introStart}
+                introEnd={video.introEnd}
+                outroStart={video.outroStart}
+                initialSubtitleSource={video.initialSubtitleSource}
+                initialSubtitleIndex={video.initialSubtitleIndex}
+                initialSubtitleLanguage={video.initialSubtitleLanguage}
+                initialSubtitleTitle={video.initialSubtitleTitle}
+                initialAudioLanguage={video.initialAudioLanguage}
+                initialAudioTitle={video.initialAudioTitle}
+                watchPartySync={watchPartySyncProp}
+              />
+            )}
+            {/* Floats over the video instead of sitting in its own row below it — see design.html. */}
+            {partyId && !partyLoadFailed && room && (
+              <div className="pointer-events-none absolute right-3 top-3 z-10 max-w-[70%] sm:max-w-[45%]">
+                <div className="pointer-events-auto">
+                  <WatchPartyVideoGrid />
+                </div>
+              </div>
+            )}
+            {partyId && !partyLoadFailed && <ReactionOverlay reactions={reactions} />}
+          </div>
+
+          {partyId && !partyLoadFailed && (
+            <PartySidePanel
+              collapsed={panelCollapsed}
+              onToggleCollapsed={() => setPanelCollapsed((value) => !value)}
+              room={room}
+              connectionState={connectionState}
+              syncEnabled={syncEnabled}
+              micEnabled={micEnabled}
+              audioReady={audioReady}
+              cameraEnabled={cameraEnabled}
+              onToggleMic={handleToggleMic}
+              onEnablePartyAudio={handleEnablePartyAudio}
+              onToggleCamera={handleToggleCamera}
+              participants={participants}
+              backendByIdentity={backendByIdentity}
+              isHost={isHost}
+              grantControl={grantControl}
+              onSendReaction={sendReaction}
+            />
+          )}
+        </div>
+      </PartyRoomProvider>
+
+      <section className="mt-6 rounded-2xl border border-divider bg-surface p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-2xl">
             <p className="text-xs uppercase tracking-[0.25em] text-white/45">Watch Party</p>
@@ -663,75 +738,6 @@ export default function WatchPage() {
         </div>
 
       </section>
-
-      <PartyRoomProvider room={partyId && !partyLoadFailed ? room : null}>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-          <div className="relative min-w-0 flex-1">
-            {/* Only browser-native formats play here; everything else (MKV, or anything that would
-                need the live ffmpeg remux) is handed off to the apps, which play any container
-                directly via libmpv. */}
-            {video.seekMode !== "native" ? (
-              <DesktopAppRequiredNotice title={video.title ?? "This video"} />
-            ) : (
-              <VideoPlayer
-                fileId={video.fileId}
-                title={video.title!}
-                backHref={video.backHref}
-                parentFolderId={video.parentFolderId}
-                nextFileId={video.nextFileId}
-                previousFileId={video.previousFileId}
-                episodes={video.episodes}
-                progressByFileId={video.progressByFileId}
-                initialPositionSeconds={video.initialPositionSeconds}
-                initialCompleted={video.initialCompleted}
-                seekMode={video.seekMode}
-                durationSeconds={video.durationSeconds}
-                subtitles={video.subtitles}
-                introStart={video.introStart}
-                introEnd={video.introEnd}
-                outroStart={video.outroStart}
-                initialSubtitleSource={video.initialSubtitleSource}
-                initialSubtitleIndex={video.initialSubtitleIndex}
-                initialSubtitleLanguage={video.initialSubtitleLanguage}
-                initialSubtitleTitle={video.initialSubtitleTitle}
-                initialAudioLanguage={video.initialAudioLanguage}
-                initialAudioTitle={video.initialAudioTitle}
-                watchPartySync={watchPartySyncProp}
-              />
-            )}
-            {/* Floats over the video instead of sitting in its own row below it — see design.html. */}
-            {partyId && !partyLoadFailed && room && (
-              <div className="pointer-events-none absolute right-3 top-3 z-10 max-w-[70%] sm:max-w-[45%]">
-                <div className="pointer-events-auto">
-                  <WatchPartyVideoGrid />
-                </div>
-              </div>
-            )}
-            {partyId && !partyLoadFailed && <ReactionOverlay reactions={reactions} />}
-          </div>
-
-          {partyId && !partyLoadFailed && (
-            <PartySidePanel
-              collapsed={panelCollapsed}
-              onToggleCollapsed={() => setPanelCollapsed((value) => !value)}
-              room={room}
-              connectionState={connectionState}
-              syncEnabled={syncEnabled}
-              micEnabled={micEnabled}
-              audioReady={audioReady}
-              cameraEnabled={cameraEnabled}
-              onToggleMic={handleToggleMic}
-              onEnablePartyAudio={handleEnablePartyAudio}
-              onToggleCamera={handleToggleCamera}
-              participants={participants}
-              backendByIdentity={backendByIdentity}
-              isHost={isHost}
-              grantControl={grantControl}
-              onSendReaction={sendReaction}
-            />
-          )}
-        </div>
-      </PartyRoomProvider>
     </div>
   );
 }

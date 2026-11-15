@@ -12,17 +12,19 @@ export default function SeasonDropdown({
 
   return (
     <select
+      id="season-select"
       value={selectedId}
-      onChange={(e) => {
+      aria-label="Season"
+      onChange={(event) => {
         const next = new URLSearchParams(searchParams);
-        next.set("season", e.target.value);
+        next.set("season", event.target.value);
         setSearchParams(next);
       }}
-      className="rounded-md border border-divider bg-surface px-4 py-2 text-sm font-medium text-white outline-none transition focus:border-white/30"
+      className="min-h-10 rounded-lg border border-divider-strong bg-[var(--bg-elevated)] px-3 py-2 text-sm font-medium text-white outline-none transition focus:border-accent"
     >
-      {seasons.map((s) => (
-        <option key={s.id} value={s.id}>
-          {s.name}
+      {seasons.map((season) => (
+        <option key={season.id} value={season.id}>
+          {season.name}
         </option>
       ))}
     </select>

@@ -104,3 +104,48 @@ body {
 .reaction-float {
   animation: reaction-float 2.2s ease-out forwards;
 }
+
+/* --- Redesign tokens (additive; the palette above is unchanged) ------------------------------- */
+:root {
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --elev:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* One visible focus treatment for every interactive element — keyboard and TV D-pad both land on
+   this. Applied globally so a new control can't quietly ship without a focus ring. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--background),
+    0 0 0 4px var(--accent);
+  border-radius: var(--r-sm);
+}
+
+/* Skeletons shimmer rather than pulse, so a grid of them doesn't strobe. */
+@keyframes campfire-shimmer {
+  to {
+    background-position: -240% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
+  background-size: 240% 100%;
+  animation: campfire-shimmer 1.3s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* Horizontal rails keep their own thin scrollbar hidden (the global rule above zeroes it) but must
+   still be scrollable by wheel/trackpad/touch. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}

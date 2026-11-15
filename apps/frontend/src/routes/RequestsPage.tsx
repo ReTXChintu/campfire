@@ -5,6 +5,8 @@ import { useDeleteRequest, useMyRequests, useRequests, useToggleUpvote } from ".
 import RequestCard from "../components/requests/RequestCard";
 import RequestModal from "../components/requests/RequestModal";
 import { REQUEST_STATUSES, REQUEST_STATUS_LABELS } from "../lib/requestStatus";
+import { EmptyState, ErrorCard, Skeleton } from "../components/ui/States";
+import { PAGE_X } from "../lib/layout";
 
 type Tab = "browse" | "mine";
 type Sort = "wanted" | "newest" | "recently-added";
@@ -25,15 +27,6 @@ function sortRequests(requests: PublicRequest[], sort: Sort): PublicRequest[] {
 function RequestGrid({ children }: { children: React.ReactNode }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{children}</div>
-  );
-}
-
-function EmptyState({ message, action }: { message: string; action: React.ReactNode }) {
-  return (
-    <div className="mx-auto grid max-w-md place-items-center gap-3 py-14 text-center">
-      <p className="text-sm text-text-secondary">{message}</p>
-      {action}
-    </div>
   );
 }
 
@@ -71,7 +64,7 @@ export default function RequestsPage() {
   const openRequestModal = () => setModalOpen(true);
 
   return (
-    <main className="w-full flex-1 px-4 py-8 sm:px-6 lg:px-8">
+    <main className={`w-full flex-1 ${PAGE_X} py-8`}>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="font-display text-sm uppercase tracking-[0.14em] text-text-tertiary">Community</p>
@@ -149,15 +142,19 @@ export default function RequestsPage() {
         {active.isLoading ? (
           <RequestGrid>
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-40 animate-pulse rounded-2xl bg-surface" />
+              <Skeleton key={i} className="h-40 rounded-2xl" />
             ))}
           </RequestGrid>
         ) : active.error ? (
-          <p className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
-            Failed to load requests: {active.error.message}
-          </p>
+          <ErrorCard
+            title="The requests board did not load"
+            message={active.error.message}
+            onRetry={() => active.refetch()}
+            retrying={active.isFetching}
+          />
         ) : visible.length === 0 ? (
           <EmptyState
+            title={tab === "mine" ? "No requests from you yet" : "Nothing on the board"}
             message={
               tab === "mine"
                 ? "You haven't asked for anything yet. When you do, you can follow it from New through Planned, Sourcing and Added right here."

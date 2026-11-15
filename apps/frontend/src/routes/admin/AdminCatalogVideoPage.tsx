@@ -1,7 +1,7 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAdminVideo, useDeleteVideo } from "../../hooks/useAdminCatalog";
 import { ApiError } from "../../lib/api";
-import AdminNav from "../../components/admin/AdminNav";
+import AdminShell from "../../components/admin/AdminShell";
 import VideoCurationForm from "../../components/admin/VideoCurationForm";
 import NotFoundPage from "../NotFoundPage";
 
@@ -37,9 +37,7 @@ export default function AdminCatalogVideoPage() {
   };
 
   return (
-    <div className="w-full flex-1 px-4 py-8 sm:px-6">
-      <AdminNav active="catalog" />
-
+    <AdminShell section="catalog" title={displayName}>
       <div className="mb-4 flex flex-wrap items-center gap-1 text-sm text-text-secondary">
         <Link to="/admin/catalog" className="transition hover:text-white">
           Catalog
@@ -53,8 +51,6 @@ export default function AdminCatalogVideoPage() {
           </span>
         )}
       </div>
-
-      <h1 className="mb-6 font-display text-4xl tracking-wide text-white">{displayName}</h1>
 
       <VideoCurationForm
         fileId={fileId!}
@@ -91,6 +87,6 @@ export default function AdminCatalogVideoPage() {
           {deleteMutation.isPending ? "Deleting…" : "Delete video"}
         </button>
       </section>
-    </div>
+    </AdminShell>
   );
 }

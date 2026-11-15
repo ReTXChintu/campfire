@@ -4,11 +4,14 @@ import { ProtectedRoute, AdminRoute } from "./components/ProtectedRoute";
 import LoginPage from "./routes/LoginPage";
 import ResetPasswordPage from "./routes/ResetPasswordPage";
 import LibraryPage from "./routes/LibraryPage";
+import BrowsePage from "./routes/BrowsePage";
 import FolderPage from "./routes/FolderPage";
 import WatchPage from "./routes/WatchPage";
 import LinkDevicePage from "./routes/LinkDevicePage";
+import SettingsPage from "./routes/SettingsPage";
 import NotFoundPage from "./routes/NotFoundPage";
 import RequestsPage from "./routes/RequestsPage";
+import AdminOverviewPage from "./routes/admin/AdminOverviewPage";
 import AdminCatalogPage from "./routes/admin/AdminCatalogPage";
 import AdminRequestsPage from "./routes/admin/AdminRequestsPage";
 import AdminCatalogFolderPage from "./routes/admin/AdminCatalogFolderPage";
@@ -26,6 +29,22 @@ export default function App() {
           element={
             <ProtectedRoute>
               <LibraryPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/series"
+          element={
+            <ProtectedRoute>
+              <BrowsePage kind="series" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/movies"
+          element={
+            <ProtectedRoute>
+              <BrowsePage kind="movies" />
             </ProtectedRoute>
           }
         />
@@ -54,6 +73,14 @@ export default function App() {
           }
         />
         <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/link"
           element={
             <ProtectedRoute>
@@ -65,7 +92,7 @@ export default function App() {
           path="/admin"
           element={
             <AdminRoute>
-              <AdminCatalogPage />
+              <AdminOverviewPage />
             </AdminRoute>
           }
         />

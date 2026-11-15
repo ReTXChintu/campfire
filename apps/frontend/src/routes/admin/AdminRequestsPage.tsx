@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import AdminNav from "../../components/admin/AdminNav";
+import AdminShell from "../../components/admin/AdminShell";
 import RequestPoster from "../../components/requests/RequestPoster";
 import RequestStatusPill from "../../components/requests/RequestStatusPill";
 import { REQUEST_STATUSES, REQUEST_STATUS_LABELS } from "../../lib/requestStatus";
@@ -311,19 +311,11 @@ export default function AdminRequestsPage() {
   }, [filter]);
 
   return (
-    <div className="w-full flex-1 px-4 py-8 sm:px-6 lg:px-8">
-      <AdminNav active="requests" />
-
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="font-display text-sm uppercase tracking-[0.14em] text-text-tertiary">From your users</p>
-          <h1 className="font-display text-4xl tracking-wide text-white">Requests</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            {data ? `${data.total} requests · ${counts?.new ?? 0} new` : "Loading…"}
-          </p>
-        </div>
-      </div>
-
+    <AdminShell
+      section="requests"
+      title="Requests"
+      description={data ? `${data.total} requests · ${counts?.new ?? 0} new` : "Loading…"}
+    >
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-divider" role="tablist" aria-label="Status">
         {(["all", ...REQUEST_STATUSES] as (RequestStatus | "all")[]).map((value) => (
           <button
@@ -468,6 +460,6 @@ export default function AdminRequestsPage() {
           </div>
         </div>
       )}
-    </div>
+    </AdminShell>
   );
 }

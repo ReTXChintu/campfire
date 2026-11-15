@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { ApiError } from "../lib/api";
+import PasswordField from "../components/ui/PasswordField";
 
 type Mode = "signin" | "signup";
 
 const mobileAppDownloadUrl = import.meta.env.VITE_MOBILE_APP_DOWNLOAD_URL;
+const desktopAppDownloadUrl = import.meta.env.VITE_DESKTOP_APP_DOWNLOAD_URL;
 
 export default function LoginPage() {
   const { token, isLoading, login, signup } = useAuth();
@@ -29,8 +31,8 @@ export default function LoginPage() {
     setError(null);
   };
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
@@ -47,23 +49,55 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative flex flex-1 items-center justify-center overflow-hidden">
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background: "radial-gradient(circle at 50% 30%, #3a1a12 0%, #1a0e12 40%, #0A0B0F 75%)",
-        }}
-      />
-      <div className="relative flex w-full max-w-sm flex-col items-center gap-8 rounded-2xl border border-divider bg-surface/60 px-10 py-14 shadow-2xl shadow-black/50 backdrop-blur">
-        <div className="flex flex-col items-center gap-2">
-          <img src="/full_logo.png" alt="Campfire" className="h-32 w-auto" />
-          <p className="text-sm text-text-secondary">Your library, ready to watch.</p>
+    <main className="grid w-full flex-1 lg:grid-cols-[minmax(0,1fr)_480px]">
+      {/* The brand panel takes the width a centred card used to waste; it collapses away on
+          phones, where the form is the whole screen. */}
+      <section
+        className="relative hidden flex-col justify-end gap-4 overflow-hidden p-10 lg:flex"
+        aria-hidden="true"
+      >
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(120% 90% at 78% 18%, rgba(255,106,61,.34), transparent 60%), radial-gradient(90% 80% at 20% 90%, rgba(255,178,94,.14), transparent 60%), linear-gradient(100deg,#0e0d0c 12%, #2a1a12 58%, #4a2414 100%)",
+          }}
+        />
+        <div className="relative">
+          <img src="/full_logo.png" alt="" className="mb-6 h-24 w-auto" />
+          <p className="font-display text-5xl leading-none tracking-wide text-white">
+            Your library,
+            <br />
+            ready to watch.
+          </p>
+          <p className="mt-4 max-w-md text-sm text-text-secondary">
+            Films and series on every screen in the house, with watch parties, synced progress and
+            subtitles that remember what you picked.
+          </p>
+        </div>
+        <div className="filmstrip relative" />
+      </section>
+
+      <section className="flex flex-col justify-center gap-7 border-divider px-4 py-12 sm:px-8 lg:border-l lg:px-10">
+        <div className="lg:hidden">
+          <img src="/full_logo.png" alt="Campfire" className="h-20 w-auto" />
         </div>
 
-        <form onSubmit={onSubmit} className="flex w-full flex-col gap-4">
+        <div>
+          <h1 className="font-display text-3xl tracking-wide text-white">
+            {mode === "signup" ? "Create your account" : "Sign in"}
+          </h1>
+          <p className="mt-1 text-sm text-text-secondary">
+            {mode === "signup"
+              ? "Pick a password you will remember — there is no email verification here."
+              : "Welcome back."}
+          </p>
+        </div>
+
+        <form onSubmit={onSubmit} className="grid gap-4">
           {mode === "signup" && (
-            <div>
-              <label htmlFor="name" className="mb-1.5 block text-sm font-medium text-white/90">
+            <div className="grid gap-1.5">
+              <label htmlFor="name" className="text-xs font-semibold tracking-wide text-text-secondary uppercase">
                 Name <span className="text-text-tertiary">(optional)</span>
               </label>
               <input
@@ -71,13 +105,14 @@ export default function LoginPage() {
                 type="text"
                 autoComplete="name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border border-divider bg-surface px-3 py-2 text-sm text-white outline-none focus:border-white/30"
+                onChange={(event) => setName(event.target.value)}
+                className="min-h-11 w-full rounded-lg border border-divider-strong bg-background px-3 py-2.5 text-sm text-white outline-none transition hover:border-text-tertiary focus:border-accent"
               />
             </div>
           )}
-          <div>
-            <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-white/90">
+
+          <div className="grid gap-1.5">
+            <label htmlFor="email" className="text-xs font-semibold tracking-wide text-text-secondary uppercase">
               Email
             </label>
             <input
@@ -86,74 +121,90 @@ export default function LoginPage() {
               autoComplete="username"
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-divider bg-surface px-3 py-2 text-sm text-white outline-none focus:border-white/30"
+              onChange={(event) => setEmail(event.target.value)}
+              className="min-h-11 w-full rounded-lg border border-divider-strong bg-background px-3 py-2.5 text-sm text-white outline-none transition hover:border-text-tertiary focus:border-accent"
             />
-          </div>
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <label htmlFor="password" className="block text-sm font-medium text-white/90">
-                Password
-              </label>
-              {mode === "signin" && (
-                <Link to="/reset-password" className="text-xs text-text-secondary underline-offset-2 hover:underline">
-                  Forgot password?
-                </Link>
-              )}
-            </div>
-            <input
-              id="password"
-              type="password"
-              autoComplete={mode === "signup" ? "new-password" : "current-password"}
-              required
-              minLength={mode === "signup" ? 8 : undefined}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-divider bg-surface px-3 py-2 text-sm text-white outline-none focus:border-white/30"
-            />
-            {mode === "signup" && (
-              <p className="mt-1 text-xs text-text-tertiary">At least 8 characters.</p>
-            )}
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          <PasswordField
+            id="password"
+            label="Password"
+            value={password}
+            onChange={setPassword}
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            minLength={mode === "signup" ? 8 : undefined}
+            required
+            hint={mode === "signup" ? "At least 8 characters." : undefined}
+            trailingLabel={
+              mode === "signin" ? (
+                <Link
+                  to="/reset-password"
+                  className="rounded px-1 text-xs text-text-secondary underline-offset-2 hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              ) : undefined
+            }
+          />
+
+          {error && (
+            <p role="alert" className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              {error}
+            </p>
+          )}
 
           <button
             type="submit"
             disabled={submitting || !email || !password}
-            className="mt-2 rounded-lg bg-white px-6 py-3 text-sm font-bold text-black transition hover:bg-white/90 disabled:opacity-50"
+            className="mt-1 min-h-12 rounded-lg bg-accent px-6 py-3 text-sm font-bold text-black transition hover:brightness-110 disabled:opacity-50"
           >
             {submitting ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
           </button>
         </form>
 
         <p className="text-sm text-text-secondary">
-          {mode === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
+          {mode === "signup" ? "Already have an account?" : "No account yet?"}{" "}
           <button
             type="button"
             onClick={() => switchMode(mode === "signup" ? "signin" : "signup")}
-            className="font-medium text-white underline-offset-2 hover:underline"
+            className="rounded font-semibold text-white underline-offset-2 hover:underline"
           >
             {mode === "signup" ? "Sign in" : "Sign up"}
           </button>
         </p>
 
-        {mobileAppDownloadUrl && (
-          <a
-            href={mobileAppDownloadUrl}
-            download={mobileAppDownloadUrl.split("/").pop()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 rounded-full border border-divider px-3 py-1.5 text-xs font-medium text-white/90 transition hover:border-white/30 hover:text-white"
-          >
-            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
-              <path d="M12 2a1 1 0 0 1 1 1v10.59l3.3-3.3a1 1 0 1 1 1.4 1.42l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.42l3.3 3.3V3a1 1 0 0 1 1-1Z" />
-              <path d="M5 20a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z" />
-            </svg>
-            Get the App
-          </a>
+        {(mobileAppDownloadUrl || desktopAppDownloadUrl) && (
+          <div className="grid gap-2 border-t border-divider pt-6">
+            <p className="text-xs text-text-tertiary">
+              The apps play every format, including MKV, which the browser cannot.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {desktopAppDownloadUrl && (
+                <a
+                  href={desktopAppDownloadUrl}
+                  download={desktopAppDownloadUrl.split("/").pop()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-9 rounded-full border border-divider-strong px-3.5 py-2 text-xs font-semibold text-white transition hover:border-text-tertiary"
+                >
+                  Windows app
+                </a>
+              )}
+              {mobileAppDownloadUrl && (
+                <a
+                  href={mobileAppDownloadUrl}
+                  download={mobileAppDownloadUrl.split("/").pop()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-9 rounded-full border border-divider-strong px-3.5 py-2 text-xs font-semibold text-white transition hover:border-text-tertiary"
+                >
+                  Android app
+                </a>
+              )}
+            </div>
+          </div>
         )}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

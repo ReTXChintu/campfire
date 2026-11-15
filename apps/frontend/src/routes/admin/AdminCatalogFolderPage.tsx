@@ -1,6 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { useAdminFolder } from "../../hooks/useAdminCatalog";
-import AdminNav from "../../components/admin/AdminNav";
+import AdminShell from "../../components/admin/AdminShell";
 import FolderTitleForm from "../../components/admin/FolderTitleForm";
 import FolderPublishRule from "../../components/admin/FolderPublishRule";
 import CatalogChildrenList from "../../components/admin/CatalogChildrenList";
@@ -23,9 +23,7 @@ export default function AdminCatalogFolderPage() {
   const { folder, breadcrumbs, childFolders, childVideos } = data;
 
   return (
-    <div className="w-full flex-1 px-4 py-8 sm:px-6">
-      <AdminNav active="catalog" />
-
+    <AdminShell section="catalog" title={folder.title ?? folder.driveName}>
       <div className="mb-4 flex flex-wrap items-center gap-1 text-sm text-text-secondary">
         <Link to="/admin/catalog" className="transition hover:text-white">
           Catalog
@@ -39,10 +37,6 @@ export default function AdminCatalogFolderPage() {
           </span>
         ))}
       </div>
-
-      <h1 className="mb-6 font-display text-4xl tracking-wide text-white">
-        {folder.title ?? folder.driveName}
-      </h1>
 
       <FolderTitleForm
         folderId={folderId!}
@@ -59,8 +53,8 @@ export default function AdminCatalogFolderPage() {
         />
       )}
 
-      <h2 className="mb-1 text-lg font-bold text-white">Contents</h2>
+      <h2 className="mb-1 font-display text-xl tracking-wide text-white">Contents</h2>
       <CatalogChildrenList folders={childFolders} videos={childVideos} />
-    </div>
+    </AdminShell>
   );
 }
