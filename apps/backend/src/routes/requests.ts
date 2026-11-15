@@ -106,6 +106,19 @@ router.post("/reference-image", requireAuth, async (req, res) => {
     return;
   }
 
+  // Refuse on the declared length *before* reading a byte. Destroying the request stream
+  // mid-upload (the backstop inside saveRequestImage) resets the connection, and the client sees
+  // a network error instead of this message — so the size limit has to be answered up front for
+  // anything that declares one, which every real client does.
+  const declaredLength = Number(req.headers["content-length"] ?? NaN);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_IMAGE_BYTES) {
+    res.status(413).json({
+      error: `Reference image is larger than ${Math.round(MAX_REQUEST_IMAGE_BYTES / 1024 / 1024)}MB`,
+      maxBytes: MAX_REQUEST_IMAGE_BYTES,
+    });
+    return;
+  }
+
   try {
     const { imageId, sizeBytes } = await saveRequestImage(req, mimeType);
     res.json({ imageId, sizeBytes, path: `/api/request-image/${imageId}` });
