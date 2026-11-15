@@ -66,4 +66,15 @@ export const env = {
   get renditionsDir() {
     return process.env.RENDITIONS_DIR || join(__dirname, "..", "..", "renditions");
   },
+  // Reference images attached to movie/series requests (see lib/requestImages.ts) — permanent,
+  // like renditionsDir and for the same reason: a request can sit in the queue for weeks.
+  get requestImagesDir() {
+    return process.env.REQUEST_IMAGES_DIR || join(__dirname, "..", "..", "request-images");
+  },
+  // Optional. With it, a pasted IMDb/TMDb link on a request is resolved to a real title, year,
+  // type and poster; without it the link is simply stored and the admin opens it themselves.
+  // Nothing fails when it's missing — see lib/referenceLink.ts.
+  get tmdbApiKey(): string | undefined {
+    return process.env.TMDB_API_KEY || undefined;
+  },
 };

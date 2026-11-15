@@ -5,6 +5,7 @@ import { createServer as createHttpServer } from "node:http";
 import { env } from "./config/env";
 import { seedAdminUser } from "./lib/users";
 import { ensureIndexes as ensureDevicePairingIndexes } from "./lib/devicePairings";
+import { ensureIndexes as ensureMediaRequestIndexes } from "./lib/mediaRequests";
 import { startConversionQueue } from "./lib/conversionQueue";
 import { startRenditionQueue } from "./lib/renditionQueue";
 
@@ -19,6 +20,7 @@ import probeRoutes from "./routes/probe";
 import healthRoutes from "./routes/health";
 import appVersionRoutes from "./routes/appVersion";
 import watchPartyRoutes from "./routes/watchParties";
+import requestRoutes, { requestImageRouter } from "./routes/requests";
 
 import adminStageRoutes from "./routes/admin/stage";
 import adminConvertRoutes from "./routes/admin/convert";
@@ -29,6 +31,7 @@ import adminOverviewRoutes from "./routes/admin/overview";
 import adminCatalogFolderRoutes from "./routes/admin/catalogFolder";
 import adminCatalogVideoRoutes from "./routes/admin/catalogVideo";
 import adminSubtitleSetRoutes from "./routes/admin/subtitleSets";
+import adminRequestRoutes from "./routes/admin/requests";
 
 const app = express();
 
@@ -49,6 +52,8 @@ app.use("/api/probe", probeRoutes);
 app.use("/api/health", healthRoutes);
 app.use("/api/app-version", appVersionRoutes);
 app.use("/api/watch-parties", watchPartyRoutes);
+app.use("/api/requests", requestRoutes);
+app.use("/api/request-image", requestImageRouter);
 
 app.use("/api/admin/stage", adminStageRoutes);
 app.use("/api/admin/convert", adminConvertRoutes);
@@ -59,6 +64,7 @@ app.use("/api/admin/catalog/overview", adminOverviewRoutes);
 app.use("/api/admin/catalog/folder", adminCatalogFolderRoutes);
 app.use("/api/admin/catalog/video", adminCatalogVideoRoutes);
 app.use("/api/admin/subtitle-sets", adminSubtitleSetRoutes);
+app.use("/api/admin/requests", adminRequestRoutes);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
@@ -67,7 +73,11 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const server = createHttpServer(app);
 
-Promise.all([seedAdminUser(env.adminEmail, env.adminPassword), ensureDevicePairingIndexes()])
+Promise.all([
+  seedAdminUser(env.adminEmail, env.adminPassword),
+  ensureDevicePairingIndexes(),
+  ensureMediaRequestIndexes(),
+])
   .then(() => {
     startConversionQueue();
     startRenditionQueue();
