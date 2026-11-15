@@ -76,6 +76,7 @@ export default function AdminCatalogVideoPage() {
             artwork={video.artwork}
             autoOff={video.artworkAutoOff}
             hasDriveThumbnail={false}
+            currentTitle={video.title}
           />
         </div>
       )}

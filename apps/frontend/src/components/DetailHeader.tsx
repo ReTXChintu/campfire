@@ -1,8 +1,11 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import Poster from "./Poster";
+import MetaLine from "./MetaLine";
+import TitleWordmark from "./TitleWordmark";
 import { useAuthedImage } from "../hooks/useAuthedImage";
 import { PAGE_X } from "../lib/layout";
+import type { TitleMeta } from "../lib/types";
 
 /** The blurred backdrop behind a detail header — the same artwork as the poster, scaled up and
  * faded out, so the page has a sense of place without a second image to fetch. */
@@ -25,24 +28,30 @@ export default function DetailHeader({
   id,
   title,
   eyebrow,
-  overview,
+  meta,
   thumbnailPath,
   backHref,
   facts,
+  metaExtra,
   actions,
   aside,
 }: {
   id: string;
   title: string;
   eyebrow?: string;
-  /** A synopsis, when the title is matched on TMDb. */
-  overview?: string | null;
+  /** Everything TMDb knows about this title: the synopsis, the facts line, the wordmark flag. An
+   * unmatched title passes `{}` and the header simply has less on it. */
+  meta: TitleMeta;
   thumbnailPath: string | null;
   backHref?: string;
+  /** The library's own facts, as the labelled list on the right (seasons, formats, counts). */
   facts: { label: string; value: ReactNode }[];
+  /** Extra items for the inline facts line, after the TMDb ones. */
+  metaExtra?: ReactNode[];
   actions?: ReactNode;
   aside?: ReactNode;
 }) {
+  const overview = meta.overview;
   return (
     <header className="relative border-b border-divider">
       <Backdrop path={thumbnailPath} />
@@ -64,7 +73,18 @@ export default function DetailHeader({
             {eyebrow && (
               <p className="font-display text-xs tracking-[0.16em] text-text-tertiary uppercase">{eyebrow}</p>
             )}
-            <h1 className="font-display text-4xl leading-none tracking-wide text-white sm:text-5xl">{title}</h1>
+            <h1>
+              <TitleWordmark
+                path={meta.hasLogo && thumbnailPath ? `${thumbnailPath}${thumbnailPath.includes("?") ? "&" : "?"}shape=logo` : null}
+                title={title}
+                className="block font-display text-4xl leading-none tracking-wide text-white sm:text-5xl"
+                imageClassName="max-h-20 w-auto max-w-full object-contain object-left sm:max-h-24"
+              />
+            </h1>
+            <MetaLine meta={meta} extra={metaExtra} className="mt-3" />
+            {meta.tagline && (
+              <p className="mt-2 max-w-[60ch] text-sm italic text-text-tertiary">{meta.tagline}</p>
+            )}
             {overview && (
               // Capped in characters per line for reading, not a page-width wrapper.
               <p className="mt-3 line-clamp-4 max-w-[68ch] text-sm leading-relaxed text-text-secondary">{overview}</p>

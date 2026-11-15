@@ -4,11 +4,12 @@ import type { WatchProgress } from "../lib/types";
 import Poster, { PosterAction, PosterBadge, PosterProgress } from "./Poster";
 import { formatLabel, playsInBrowser, remainingLabel } from "../lib/mediaFormat";
 import { progressPercent } from "../lib/progress";
+import { RatingChip } from "./MetaLine";
 
 /**
- * One film or episode. Everything it shows comes from the API: the Drive thumbnail, the name, the
- * container (from `mimeType`) and — when there's a progress record — how much is left. There is no
- * year, runtime, resolution or genre on a catalog list item, so the card doesn't pretend otherwise.
+ * One film or episode. Everything it shows comes from the API: the artwork, the name, the container
+ * (from `mimeType`), how much is left when there's a progress record, and — for a title matched on
+ * TMDb — its year and score. Nothing is invented: an unmatched title simply shows fewer facts.
  */
 export default function VideoCard({
   item,
@@ -49,6 +50,14 @@ export default function VideoCard({
       <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-text-tertiary">
         {remaining && <span className="text-text-secondary">{remaining}</span>}
         {remaining && <span aria-hidden="true">·</span>}
+        <RatingChip rating={item.rating} className="text-xs" />
+        {item.rating && <span aria-hidden="true">·</span>}
+        {item.year && (
+          <>
+            <span>{item.year}</span>
+            <span aria-hidden="true">·</span>
+          </>
+        )}
         <span>{browserPlayable ? formatLabel(item.mimeType) : "Needs the app"}</span>
       </p>
     </Link>

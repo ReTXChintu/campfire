@@ -421,7 +421,7 @@ async function getDoc(kind: ArtworkKind, id: string): Promise<ArtworkDoc> {
 async function save(
   kind: ArtworkKind,
   id: string,
-  set: Partial<ArtworkFields> & { title?: string },
+  set: Partial<ArtworkFields> & { title?: string; titleOverridden?: boolean },
 ): Promise<void> {
   await (await collection(kind)).updateOne({ _id: id }, { $set: set });
 }
@@ -465,6 +465,41 @@ export async function matchArtworkNow(kind: ArtworkKind, id: string): Promise<Ca
   await save(kind, id, { artwork, artworkAutoOff: false, artworkTriedFor: key, ...titleUpdate(doc, artwork) });
   warmImage(artwork);
   return artwork;
+}
+
+/**
+ * Admin asked, in so many words, for this title to be called what TMDb calls it.
+ *
+ * Unlike the rename that rides along with a match, this one overrides a hand-typed name and
+ * doesn't care whether the two names are "the same title" — that caution is there to stop an
+ * automatic pass from undoing somebody's deliberate wording, and it has no place in a button
+ * labelled "Use TMDb's title". It also clears `titleOverridden`, because the name is no longer a
+ * hand-typed one, so a later re-match can keep it current.
+ */
+export async function useTmdbTitle(kind: ArtworkKind, id: string): Promise<{ from: string | null; to: string }> {
+  const doc = await getDoc(kind, id);
+  const tmdbTitle = doc.artwork?.title?.trim();
+  if (!tmdbTitle) {
+    throw new ArtworkLookupError("not-found", "Match this title to TMDb first, then its name can come from there.");
+  }
+  await save(kind, id, { title: tmdbTitle, titleOverridden: false });
+  return { from: doc.title, to: tmdbTitle };
+}
+
+/** Every matched title at once, for the admin catalog page. Reports only what actually changed. */
+export async function useTmdbTitlesEverywhere(): Promise<{ kind: ArtworkKind; id: string; from: string; to: string }[]> {
+  const renamed: { kind: ArtworkKind; id: string; from: string; to: string }[] = [];
+  for (const kind of ["folder", "video"] as const) {
+    const col = await collection(kind);
+    const docs = await col.find({ parentFolderId: env.driveRootFolderId, artwork: { $ne: null } }).toArray();
+    for (const doc of docs) {
+      const tmdbTitle = doc.artwork?.title?.trim();
+      if (!tmdbTitle || doc.title === tmdbTitle) continue;
+      await col.updateOne({ _id: doc._id }, { $set: { title: tmdbTitle, titleOverridden: false } });
+      renamed.push({ kind, id: doc._id, from: doc.title ?? doc.driveName, to: tmdbTitle });
+    }
+  }
+  return renamed;
 }
 
 /** Admin removed the artwork: back to the Drive image, and no automatic match until asked. */

@@ -26,6 +26,15 @@ type AdminFolderDetail = {
   childVideos: CatalogVideo[];
   /** A series (or film folder) in the library root — the only folders artwork applies to. */
   isTopLevel?: boolean;
+  /** Set when this folder sits inside a matched series, i.e. it's a season folder whose episodes
+   * can be named from TMDb. `season` is what the backend worked out; `seasonFromName` says it was
+   * guessed from the folder's name rather than set by an admin. */
+  episodeSeries?: {
+    folderId: string;
+    title: string;
+    season: number | null;
+    seasonFromName: boolean;
+  } | null;
 };
 
 export function useAdminFolder(folderId: string) {
@@ -218,7 +227,84 @@ export function useArtworkAction(kind: ArtworkKind, id: string) {
 export type ArtworkAutoMatchResult = {
   matched: { kind: ArtworkKind; id: string; name: string; tmdbTitle: string; year: number | null }[];
   unmatched: { kind: ArtworkKind; id: string; name: string; query: string; year: number | null }[];
+  /** Titles whose own name TMDb's replaced. Absent from an older backend. */
+  renamed?: { kind: ArtworkKind; id: string; from: string; to: string }[];
+  /** Already-matched titles topped up with metadata this backend knows how to fetch. */
+  enriched?: number;
+  episodes?: EpisodeMatchResult;
 };
+
+/** What naming a series' episodes did (backend lib/episodeArtwork.ts). */
+export type EpisodeMatchResult = {
+  matched: number;
+  renamed: number;
+  /** Folders that look like episodes but whose season couldn't be worked out from the name. */
+  unresolved: { folderId: string; name: string }[];
+};
+
+/** Rename one title to the name TMDb uses. Unlike the rename that rides along with a match,
+ * this overwrites a hand-typed name, because an admin pressed a button that says so. */
+export function useUseTmdbTitle(kind: ArtworkKind, id: string) {
+  const invalidate = useInvalidateArtwork(kind, id);
+  return useMutation({
+    mutationFn: () =>
+      apiPost<{ from: string | null; to: string }>(`/api/admin/catalog/artwork/${kind}/${id}/use-tmdb-title`),
+    onSuccess: invalidate,
+  });
+}
+
+/** The same for every matched movie and series at once. */
+export function useUseTmdbTitlesEverywhere() {
+  const queryClient = useQueryClient();
+  const invalidateCatalog = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: () =>
+      apiPost<{ renamed: { kind: ArtworkKind; id: string; from: string; to: string }[] }>(
+        "/api/admin/catalog/artwork/use-tmdb-titles",
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-overview"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-folder"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-video"] });
+      invalidateCatalog();
+    },
+  });
+}
+
+/** Name one series' episodes from TMDb now. */
+export function useMatchEpisodes(folderId: string) {
+  const invalidate = useInvalidateArtwork("folder", folderId);
+  return useMutation({
+    mutationFn: () =>
+      apiPost<EpisodeMatchResult>(`/api/admin/catalog/artwork/folder/${folderId}/episodes`),
+    onSuccess: invalidate,
+  });
+}
+
+/** Say which season a folder holds (null goes back to guessing from its name). Re-matches the
+ * series' episodes, so it also invalidates the series folder, not just this one. */
+export function useSetFolderSeason(folderId: string, seriesFolderId: string) {
+  const invalidate = useInvalidateArtwork("folder", folderId);
+  const invalidateSeries = useInvalidateArtwork("folder", seriesFolderId);
+  return useMutation({
+    mutationFn: (season: number | null) =>
+      apiPut<EpisodeMatchResult>(`/api/admin/catalog/artwork/folder/${folderId}/season`, { season }),
+    onSuccess: () => {
+      invalidate();
+      invalidateSeries();
+    },
+  });
+}
+
+/** Turn TMDb episode naming on or off for one series. */
+export function useSetEpisodeNaming(folderId: string) {
+  const invalidate = useInvalidateArtwork("folder", folderId);
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiPut<{ ok: true }>(`/api/admin/catalog/artwork/folder/${folderId}/episode-naming`, { enabled }),
+    onSuccess: invalidate,
+  });
+}
 
 export function useMatchMissingArtwork() {
   const queryClient = useQueryClient();

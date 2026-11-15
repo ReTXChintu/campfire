@@ -1,5 +1,5 @@
 import type { StreamTrack } from "./languageNames";
-import type { CatalogListItem } from "./catalogListItem";
+import type { CatalogListItem, CatalogVideoListItem } from "./catalogListItem";
 
 export type WatchProgress = {
   userId: string;
@@ -42,6 +42,65 @@ export type CatalogArtwork = {
   backdropPath: string | null;
   posterPath: string | null;
   matchedAt: string;
+  // All optional: a title matched by an older backend has none of them, and re-matching fills
+  // them in. Treat absent and null alike.
+  tagline?: string | null;
+  runtimeMinutes?: number | null;
+  genres?: string[];
+  certificate?: string | null;
+  rating?: TmdbRating | null;
+  logoPath?: string | null;
+  seasonCount?: number | null;
+  episodeCount?: number | null;
+  cast?: { name: string; character: string | null; profilePath: string | null }[];
+};
+
+/** TMDb's own user score (not IMDb's — TMDb doesn't publish those). */
+export type TmdbRating = { average: number; count: number };
+
+/** One episode's TMDb data, as stored on the video doc (backend lib/episodeArtwork.ts). */
+export type CatalogEpisodeArtwork = {
+  seriesTmdbId: string;
+  season: number;
+  episode: number;
+  name: string | null;
+  overview: string | null;
+  stillPath: string | null;
+  airDate: string | null;
+  runtimeMinutes: number | null;
+  rating: TmdbRating | null;
+  matchedAt: string;
+};
+
+/** The TMDb facts every viewer-facing detail response carries, flattened by the backend's
+ * `titleMeta`. `year` and `overview` kept their old names, so code that only reads those is
+ * unaffected; everything else is optional because an older backend doesn't send it. */
+export type TitleMeta = {
+  year?: number | null;
+  overview?: string | null;
+  tagline?: string | null;
+  runtimeMinutes?: number | null;
+  genres?: string[];
+  certificate?: string | null;
+  rating?: TmdbRating | null;
+  /** The title has a wordmark: load it from the thumbnail path with `?shape=logo`. */
+  hasLogo?: boolean;
+  seasonCount?: number | null;
+  episodeCount?: number | null;
+  cast?: CastMember[];
+};
+
+/** `imagePath` is a Bearer-gated backend path, so it goes through useAuthedImage. */
+export type CastMember = { name: string; character: string | null; imagePath: string | null };
+
+/** Which episode a video is, when it belongs to a matched series. */
+export type EpisodeMeta = {
+  number: number | null;
+  season: number | null;
+  overview: string | null;
+  airDate: string | null;
+  runtimeMinutes: number | null;
+  rating: TmdbRating | null;
 };
 
 type ArtworkFields = {
@@ -67,6 +126,10 @@ export type CatalogFolder = {
   status: CatalogFolderStatus;
   title: string | null;
   publishRule: CatalogFolderPublishRule | null;
+  /** Which season of its series this folder holds, set by an admin (null = guess from the name). */
+  tmdbSeason?: number | null;
+  /** An admin turned off naming this series' episodes from TMDb. */
+  episodeArtworkOff?: boolean;
   createdAt: string;
   curatedAt: string | null;
   curatedBy: string | null;
@@ -96,6 +159,8 @@ export type CatalogVideo = {
   episodeOrder: number | null;
   titleOverridden: boolean;
   introOverridden: boolean;
+  /** This episode's TMDb data, when its series is matched. */
+  episodeArtwork?: CatalogEpisodeArtwork | null;
   renditions: CatalogVideoRenditions;
   createdAt: string;
   curatedAt: string | null;
@@ -117,6 +182,9 @@ export type SpotlightSlide = {
   // no thumbnail yet — the carousel then keeps its coloured gradient
   // backdrop by design; included so the type matches what the backend actually sends.
   thumbnailPath: string | null;
+  /** The title's wordmark, when TMDb has one — drawn instead of the title text. Absent from an
+   * older backend, null when the title has none. */
+  logoPath?: string | null;
   requestId?: string;
   requestedByName?: string | null;
   youAsked?: boolean;
@@ -127,7 +195,14 @@ export type LibraryResponse = {
   spotlight: SpotlightSlide[];
   // Deprecated: always equal to spotlight[0], kept by the backend for older installed app builds.
   // New client code reads `spotlight` and ignores this.
-  hero: { title: string; badge: string; playHref: string; infoHref: string | null; thumbnailPath: string | null } | null;
+  hero: {
+    title: string;
+    badge: string;
+    playHref: string;
+    infoHref: string | null;
+    thumbnailPath: string | null;
+    logoPath?: string | null;
+  } | null;
   continueWatching: { item: CatalogListItem; progress: WatchProgress }[];
   folders: CatalogListItem[];
   videos: CatalogListItem[];
@@ -142,12 +217,9 @@ export type FolderFlatResponse = {
   title: string | null;
   backHref: string;
   thumbnailFileId: string | null;
-  /** From the TMDb match; absent from older backends. */
-  year?: number | null;
-  overview?: string | null;
   items: CatalogListItem[];
   progress: WatchProgress[];
-};
+} & TitleMeta;
 
 export type FolderSeriesResponse = {
   mode: "series";
@@ -155,28 +227,26 @@ export type FolderSeriesResponse = {
   title: string | null;
   backHref: string;
   thumbnailFileId: string | null;
-  year?: number | null;
-  overview?: string | null;
   seasons: { id: string; name: string }[];
   selectedSeasonId: string;
   seasonItems: CatalogListItem[];
   specialItems: CatalogListItem[];
   progress: WatchProgress[];
-};
+} & TitleMeta;
 
 export type FolderResponse = FolderFlatResponse | FolderSeriesResponse;
 
 export type VideoResponse = {
   fileId: string;
   title: string | null;
-  /** A movie's TMDb year and synopsis, when it's matched. */
-  year?: number | null;
-  overview?: string | null;
+  /** Which episode this is, when it belongs to a matched series; null for a film. The film's own
+   * facts arrive in the TitleMeta fields instead. */
+  episode?: EpisodeMeta | null;
   backHref: string;
   parentFolderId: string;
   nextFileId: string | null;
   previousFileId: string | null;
-  episodes: { id: string; name: string }[];
+  episodes: CatalogVideoListItem[];
   progressByFileId: Record<string, { positionSeconds: number; completed: boolean }>;
   initialPositionSeconds: number;
   initialCompleted: boolean;
@@ -203,7 +273,7 @@ export type VideoResponse = {
   initialSubtitleTitle: string | null;
   initialAudioLanguage: string | null;
   initialAudioTitle: string | null;
-};
+} & TitleMeta;
 
 export type WatchParty = {
   id: string;

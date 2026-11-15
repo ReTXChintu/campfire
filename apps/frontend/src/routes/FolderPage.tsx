@@ -60,8 +60,7 @@ export default function FolderPage() {
         title={data.title!}
         backHref={data.backHref}
         thumbnailFileId={data.thumbnailFileId}
-        year={data.year}
-        overview={data.overview}
+        meta={data}
         items={data.items}
         progressByFileId={progressByFileId}
       />
@@ -74,8 +73,7 @@ export default function FolderPage() {
       title={data.title!}
       backHref={data.backHref}
       thumbnailFileId={data.thumbnailFileId}
-      year={data.year}
-      overview={data.overview}
+      meta={data}
       seasons={data.seasons}
       selectedSeasonId={data.selectedSeasonId}
       seasonItems={data.seasonItems}

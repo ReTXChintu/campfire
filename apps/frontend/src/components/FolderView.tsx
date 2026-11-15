@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { CatalogListItem, CatalogVideoListItem } from "../lib/catalogListItem";
-import type { WatchProgress } from "../lib/types";
+import type { TitleMeta, WatchProgress } from "../lib/types";
+import CastRow from "./CastRow";
 import DetailHeader from "./DetailHeader";
 import EpisodeRow from "./EpisodeRow";
 import VideoGrid from "./VideoGrid";
@@ -15,8 +16,7 @@ export default function FolderView({
   title,
   backHref,
   thumbnailFileId,
-  year,
-  overview,
+  meta,
   items,
   progressByFileId,
 }: {
@@ -24,8 +24,8 @@ export default function FolderView({
   title: string;
   backHref?: string;
   thumbnailFileId: string | null;
-  year?: number | null;
-  overview?: string | null;
+  /** What TMDb knows about this title (see lib/types' TitleMeta). */
+  meta: TitleMeta;
   items: CatalogListItem[];
   progressByFileId: Map<string, WatchProgress>;
 }) {
@@ -40,11 +40,10 @@ export default function FolderView({
         id={folderId}
         title={title}
         eyebrow="Collection"
-        overview={overview}
+        meta={meta}
         thumbnailPath={thumbnailFileId ? `/api/thumbnail-folder/${folderId}` : null}
         backHref={backHref}
         facts={[
-          ...(year ? [{ label: "Year", value: year }] : []),
           { label: "Items", value: items.length },
           ...(folders.length > 0 ? [{ label: "Folders", value: folders.length }] : []),
           ...(formats.length > 0 ? [{ label: "Formats", value: formats.join(", ") }] : []),
@@ -63,6 +62,8 @@ export default function FolderView({
           )
         }
       />
+
+      <CastRow cast={meta.cast} />
 
       <section className={`${PAGE_X} pt-8`}>
         {folders.length > 0 && (

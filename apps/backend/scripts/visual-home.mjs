@@ -1,12 +1,13 @@
-// Screenshots the web Home page (spotlight + rails) against a copy of production's library, running
-// the backend and web app from this checkout — so a change to artwork or cards can be looked at
-// before it ships. Nothing is written to production: its root catalog is read over the admin API
-// and copied into a throwaway local database (`campfire_visual`, dropped at the end); images come
-// from TMDb's public CDN.
+// Screenshots the web app (Home, a series page, a film's player page) against a copy of
+// production's library, running the backend and web app from this checkout — so a change to
+// artwork, cards or metadata can be looked at before it ships. Nothing is written to production:
+// its catalog is read over the admin API and copied into a throwaway local database
+// (`campfire_visual`, dropped at the end); images come from TMDb's public CDN.
 //
 //   node apps/backend/scripts/visual-home.mjs <outDir> [prodBaseUrl]
 //
-// Needs the backend .env (MONGODB_URI, admin login that also works on production) and Chrome.
+// Needs the backend .env (MONGODB_URI, admin login that also works on production, and
+// TMDB_API_KEY if the new metadata is to be fetched for real) and Chrome.
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,21 +42,43 @@ async function login(base) {
   return (await res.json()).token;
 }
 
-// 1. Production's root catalog, as the admin sees it (full docs, artwork included).
+// 1. Production's catalog, as the admin sees it (full docs, artwork included) — the root, plus
+//    two levels down, so a series page has its seasons and episodes to render.
 const prodToken = await login(PROD);
-const overview = await (await fetch(`${PROD}/api/admin/catalog/overview`, { headers: { authorization: `Bearer ${prodToken}` } })).json();
+const prodGet = async (path) =>
+  (await fetch(`${PROD}${path}`, { headers: { authorization: `Bearer ${prodToken}` } })).json();
+const overview = await prodGet("/api/admin/catalog/overview");
 const revive = (doc) => {
   const out = { ...doc };
   for (const key of ["createdAt", "curatedAt", "updatedAt"]) if (out[key]) out[key] = new Date(out[key]);
   return out;
 };
+
+const folders = [...overview.rootFolders];
+const videos = [...overview.rootVideos];
+const seen = new Set(folders.map((f) => f._id));
+for (let depth = 0, frontier = [...overview.rootFolders]; depth < 2 && frontier.length; depth++) {
+  const next = [];
+  for (const folder of frontier) {
+    const detail = await prodGet(`/api/admin/catalog/folder/${folder._id}`);
+    for (const child of detail.childFolders ?? []) {
+      if (seen.has(child._id)) continue;
+      seen.add(child._id);
+      folders.push(child);
+      next.push(child);
+    }
+    videos.push(...(detail.childVideos ?? []));
+  }
+  frontier = next;
+}
+
 const mongo = new MongoClient(envValue("MONGODB_URI"));
 await mongo.connect();
 const db = mongo.db(DB);
 await db.dropDatabase();
-if (overview.rootFolders.length) await db.collection("catalogFolders").insertMany(overview.rootFolders.map(revive));
-if (overview.rootVideos.length) await db.collection("catalogVideos").insertMany(overview.rootVideos.map(revive));
-console.log(`copied ${overview.rootFolders.length} series, ${overview.rootVideos.length} movies`);
+if (folders.length) await db.collection("catalogFolders").insertMany(folders.map(revive));
+if (videos.length) await db.collection("catalogVideos").insertMany(videos.map(revive));
+console.log(`copied ${folders.length} folders, ${videos.length} videos`);
 
 const procs = [];
 const artworkDir = mkdtempSync(join(tmpdir(), "campfire-visual-art-"));
@@ -80,7 +103,10 @@ try {
       PORT: String(API_PORT),
       MONGODB_DB_NAME: DB,
       FRONTEND_URL: `http://127.0.0.1:${WEB_PORT}`,
-      TMDB_API_KEY: "visual-check", // every root title is already matched; no searches happen
+      // The real key when the .env has one: production's docs were matched by an older build, so
+      // the startup pass has to call TMDb again to fill in the facts, cast and wordmarks this
+      // check is looking at. Without a key it still runs, just with the old data.
+      TMDB_API_KEY: envValue("TMDB_API_KEY") || "visual-check",
       ARTWORK_DIR: artworkDir,
     },
   }, "backend");
@@ -128,10 +154,10 @@ try {
       ws.send(JSON.stringify({ id, method, params }));
     });
 
-  async function shot(name, width, height, scrollY = 0) {
+  async function shot(name, width, height, { path = "/", scrollY = 0, settle = 9000 } = {}) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 600 });
-    await send("Page.navigate", { url: `http://127.0.0.1:${WEB_PORT}/` });
-    await sleep(9000); // data + first image downloads from TMDb
+    await send("Page.navigate", { url: `http://127.0.0.1:${WEB_PORT}${path}` });
+    await sleep(settle); // data + first image downloads from TMDb
     if (scrollY) {
       await send("Runtime.evaluate", { expression: `window.scrollTo(0, ${scrollY})` });
       await sleep(1500);
@@ -146,9 +172,29 @@ try {
   await sleep(2000);
   await send("Runtime.evaluate", { expression: `localStorage.setItem("campfire_token", ${JSON.stringify(token)})` });
   await shot("home-desktop-top", 1440, 900);
-  await shot("home-desktop-rails", 1440, 900, 700);
+  await shot("home-desktop-rails", 1440, 900, { scrollY: 700 });
   await shot("home-phone-top", 390, 844);
-  await shot("home-phone-rails", 390, 844, 560);
+  await shot("home-phone-rails", 390, 844, { scrollY: 560 });
+
+  // A series and a film, which is where the facts line, the cast row and the episode synopses are.
+  // Picked from what production actually has, so this keeps working as the library changes.
+  const series = folders.find((f) => f.artwork?.tmdbType === "tv" && f.parentFolderId === envValue("DRIVE_ROOT_FOLDER_ID"));
+  const film = videos.find((v) => v.artwork?.tmdbType === "movie");
+  if (series) {
+    await shot("series-desktop", 1440, 900, { path: `/folder/${series._id}` });
+    await shot("series-desktop-episodes", 1440, 900, { path: `/folder/${series._id}`, scrollY: 620 });
+    await shot("series-phone", 390, 844, { path: `/folder/${series._id}` });
+  } else {
+    console.warn("no matched series in the copied catalog — skipped the series shots");
+  }
+  if (film) {
+    await shot("film-desktop", 1440, 900, { path: `/folder/${film.parentFolderId}` });
+    // The player page: MKV films show the "needs the app" notice, and the info card sits under it.
+    await shot("watch-desktop", 1440, 900, { path: `/watch/${film._id}`, settle: 11000 });
+    await shot("watch-phone", 390, 844, { path: `/watch/${film._id}`, settle: 11000 });
+  } else {
+    console.warn("no matched film in the copied catalog — skipped the film shots");
+  }
   ws.close();
 } catch (error) {
   console.error(error);

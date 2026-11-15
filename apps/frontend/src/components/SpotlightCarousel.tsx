@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { SpotlightSlide } from "../lib/types";
 import { useAuthedImage } from "../hooks/useAuthedImage";
+import TitleWordmark from "./TitleWordmark";
 
 const AUTO_ADVANCE_MS = 7000;
 
@@ -153,8 +154,15 @@ export default function SpotlightCarousel({ slides }: { slides: SpotlightSlide[]
               <div className="mb-4 inline-flex items-center gap-2 rounded border border-amber/30 bg-amber/10 px-2.5 py-1 font-mono text-xs uppercase tracking-wide text-amber">
                 {slide.badge}
               </div>
-              <h1 className="mb-6 font-display text-5xl leading-[0.9] tracking-wide text-white sm:text-8xl">
-                {slide.title}
+              <h1 className="mb-6">
+                <TitleWordmark
+                  path={slide.logoPath}
+                  title={slide.title}
+                  className="block font-display text-5xl leading-[0.9] tracking-wide text-white sm:text-8xl"
+                  // Capped both ways: a wordmark can be a wide banner or a tall stacked crest, and
+                  // either has to sit in the same corner without covering the buttons.
+                  imageClassName="max-h-28 w-auto max-w-full object-contain object-left drop-shadow-[0_2px_12px_rgba(0,0,0,0.7)] sm:max-h-40"
+                />
               </h1>
               <div className="flex flex-wrap gap-3">
                 <Link

@@ -5,6 +5,8 @@ import {
   clearArtwork,
   matchArtworkNow,
   setArtworkFromLink,
+  useTmdbTitle,
+  useTmdbTitlesEverywhere,
   type ArtworkKind,
 } from "../../lib/artwork";
 import {
@@ -40,6 +42,26 @@ router.post("/auto-match", requireAdmin, async (_req, res) => {
     return;
   }
   res.json(result);
+});
+
+/** Rename every matched movie and series to the title TMDb uses. Unlike the rename a match does
+ * on its own, this overwrites hand-typed names — it only runs when an admin asks for it. */
+router.post("/use-tmdb-titles", requireAdmin, async (_req, res) => {
+  res.json({ renamed: await useTmdbTitlesEverywhere() });
+});
+
+/** Rename this one title to TMDb's. */
+router.post("/:kind/:id/use-tmdb-title", requireAdmin, async (req, res) => {
+  const kind = parseKind(req.params.kind);
+  if (!kind) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  try {
+    res.json(await useTmdbTitle(kind, req.params.id));
+  } catch (error) {
+    sendError(res, error);
+  }
 });
 
 /** Name this one series' episodes from TMDb now. */

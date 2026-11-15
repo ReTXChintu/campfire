@@ -144,7 +144,9 @@ async function matchFolder(
     const artwork = toEpisodeArtwork(episode, plan.seriesTmdbId, plan.season);
     const set: Record<string, unknown> = { episodeArtwork: artwork, updatedAt: new Date() };
     // The real name replaces "Episode 4" unless an admin typed this episode's title by hand.
-    if (artwork.name && !video.titleOverridden && video.title !== artwork.name) {
+    // A video with no title at all is still "pending" — giving it one here would quietly promote
+    // it into the curation flow as a side effect of fetching metadata, so it only gets the data.
+    if (artwork.name && video.title && !video.titleOverridden && video.title !== artwork.name) {
       set.title = artwork.name;
       result.renamed++;
     }

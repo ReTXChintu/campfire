@@ -5,7 +5,8 @@ import EpisodeRow from "./EpisodeRow";
 import { EmptyState } from "./ui/States";
 import { formatLabel } from "../lib/mediaFormat";
 import { PAGE_X } from "../lib/layout";
-import type { WatchProgress } from "../lib/types";
+import CastRow from "./CastRow";
+import type { TitleMeta, WatchProgress } from "../lib/types";
 import type { CatalogListItem, CatalogVideoListItem } from "../lib/catalogListItem";
 
 /** The most recently touched in-progress episode, which is what "Resume" should open. Falls back
@@ -34,8 +35,7 @@ export default function SeriesView({
   title,
   backHref,
   thumbnailFileId,
-  year,
-  overview,
+  meta,
   seasons,
   selectedSeasonId,
   seasonItems,
@@ -46,8 +46,8 @@ export default function SeriesView({
   title: string;
   backHref?: string;
   thumbnailFileId: string | null;
-  year?: number | null;
-  overview?: string | null;
+  /** What TMDb knows about the series (see lib/types' TitleMeta). */
+  meta: TitleMeta;
   seasons: { id: string; name: string }[];
   selectedSeasonId: string;
   seasonItems: CatalogListItem[];
@@ -65,11 +65,12 @@ export default function SeriesView({
         id={folderId}
         title={title}
         eyebrow="Series"
-        overview={overview}
+        meta={meta}
         thumbnailPath={thumbnailFileId ? `/api/thumbnail-folder/${folderId}` : null}
         backHref={backHref}
+        // The seasons the library actually holds, which is often not all TMDb lists.
+        metaExtra={[seasons.length > 1 ? `${seasons.length} seasons here` : null]}
         facts={[
-          ...(year ? [{ label: "Year", value: year }] : []),
           { label: "Seasons", value: seasons.length },
           {
             label: "Episodes",
@@ -97,6 +98,8 @@ export default function SeriesView({
           )
         }
       />
+
+      <CastRow cast={meta.cast} />
 
       <section className={`${PAGE_X} pt-8`}>
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">

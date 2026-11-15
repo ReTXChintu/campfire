@@ -31,6 +31,7 @@ import type {
 } from "../lib/types";
 import NotFoundPage from "./NotFoundPage";
 import { PAGE_X } from "../lib/layout";
+import NowPlayingInfo from "../components/NowPlayingInfo";
 
 type PartyParticipant = {
   identity: string;
@@ -588,6 +589,8 @@ export default function WatchPage() {
           )}
         </div>
       </PartyRoomProvider>
+
+      <NowPlayingInfo video={video} />
 
       <section className="mt-6 rounded-2xl border border-divider bg-surface p-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

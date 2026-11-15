@@ -205,6 +205,7 @@ const seasons = {
     { episode_number: 1, name: "The Heirs of the Dragon", overview: "Viserys hosts a tourney.", still_path: "/hotdS1E1.jpg", air_date: "2022-08-21", runtime: 66, vote_average: 8.1, vote_count: 400 },
     { episode_number: 2, name: "", overview: "", still_path: null, air_date: "2022-08-28", runtime: 54 },
     { episode_number: 3, name: "Second of His Name", overview: "A war in the Stepstones.", still_path: "/hotdS1E3.jpg", air_date: "2022-09-04", runtime: 63 },
+    { episode_number: 4, name: "King of the Narrow Sea", overview: "Rhaenyra sees the city.", still_path: "/hotdS1E4.jpg", air_date: "2022-09-11", runtime: 64 },
   ],
   "101/2": [
     { episode_number: 1, name: "Episode One", overview: "The judges arrive.", still_path: "/latentS2E1.jpg", air_date: "2025-01-05", runtime: 80 },
@@ -287,6 +288,7 @@ await db.collection("catalogVideos").insertMany([
   video("v-ep1", "f-hotd-s1", "HOTD S01E01.mkv", "Episode 1", { titleOverridden: false, episodeOrder: 1 }),
   video("v-ep2", "f-hotd-s1", "HOTD S01E02.mkv", "Episode 2", { titleOverridden: false, episodeOrder: 2 }),
   video("v-ep3", "f-hotd-s1", "HOTD S01E03.mkv", "Renamed by hand", { titleOverridden: true, episodeOrder: 3 }),
+  video("v-ep-pending", "f-hotd-s1", "HOTD S01E04.mkv", null, { titleOverridden: false, episodeOrder: 4, status: "pending" }),
   // A flat series: episodes straight inside the series folder, whose own name says "s2".
   video("v-latent-e1", "f-latent", "Latent S02E01.mkv", "Episode 1", { titleOverridden: false, episodeOrder: 1 }),
 ]);
@@ -420,6 +422,18 @@ try {
   check("a folder's capitalisation is corrected to TMDb's", (await doc("folder", "f-hotd"))?.title === "House of the Dragon", JSON.stringify((await doc("folder", "f-hotd"))?.title));
   check("cards carry the year and score", (await api("/api/library", { token: viewer })).json?.videos?.find((v) => v.id === "v-weapons")?.rating?.average === 7.4);
 
+  console.log("\nUsing TMDb's titles on purpose");
+  // v-weapons has a hand-typed title, so the automatic pass left it alone (checked above). Asking
+  // for TMDb's title is a different question, and overrides that.
+  const renameOne = await api("/api/admin/catalog/artwork/video/v-weapons/use-tmdb-title", { token: admin, method: "POST" });
+  check("a hand-typed name can be replaced on request", renameOne.status === 200 && renameOne.json?.to === "Weapons" && (await doc("video", "v-weapons"))?.title === "Weapons", JSON.stringify(renameOne.json));
+  check("…and it stops counting as hand-typed, so re-matching keeps it current", (await doc("video", "v-weapons"))?.titleOverridden === false);
+  check("an unmatched title has no TMDb name to take", (await api("/api/admin/catalog/artwork/folder/f-unknown/use-tmdb-title", { token: admin, method: "POST" })).json?.code === "not-found");
+  check("viewers can't rename anything", (await api("/api/admin/catalog/artwork/video/v-weapons/use-tmdb-title", { token: viewer, method: "POST" })).status === 403);
+  const renameAll = await api("/api/admin/catalog/artwork/use-tmdb-titles", { token: admin, method: "POST" });
+  check("renaming everything reports only what it changed", renameAll.status === 200 && Array.isArray(renameAll.json?.renamed) && renameAll.json.renamed.every((r) => r.from !== r.to), JSON.stringify(renameAll.json));
+  check("…and leaves an already-correct title alone", !renameAll.json.renamed.some((r) => r.id === "v-weapons"));
+
   console.log("\nEpisodes");
   const ep1 = await doc("video", "v-ep1");
   check("episode 1 is named from TMDb", ep1?.title === "The Heirs of the Dragon", JSON.stringify(ep1?.title));
@@ -435,6 +449,8 @@ try {
   const playerEp = (await api("/api/video/v-ep1", { token: viewer })).json;
   check("the player knows which episode it is", playerEp?.episode?.number === 1 && playerEp?.episode?.season === 1 && playerEp?.episode?.overview === "Viserys hosts a tourney.", JSON.stringify(playerEp?.episode));
   check("a film has no episode block", movieFacts?.episode === null);
+  const pending = await doc("video", "v-ep-pending");
+  check("a never-curated episode gets the data but not a title", pending?.episodeArtwork?.episode === 4 && pending?.title === null && pending?.status === "pending", JSON.stringify({ t: pending?.title, s: pending?.status }));
   const latentEp = await doc("video", "v-latent-e1");
   check("a flat series takes its season from its own name", latentEp?.episodeArtwork?.season === 2 && latentEp?.title === "Episode One", JSON.stringify(latentEp?.episodeArtwork));
 
