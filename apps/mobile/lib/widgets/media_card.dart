@@ -6,6 +6,7 @@ import '../utils/media_meta.dart';
 import 'authed_network_image.dart';
 import 'tv_focusable.dart';
 import 'ui_kit.dart';
+import 'title_meta_views.dart';
 
 /// The redesigned card: still, title, a metadata line, a quality/container badge and a progress
 /// bar — the anatomy from the approved prototypes, minus the fields this backend has no data for.
@@ -155,11 +156,23 @@ class MediaCard extends StatelessWidget {
             const SizedBox(height: 2),
             SizedBox(
               height: 15,
-              child: Text(
-                meta.hasAny ? meta.line : '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
+              child: Row(
+                children: [
+                  if (item.rating != null) ...[
+                    RatingChip(rating: item.rating, fontSize: 11),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Text(
+                      // TMDb's year first when the title is matched; the name's own parsed facts
+                      // (quality, container) otherwise, exactly as before.
+                      [if (item.year != null) '${item.year}', if (meta.hasAny) meta.line].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

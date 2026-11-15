@@ -1,3 +1,5 @@
+import 'title_meta.dart';
+
 // Mirrors apps/frontend/src/lib/types.ts's CatalogFolder/CatalogVideo and the admin-only response
 // shapes from apps/frontend/src/hooks/useAdminCatalog.ts. Admin-only models live separately from
 // models/catalog.dart's lightweight CatalogListItem — the admin screens need the full curation
@@ -15,6 +17,17 @@ class CatalogArtwork {
   final String? overview;
   final String matchedAt;
 
+  // Everything below came later, so a title matched by an older backend simply has none of it —
+  // the next automatic pass tops it up. The admin panel shows what it has.
+  final String? tagline;
+  final int? runtimeMinutes;
+  final List<String> genres;
+  final String? certificate;
+  final TmdbRating? rating;
+  final bool hasLogo;
+  final int? seasonCount;
+  final int castCount;
+
   const CatalogArtwork({
     required this.source,
     required this.tmdbType,
@@ -23,6 +36,14 @@ class CatalogArtwork {
     this.year,
     this.overview,
     required this.matchedAt,
+    this.tagline,
+    this.runtimeMinutes,
+    this.genres = const [],
+    this.certificate,
+    this.rating,
+    this.hasLogo = false,
+    this.seasonCount,
+    this.castCount = 0,
   });
 
   String get tmdbUrl => 'https://www.themoviedb.org/$tmdbType/$tmdbId';
@@ -37,6 +58,14 @@ class CatalogArtwork {
       year: (json['year'] as num?)?.toInt(),
       overview: json['overview'] as String?,
       matchedAt: json['matchedAt'] as String? ?? '',
+      tagline: json['tagline'] as String?,
+      runtimeMinutes: (json['runtimeMinutes'] as num?)?.toInt(),
+      genres: (json['genres'] as List?)?.whereType<String>().toList() ?? const [],
+      certificate: json['certificate'] as String?,
+      rating: TmdbRating.tryParse(json['rating']),
+      hasLogo: (json['logoPath'] as String?)?.isNotEmpty ?? false,
+      seasonCount: (json['seasonCount'] as num?)?.toInt(),
+      castCount: (json['cast'] as List?)?.length ?? 0,
     );
   }
 }
@@ -52,6 +81,9 @@ class CatalogFolder {
   final CatalogArtwork? artwork;
   final bool artworkAutoOff;
 
+  /// An admin turned off naming this series' episodes from TMDb.
+  final bool episodeArtworkOff;
+
   const CatalogFolder({
     required this.id,
     required this.parentFolderId,
@@ -62,6 +94,7 @@ class CatalogFolder {
     this.curatedAt,
     this.artwork,
     this.artworkAutoOff = false,
+    this.episodeArtworkOff = false,
   });
 
   factory CatalogFolder.fromJson(Map<String, dynamic> json) => CatalogFolder(
@@ -74,6 +107,7 @@ class CatalogFolder {
     curatedAt: json['curatedAt'] as String?,
     artwork: CatalogArtwork.tryParse(json['artwork']),
     artworkAutoOff: json['artworkAutoOff'] == true,
+    episodeArtworkOff: json['episodeArtworkOff'] == true,
   );
 }
 
@@ -178,12 +212,17 @@ class AdminFolderDetail {
   /// A series in the library root — the only folders artwork applies to.
   final bool isTopLevel;
 
+  /// Set when this folder sits inside a matched series, i.e. it's a season folder whose episodes
+  /// can be named from TMDb.
+  final EpisodeSeries? episodeSeries;
+
   const AdminFolderDetail({
     required this.folder,
     required this.breadcrumbs,
     required this.childFolders,
     required this.childVideos,
     this.isTopLevel = false,
+    this.episodeSeries,
   });
 
   factory AdminFolderDetail.fromJson(Map<String, dynamic> json) => AdminFolderDetail(
@@ -192,6 +231,7 @@ class AdminFolderDetail {
     childFolders: (json['childFolders'] as List).map((e) => CatalogFolder.fromJson(e)).toList(),
     childVideos: (json['childVideos'] as List).map((e) => CatalogVideo.fromJson(e)).toList(),
     isTopLevel: json['isTopLevel'] == true,
+    episodeSeries: EpisodeSeries.tryParse(json['episodeSeries']),
   );
 }
 
@@ -295,6 +335,58 @@ class ScanResult {
 }
 
 /// Result of "Match missing artwork" (POST /api/admin/catalog/artwork/auto-match).
+/// What naming a series' episodes did (backend lib/episodeArtwork.ts).
+class EpisodeMatchResult {
+  final int matched;
+  final int renamed;
+
+  /// Folders that hold episodes but whose season couldn't be worked out from the name.
+  final List<({String folderId, String name})> unresolved;
+
+  const EpisodeMatchResult({
+    required this.matched,
+    required this.renamed,
+    this.unresolved = const [],
+  });
+
+  factory EpisodeMatchResult.fromJson(Map<String, dynamic> json) => EpisodeMatchResult(
+    matched: (json['matched'] as num?)?.toInt() ?? 0,
+    renamed: (json['renamed'] as num?)?.toInt() ?? 0,
+    unresolved:
+        (json['unresolved'] as List?)
+            ?.whereType<Map<String, dynamic>>()
+            .map((e) => (folderId: e['folderId'] as String, name: e['name'] as String? ?? ''))
+            .toList() ??
+        const [],
+  );
+}
+
+/// A season folder inside a matched series: what the backend worked out, and whether it was a
+/// guess from the folder's name rather than something an admin set.
+class EpisodeSeries {
+  final String folderId;
+  final String title;
+  final int? season;
+  final bool seasonFromName;
+
+  const EpisodeSeries({
+    required this.folderId,
+    required this.title,
+    this.season,
+    this.seasonFromName = true,
+  });
+
+  static EpisodeSeries? tryParse(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    return EpisodeSeries(
+      folderId: json['folderId'] as String,
+      title: json['title'] as String? ?? '',
+      season: (json['season'] as num?)?.toInt(),
+      seasonFromName: json['seasonFromName'] as bool? ?? true,
+    );
+  }
+}
+
 class ArtworkAutoMatchResult {
   final int matched;
   final List<({String kind, String id, String name})> unmatched;

@@ -15,22 +15,44 @@ void evictAuthedImage(String path) {
 class AuthedNetworkImage extends StatelessWidget {
   final String path; // e.g. "/api/thumbnail/$fileId"
   final BoxFit fit;
+  final Alignment alignment;
 
-  const AuthedNetworkImage({super.key, required this.path, this.fit = BoxFit.cover});
+  /// Read out in place of the image. Null leaves it decorative, which is right for artwork that
+  /// sits behind a title the screen already shows in text.
+  final String? semanticLabel;
+
+  /// Shown while the image loads, and when it fails. The defaults are the film-reel placeholder;
+  /// a caller passes something else when a failure is an ordinary outcome rather than a fault —
+  /// a wordmark, say, which the backend 404s for any title that hasn't got one.
+  final Widget? placeholder;
+  final Widget? errorWidget;
+
+  const AuthedNetworkImage({
+    super.key,
+    required this.path,
+    this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
+    this.semanticLabel,
+    this.placeholder,
+    this.errorWidget,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final loadingView = placeholder ?? const _Placeholder(loading: true);
+    final errorView = errorWidget ?? placeholder ?? const _Placeholder(loading: false);
     return FutureBuilder<Map<String, String>>(
       future: authHeaders(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) return const _Placeholder(loading: true);
+        if (!snapshot.hasData) return loadingView;
         return Image.network(
           '$apiBaseUrl$path',
           headers: snapshot.data,
           fit: fit,
-          loadingBuilder: (context, child, progress) =>
-              progress == null ? child : const _Placeholder(loading: true),
-          errorBuilder: (context, error, stackTrace) => const _Placeholder(loading: false),
+          alignment: alignment,
+          semanticLabel: semanticLabel,
+          loadingBuilder: (context, child, progress) => progress == null ? child : loadingView,
+          errorBuilder: (context, error, stackTrace) => errorView,
         );
       },
     );

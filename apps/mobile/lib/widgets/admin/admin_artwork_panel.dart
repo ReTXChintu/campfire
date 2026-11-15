@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/admin_catalog.dart';
+import '../../models/title_meta.dart';
 import '../../services/admin_catalog_service.dart';
 import '../../services/api_client.dart';
 import '../../theme/app_theme.dart';
@@ -17,6 +18,9 @@ class AdminArtworkPanel extends StatefulWidget {
 
   /// A folder with its own thumbnail.* image in Drive.
   final bool hasDriveThumbnail;
+
+  /// What this title is called now, so the panel can offer TMDb's name when they differ.
+  final String? currentTitle;
   final VoidCallback onChanged;
 
   const AdminArtworkPanel({
@@ -26,11 +30,32 @@ class AdminArtworkPanel extends StatefulWidget {
     required this.artwork,
     required this.autoOff,
     required this.hasDriveThumbnail,
+    this.currentTitle,
     required this.onChanged,
   });
 
   @override
   State<AdminArtworkPanel> createState() => _AdminArtworkPanelState();
+}
+
+/// What came back with the match, so an admin can see at a glance whether it's the right title
+/// and what viewers will now see. A title matched by an older backend has none of these fields;
+/// the next automatic pass fills them in.
+String _matchedFacts(CatalogArtwork artwork) {
+  final facts = [
+    if (artwork.rating != null) '★ ${artwork.rating!.label}',
+    ?artwork.certificate,
+    ?runtimeLabel(artwork.runtimeMinutes),
+    if (artwork.genres.isNotEmpty) artwork.genres.join(', '),
+    if (artwork.tmdbType == 'tv' && artwork.seasonCount != null)
+      '${artwork.seasonCount} season${artwork.seasonCount == 1 ? '' : 's'} on TMDb',
+    if (artwork.castCount > 0) '${artwork.castCount} cast',
+    if (artwork.hasLogo) 'wordmark',
+  ];
+  if (facts.isEmpty) {
+    return 'Matched before this version, so there are no details yet — "Find automatically" fetches them.';
+  }
+  return facts.join(' · ');
 }
 
 class _AdminArtworkPanelState extends State<AdminArtworkPanel> {
@@ -84,6 +109,9 @@ class _AdminArtworkPanelState extends State<AdminArtworkPanel> {
     final version = Uri.encodeQueryComponent(artwork?.matchedAt ?? (widget.autoOff ? 'off' : 'none'));
     // TMDb artwork wins whenever there is some; the Drive image is only the fallback.
     final showingDrive = widget.kind == 'folder' && widget.hasDriveThumbnail && artwork == null;
+    final currentTitle = widget.currentTitle;
+    final titleDiffers =
+        artwork != null && currentTitle != null && currentTitle.trim() != artwork.title.trim();
     const secondary = TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4);
     const tertiary = TextStyle(color: AppColors.textTertiary, fontSize: 12, height: 1.4);
 
@@ -130,6 +158,10 @@ class _AdminArtworkPanelState extends State<AdminArtworkPanel> {
             style: tertiary,
           ),
         ],
+        if (artwork != null) ...[
+          const SizedBox(height: 4),
+          Text(_matchedFacts(artwork), style: tertiary),
+        ],
         if (artwork?.overview != null) ...[
           const SizedBox(height: 8),
           Text(artwork!.overview!, maxLines: 3, overflow: TextOverflow.ellipsis, style: tertiary),
@@ -171,6 +203,20 @@ class _AdminArtworkPanelState extends State<AdminArtworkPanel> {
                       'Matched automatically.'),
               child: Text(_busy == 'auto' ? 'Searching…' : 'Find automatically'),
             ),
+            // A match only tidies a raw filename when the two are plainly the same title and
+            // nobody typed the current one by hand, so anything less clear-cut is still sitting
+            // here waiting to be asked about.
+            if (titleDiffers)
+              OutlinedButton(
+                onPressed: _busy != null
+                    ? null
+                    : () => _run(
+                        'title',
+                        () => AdminCatalogService.useTmdbTitle(widget.kind, widget.id),
+                        'Renamed to "${artwork.title}".',
+                      ),
+                child: Text(_busy == 'title' ? 'Renaming…' : 'Rename to "${artwork.title}"'),
+              ),
             if (artwork != null)
               OutlinedButton(
                 onPressed: _busy != null

@@ -156,6 +156,7 @@ class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
                         artwork: data.video.artwork,
                         autoOff: data.video.artworkAutoOff,
                         hasDriveThumbnail: false,
+                        currentTitle: data.video.title,
                         onChanged: _reload,
                       ),
                     ],

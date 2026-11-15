@@ -6,6 +6,8 @@ import '../services/watch_events.dart';
 import '../theme/app_theme.dart';
 import '../utils/media_meta.dart';
 import '../widgets/authed_network_image.dart';
+import '../widgets/title_meta_views.dart';
+import '../models/title_meta.dart';
 import '../widgets/media_card.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/ui_kit.dart';
@@ -118,34 +120,39 @@ class _FolderScreenState extends State<FolderScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(data.title, style: AppTheme.display(fontSize: 34)),
+                    TitleWordmark(
+                      path: data.meta.hasLogo
+                          ? '/api/thumbnail-folder/${data.folderId}?shape=logo'
+                          : null,
+                      title: data.title,
+                      textStyle: AppTheme.display(fontSize: 34),
+                      maxHeight: 74,
+                    ),
                     const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        if (data.year != null)
-                          Text(
-                            '${data.year} ·',
-                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
-                          ),
-                        Text(
-                          data.isSeries
-                              ? '${data.seasons.length} ${data.seasons.length == 1 ? "season" : "seasons"}'
-                              : '${episodes.length} ${episodes.length == 1 ? "title" : "titles"}',
-                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
-                        ),
-                        if (data.isSeries && episodes.isNotEmpty)
-                          Text(
-                            '· ${episodes.length} in this season',
-                            style: const TextStyle(color: AppColors.textTertiary, fontSize: 12.5),
-                          ),
+                    MetaLine(
+                      meta: data.meta,
+                      // What this library actually holds, which is often not what TMDb lists.
+                      extra: [
+                        data.isSeries
+                            ? '${data.seasons.length} ${data.seasons.length == 1 ? "season" : "seasons"} here'
+                            : '${episodes.length} ${episodes.length == 1 ? "title" : "titles"}',
+                        if (data.isSeries && episodes.isNotEmpty) '${episodes.length} in this season',
                       ],
                     ),
-                    if (data.overview != null) ...[
+                    if (data.meta.tagline != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        data.meta.tagline!,
+                        style: const TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: 12.5,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                    if (data.meta.overview != null) ...[
                       const SizedBox(height: 10),
-                      _Synopsis(text: data.overview!),
+                      _Synopsis(text: data.meta.overview!),
                     ],
                     const SizedBox(height: 16),
                     Row(
@@ -179,6 +186,7 @@ class _FolderScreenState extends State<FolderScreen> {
                   ],
                 ),
               ),
+              CastRow(cast: data.meta.cast, gutter: gutter),
               if (data.isSeries) ...[
                 const SizedBox(height: 10),
                 for (var i = 0; i < episodes.length; i++)
@@ -453,6 +461,16 @@ class _EpisodeRow extends StatelessWidget {
             progress!.durationSeconds,
             completed: progress!.completed,
           );
+    // TMDb's own episode number, which is what an "E4" label should read. Null for anything that
+    // isn't an episode of a matched series, and the row then looks exactly as it always did.
+    final episodeLabel = video?.episodeNumber == null
+        ? null
+        : 'E${video!.episodeNumber}';
+    final secondLine = [
+      if (meta.hasAny) meta.line,
+      ?runtimeLabel(video?.runtimeMinutes),
+      ?remaining,
+    ];
 
     return TvFocusable(
       autofocus: autofocus,
@@ -518,6 +536,25 @@ class _EpisodeRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (episodeLabel != null || video?.rating != null) ...[
+                    Row(
+                      children: [
+                        if (episodeLabel != null)
+                          Text(
+                            episodeLabel,
+                            style: const TextStyle(
+                              color: AppColors.amber,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        if (episodeLabel != null && video?.rating != null) const SizedBox(width: 8),
+                        RatingChip(rating: video?.rating, fontSize: 11),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                  ],
                   Text(
                     meta.title,
                     maxLines: 2,
@@ -529,10 +566,19 @@ class _EpisodeRow extends StatelessWidget {
                       height: 1.3,
                     ),
                   ),
-                  if (meta.hasAny || remaining != null) ...[
+                  if (video?.overview != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      video!.overview!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5, height: 1.35),
+                    ),
+                  ],
+                  if (secondLine.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
-                      [if (meta.hasAny) meta.line, ?remaining].join(' · '),
+                      secondLine.join(' · '),
                       style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
                     ),
                   ],

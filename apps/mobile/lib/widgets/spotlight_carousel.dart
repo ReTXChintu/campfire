@@ -8,6 +8,7 @@ import '../models/catalog.dart';
 import '../platform_info.dart';
 import '../theme/app_theme.dart';
 import 'authed_network_image.dart';
+import 'title_meta_views.dart';
 
 /// The Home spotlight — up to 6 slides from `GET /api/library`'s `spotlight` array, replacing the
 /// single HeroBanner the screen used to show. Slide anatomy is unchanged from that hero; what's
@@ -302,11 +303,11 @@ class SpotlightSlideView extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (slide.badge.isNotEmpty) _SlideBadge(text: slide.badge, request: slide.isRequest),
-                Text(
-                  slide.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTheme.display(fontSize: 44),
+                TitleWordmark(
+                  path: slide.logoPath,
+                  title: slide.title,
+                  textStyle: AppTheme.display(fontSize: 44),
+                  maxHeight: 96,
                 ),
                 const SizedBox(height: 16),
                 Wrap(

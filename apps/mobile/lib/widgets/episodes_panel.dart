@@ -161,6 +161,16 @@ class EpisodeListRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (episode.episodeNumber != null)
+                      Text(
+                        'E${episode.episodeNumber}',
+                        style: TextStyle(
+                          color: current ? AppColors.accent : AppColors.textTertiary,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
                     Text(
                       title,
                       maxLines: 2,

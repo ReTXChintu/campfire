@@ -35,6 +35,36 @@ class AdminCatalogService {
     return ApiClient.delete('/api/admin/catalog/artwork/$kind/$id');
   }
 
+  /// Rename one title to the name TMDb uses. Unlike the rename a match does on its own, this
+  /// overwrites a hand-typed name — an admin pressed a button that says so.
+  static Future<String> useTmdbTitle(String kind, String id) async {
+    final data = await ApiClient.post('/api/admin/catalog/artwork/$kind/$id/use-tmdb-title');
+    return (data as Map<String, dynamic>)['to'] as String;
+  }
+
+  /// Name one series' episodes from TMDb now.
+  static Future<EpisodeMatchResult> matchEpisodes(String folderId) async {
+    final data = await ApiClient.post('/api/admin/catalog/artwork/folder/$folderId/episodes');
+    return EpisodeMatchResult.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Which season of its series this folder holds (null goes back to guessing from its name).
+  static Future<EpisodeMatchResult> setFolderSeason(String folderId, int? season) async {
+    final data = await ApiClient.put(
+      '/api/admin/catalog/artwork/folder/$folderId/season',
+      {'season': season},
+    );
+    return EpisodeMatchResult.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// Turn TMDb episode naming on or off for one series.
+  static Future<void> setEpisodeNaming(String folderId, {required bool enabled}) {
+    return ApiClient.put(
+      '/api/admin/catalog/artwork/folder/$folderId/episode-naming',
+      {'enabled': enabled},
+    );
+  }
+
   static Future<ArtworkAutoMatchResult> matchMissingArtwork() async {
     final data = await ApiClient.post('/api/admin/catalog/artwork/auto-match') as Map<String, dynamic>;
     return ArtworkAutoMatchResult.fromJson(data);

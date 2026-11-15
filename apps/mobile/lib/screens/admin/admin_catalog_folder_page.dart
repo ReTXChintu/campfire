@@ -7,6 +7,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/admin/admin_artwork_panel.dart';
 import '../../widgets/admin/admin_folder_title_form.dart';
 import '../../widgets/admin/catalog_children_list.dart';
+import '../../widgets/admin/admin_episode_panel.dart';
 
 /// Mirrors apps/frontend/src/routes/admin/AdminCatalogFolderPage.tsx.
 class AdminCatalogFolderPage extends StatefulWidget {
@@ -86,6 +87,23 @@ class _AdminCatalogFolderPageState extends State<AdminCatalogFolderPage> {
                         artwork: data.folder.artwork,
                         autoOff: data.folder.artworkAutoOff,
                         hasDriveThumbnail: data.folder.thumbnailFileId != null,
+                        currentTitle: data.folder.title,
+                        onChanged: _reload,
+                      ),
+                      // Only a TV match has seasons whose episodes can be named from.
+                      if (data.folder.artwork?.tmdbType == 'tv')
+                        AdminEpisodeNamingPanel(
+                          folderId: widget.folderId,
+                          namingOff: data.folder.episodeArtworkOff,
+                          onChanged: _reload,
+                        ),
+                    ],
+                    if (data.episodeSeries != null) ...[
+                      const SizedBox(height: 24),
+                      AdminSeasonPanel(
+                        folderId: widget.folderId,
+                        folderName: data.folder.title ?? data.folder.driveName,
+                        series: data.episodeSeries!,
                         onChanged: _reload,
                       ),
                     ],

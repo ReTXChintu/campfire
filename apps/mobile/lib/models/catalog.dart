@@ -1,35 +1,75 @@
 // Mirrors apps/frontend/src/lib/{catalogListItem,types}.ts — same shapes, since both clients hit
 // the same apps/backend REST API.
 
+import 'title_meta.dart';
+
 sealed class CatalogListItem {
   final String id;
   final String name;
 
-  const CatalogListItem({required this.id, required this.name});
+  /// The TMDb facts small enough to fit on a card. Null on anything unmatched.
+  final int? year;
+  final TmdbRating? rating;
+
+  const CatalogListItem({required this.id, required this.name, this.year, this.rating});
 
   factory CatalogListItem.fromJson(Map<String, dynamic> json) {
+    final year = (json['year'] as num?)?.toInt();
+    final rating = TmdbRating.tryParse(json['rating']);
     return json['kind'] == 'folder'
         ? CatalogFolderItem(
             id: json['id'] as String,
             name: json['name'] as String,
             thumbnailFileId: json['thumbnailFileId'] as String?,
+            year: year,
+            rating: rating,
           )
         : CatalogVideoItem(
             id: json['id'] as String,
             name: json['name'] as String,
             mimeType: json['mimeType'] as String,
+            year: year,
+            rating: rating,
+            episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
+            overview: json['overview'] as String?,
+            runtimeMinutes: (json['runtimeMinutes'] as num?)?.toInt(),
+            airDate: json['airDate'] as String?,
           );
   }
 }
 
 class CatalogFolderItem extends CatalogListItem {
   final String? thumbnailFileId;
-  const CatalogFolderItem({required super.id, required super.name, this.thumbnailFileId});
+  const CatalogFolderItem({
+    required super.id,
+    required super.name,
+    this.thumbnailFileId,
+    super.year,
+    super.rating,
+  });
 }
 
 class CatalogVideoItem extends CatalogListItem {
   final String mimeType;
-  const CatalogVideoItem({required super.id, required super.name, required this.mimeType});
+
+  /// Episode listings only. [episodeNumber] is the episode's own number on TMDb — what an "E4"
+  /// label should read — rather than its position in the folder.
+  final int? episodeNumber;
+  final String? overview;
+  final int? runtimeMinutes;
+  final String? airDate;
+
+  const CatalogVideoItem({
+    required super.id,
+    required super.name,
+    required this.mimeType,
+    super.year,
+    super.rating,
+    this.episodeNumber,
+    this.overview,
+    this.runtimeMinutes,
+    this.airDate,
+  });
 }
 
 class WatchProgress {
@@ -177,6 +217,10 @@ class SpotlightSlide {
   final String playHref;
   final String? infoHref;
   final String? thumbnailPath;
+
+  /// The title's wordmark, when TMDb has one — drawn instead of the title text. Null when there
+  /// is none, and on a backend older than the field.
+  final String? logoPath;
   // Request slides only.
   final String? requestId;
   final String? requestedByName;
@@ -190,6 +234,7 @@ class SpotlightSlide {
     required this.playHref,
     this.infoHref,
     this.thumbnailPath,
+    this.logoPath,
     this.requestId,
     this.requestedByName,
     this.youAsked = false,
@@ -205,6 +250,7 @@ class SpotlightSlide {
     playHref: json['playHref'] as String,
     infoHref: json['infoHref'] as String?,
     thumbnailPath: json['thumbnailPath'] as String?,
+    logoPath: json['logoPath'] as String?,
     requestId: json['requestId'] as String?,
     requestedByName: json['requestedByName'] as String?,
     youAsked: json['youAsked'] as bool? ?? false,
@@ -279,9 +325,9 @@ class FolderResponse {
   final String title;
   final String backHref;
   final String? thumbnailFileId;
-  /// From the title's TMDb match; null when unmatched or on an older backend.
-  final int? year;
-  final String? overview;
+
+  /// Everything TMDb knows about this title. Empty when it isn't matched, or on an older backend.
+  final TitleMeta meta;
   final List<CatalogListItem> items; // flat mode only
   final List<Season> seasons; // series mode only
   final String? selectedSeasonId;
@@ -295,8 +341,7 @@ class FolderResponse {
     required this.title,
     required this.backHref,
     this.thumbnailFileId,
-    this.year,
-    this.overview,
+    this.meta = const TitleMeta(),
     this.items = const [],
     this.seasons = const [],
     this.selectedSeasonId,
@@ -313,8 +358,7 @@ class FolderResponse {
     title: (json['title'] as String?) ?? '',
     backHref: json['backHref'] as String,
     thumbnailFileId: json['thumbnailFileId'] as String?,
-    year: (json['year'] as num?)?.toInt(),
-    overview: json['overview'] as String?,
+    meta: TitleMeta.fromJson(json),
     items: json['items'] == null
         ? const []
         : (json['items'] as List).map((e) => CatalogListItem.fromJson(e)).toList(),
@@ -337,9 +381,18 @@ class FolderResponse {
 class EpisodeRef {
   final String id;
   final String name;
-  const EpisodeRef({required this.id, required this.name});
-  factory EpisodeRef.fromJson(Map<String, dynamic> json) =>
-      EpisodeRef(id: json['id'] as String, name: json['name'] as String);
+
+  /// The episode's own number on TMDb, when its series is matched — what an "E4" label should
+  /// read. Null on anything unmatched, and on a backend older than the field.
+  final int? episodeNumber;
+
+  const EpisodeRef({required this.id, required this.name, this.episodeNumber});
+
+  factory EpisodeRef.fromJson(Map<String, dynamic> json) => EpisodeRef(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
+  );
 }
 
 class EpisodeProgress {
@@ -396,6 +449,12 @@ class VideoResponse {
   final String? initialAudioLanguage;
   final String? initialAudioTitle;
 
+  /// The film's own TMDb facts, when this video is one. Empty for an episode.
+  final TitleMeta meta;
+
+  /// Which episode this is, when it belongs to a matched series. Null for a film.
+  final EpisodeMeta? episode;
+
   const VideoResponse({
     required this.fileId,
     required this.title,
@@ -419,6 +478,8 @@ class VideoResponse {
     this.initialSubtitleTitle,
     this.initialAudioLanguage,
     this.initialAudioTitle,
+    this.meta = const TitleMeta(),
+    this.episode,
   });
 
   bool get isNative => seekMode == 'native';
@@ -427,6 +488,8 @@ class VideoResponse {
   factory VideoResponse.fromJson(Map<String, dynamic> json) => VideoResponse(
     fileId: json['fileId'] as String,
     title: (json['title'] as String?) ?? '',
+    meta: TitleMeta.fromJson(json),
+    episode: EpisodeMeta.tryParse(json['episode']),
     backHref: json['backHref'] as String,
     parentFolderId: json['parentFolderId'] as String,
     nextFileId: json['nextFileId'] as String?,
