@@ -1,5 +1,6 @@
+import { Link } from "react-router-dom";
 import { useLibrary } from "../hooks/useCatalog";
-import Hero from "../components/Hero";
+import SpotlightCarousel from "../components/SpotlightCarousel";
 import Rail from "../components/Rail";
 import VideoCard from "../components/VideoCard";
 import FolderCard from "../components/FolderCard";
@@ -28,19 +29,23 @@ export default function LibraryPage() {
     return (
       <div className="w-full flex-1 px-4 py-16 sm:px-6">
         <p className="text-text-secondary">
-          Your library is empty — curate something in the admin Catalog to get started.
+          Your library is empty — curate something in the admin Catalog to get started, or{" "}
+          <Link to="/requests" className="font-semibold text-amber underline">
+            ask for a title
+          </Link>
+          .
         </p>
       </div>
     );
   }
 
-  const { hero, continueWatching, folders, videos } = data;
+  const { spotlight, continueWatching, folders, videos } = data;
 
   return (
     <>
-      {hero && (
+      {spotlight.length > 0 && (
         <>
-          <Hero title={hero.title} badge={hero.badge} playHref={hero.playHref} infoHref={hero.infoHref} />
+          <SpotlightCarousel slides={spotlight} />
           <div className="filmstrip" />
         </>
       )}

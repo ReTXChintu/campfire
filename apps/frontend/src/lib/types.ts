@@ -83,11 +83,30 @@ export type CatalogVideo = {
   updatedAt: string;
 };
 
+/** One slide of the Home spotlight carousel. `kind` describes what the badge is saying, not what
+ * the item is: "new"/"featured" are library picks, "request" is a title somebody asked for that
+ * has since been published (and only those slides carry the request fields). */
+export type SpotlightSlide = {
+  id: string;
+  kind: "new" | "featured" | "request";
+  title: string;
+  badge: string;
+  playHref: string;
+  infoHref: string | null;
+  // A ready-to-fetch backend path (e.g. "/api/thumbnail/<id>"), or null when a folder simply has
+  // no thumbnail yet — not rendered on web, where the carousel keeps the old hero's gradient
+  // backdrop by design; included so the type matches what the backend actually sends.
+  thumbnailPath: string | null;
+  requestId?: string;
+  requestedByName?: string | null;
+  youAsked?: boolean;
+};
+
 export type LibraryResponse = {
   empty: boolean;
-  // thumbnailPath is a ready-to-fetch backend path (e.g. "/api/thumbnail/<id>"), or null when a
-  // folder simply has no thumbnail yet — not currently rendered on web (Hero.tsx is gradient-only
-  // by design there too), included here just so the type matches what the backend actually sends.
+  spotlight: SpotlightSlide[];
+  // Deprecated: always equal to spotlight[0], kept by the backend for older installed app builds.
+  // New client code reads `spotlight` and ignores this.
   hero: { title: string; badge: string; playHref: string; infoHref: string | null; thumbnailPath: string | null } | null;
   continueWatching: { item: CatalogListItem; progress: WatchProgress }[];
   folders: CatalogListItem[];
@@ -215,3 +234,53 @@ export type WatchPartySyncState = {
   playbackRate: number;
   updatedAt: string;
 };
+
+// --- Media requests ---------------------------------------------------------------------------
+// A request is two fields: a title plus one reference (an IMDb/TMDb link OR an uploaded image).
+// `type` and `year` are filled in by the link lookup or by an admin, so they are usually null —
+// render the type chip and the year only when present (see docs/API-CONTRACT).
+
+export type RequestStatus = "new" | "planned" | "sourcing" | "added" | "declined";
+
+export type RequestRefMeta = {
+  source: "tmdb";
+  sourceId: string;
+  title: string;
+  year: number | null;
+  type: "movie" | "series" | null;
+  posterUrl: string | null;
+  overview: string | null;
+};
+
+export type RequestCatalogRef = { kind: "video" | "folder"; id: string };
+
+export type PublicRequest = {
+  id: string;
+  title: string;
+  type: "movie" | "series" | null;
+  year: number | null;
+  refLink: string | null;
+  // "/api/request-image/<id>" — Bearer-gated, so it goes through useAuthedImage, not a bare src.
+  refImagePath: string | null;
+  refMeta: RequestRefMeta | null;
+  requestedByName: string | null;
+  isMine: boolean;
+  wantCount: number;
+  iWantIt: boolean;
+  status: RequestStatus;
+  adminNote: string | null;
+  catalogRef: RequestCatalogRef | null;
+  createdAt: string;
+  statusChangedAt: string;
+};
+
+export type RequestCounts = Record<RequestStatus, number>;
+
+export type AdminRequest = Omit<PublicRequest, "isMine" | "iWantIt"> & {
+  requestedBy: { id: string; name: string | null; email: string | null };
+  voters: { id: string; name: string | null; email: string | null }[];
+  catalogTitle: string | null;
+  updatedAt: string;
+};
+
+export type ResolveLinkResult = { ok: true; source: string; meta: RequestRefMeta | null };

@@ -17,6 +17,10 @@
   --live: #3fcb8e;
   --danger: #e5645e;
   --danger-soft: rgba(229, 100, 94, 0.14);
+  /* Request status colours: "sourcing" is the one state that is neither warning nor success, so it
+     gets its own blue (same value as the approved prototype's --info). */
+  --info: #6ea8e0;
+  --info-soft: rgba(110, 168, 224, 0.16);
   --divider: #262220;
   --divider-strong: #353330;
 }
@@ -35,6 +39,8 @@
   --color-live: var(--live);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
   --color-divider: var(--divider);
   --color-divider-strong: var(--divider-strong);
   --font-sans: "Inter", sans-serif;

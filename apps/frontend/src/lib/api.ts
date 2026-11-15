@@ -14,9 +14,18 @@ export function clearToken(): void {
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** The form field the server blamed, when it named one (`{ error, field }`) — used by the
+   * request form and the admin requests panel to put the server's own message next to the input
+   * that caused it rather than in a generic banner. */
+  field: string | null;
+  /** The rest of the error body, for the few endpoints that add detail (e.g. `maxBytes` on a
+   * too-large reference image). */
+  body: Record<string, unknown> | null;
+  constructor(message: string, status: number, body?: Record<string, unknown> | null) {
     super(message);
     this.status = status;
+    this.body = body ?? null;
+    this.field = typeof body?.field === "string" ? body.field : null;
   }
 }
 
@@ -27,8 +36,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new ApiError((body as { error?: string } | null)?.error || res.statusText, res.status);
+    const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    throw new ApiError(
+      (typeof body?.error === "string" ? body.error : null) || res.statusText,
+      res.status,
+      body,
+    );
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -64,6 +77,17 @@ export function apiPostText<T>(path: string, text: string): Promise<T> {
   return request<T>(path, { method: "POST", headers: { "Content-Type": "text/plain" }, body: text });
 }
 
+/** Raw-bytes POST: the body *is* the file and the real image type goes in Content-Type. The
+ * reference-image upload (and the admin stage route) read the request stream directly rather than
+ * going through a multipart parser, so there's no FormData involved. */
+export function apiPostBinary<T>(path: string, file: Blob): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+  });
+}
+
 /** Fire-and-forget progress save that must survive the tab actually closing (pagehide) —
  * `navigator.sendBeacon` can't attach an Authorization header, so `fetch` with `keepalive: true` is
  * used instead (well-supported in evergreen browsers, and unlike sendBeacon it accepts headers). */
@@ -74,21 +98,6 @@ export function apiPostKeepalive(path: string, body: unknown): void {
   fetch(`${API_URL}${path}`, { method: "POST", headers, body: JSON.stringify(body), keepalive: true }).catch(
     () => {},
   );
-}
-
-/** Downloads an admin-only file (converter output, subtitle .vtt) via an authenticated fetch, then
- * triggers a normal browser save via a throwaway anchor — a plain `<a href>` can't send an
- * Authorization header, and these one-shot admin downloads don't fit the video/thumbnail scoped
- * media-token pattern (see lib/mediaToken.ts), so a full blob fetch is simplest here. */
-export async function downloadAuthedFile(path: string, filename: string): Promise<void> {
-  const url = await fetchAuthedBlobUrl(path);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 /** Fetches an admin-only or user-scoped image (thumbnail) with the normal Bearer header and hands

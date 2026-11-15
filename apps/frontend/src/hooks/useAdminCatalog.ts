@@ -52,7 +52,7 @@ export function useAdminVideo(fileId: string) {
     queryFn: () => apiGet<AdminVideoDetail>(`/api/admin/catalog/video/${fileId}`),
     // Poll while any rendition is still being generated, so the status chips (and eventually the
     // "Generate renditions" button re-enabling) update without a manual refresh — matches the
-    // Converter tab's polling pattern for the same reason (background ffmpeg work, no websocket).
+    // same reason the desktop app polls its own conversion jobs (background ffmpeg work, no websocket).
     refetchInterval: (query) => {
       const renditions = query.state.data?.video.renditions;
       const inFlight = renditions && Object.values(renditions).some((r) => r?.status === "queued" || r?.status === "processing");

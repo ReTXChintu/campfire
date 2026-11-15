@@ -294,7 +294,7 @@ export default function VideoCurationForm({
           <p className="mb-1.5 text-sm font-medium text-white/90">Subtitles</p>
           {subtitleSetOptions.length === 0 ? (
             <p className="mb-2 text-sm text-text-tertiary">
-              None yet — upload a file below, or convert a video with subtitles in the Converter tab.
+              None yet — upload a file below, or convert a video with subtitles in the desktop app.
             </p>
           ) : (
             <div className="mb-3 flex flex-col gap-1.5">

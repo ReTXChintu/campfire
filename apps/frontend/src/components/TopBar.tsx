@@ -40,6 +40,9 @@ export default function TopBar() {
         <div className="flex items-center gap-5 text-sm text-text-secondary">
           {desktopAppDownloadUrl && <DownloadLink href={desktopAppDownloadUrl} label="Desktop App" />}
           {mobileAppDownloadUrl && <DownloadLink href={mobileAppDownloadUrl} label="Get the App" />}
+          <Link to="/requests" className="font-medium transition hover:text-white">
+            Requests
+          </Link>
           {isAdmin && (
             <Link to="/admin" className="font-medium transition hover:text-white">
               Admin

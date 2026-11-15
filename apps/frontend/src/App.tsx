@@ -8,8 +8,9 @@ import FolderPage from "./routes/FolderPage";
 import WatchPage from "./routes/WatchPage";
 import LinkDevicePage from "./routes/LinkDevicePage";
 import NotFoundPage from "./routes/NotFoundPage";
-import AdminConverterPage from "./routes/admin/AdminConverterPage";
+import RequestsPage from "./routes/RequestsPage";
 import AdminCatalogPage from "./routes/admin/AdminCatalogPage";
+import AdminRequestsPage from "./routes/admin/AdminRequestsPage";
 import AdminCatalogFolderPage from "./routes/admin/AdminCatalogFolderPage";
 import AdminCatalogVideoPage from "./routes/admin/AdminCatalogVideoPage";
 
@@ -45,6 +46,14 @@ export default function App() {
           }
         />
         <Route
+          path="/requests"
+          element={
+            <ProtectedRoute>
+              <RequestsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/link"
           element={
             <ProtectedRoute>
@@ -56,7 +65,7 @@ export default function App() {
           path="/admin"
           element={
             <AdminRoute>
-              <AdminConverterPage />
+              <AdminCatalogPage />
             </AdminRoute>
           }
         />
@@ -65,6 +74,14 @@ export default function App() {
           element={
             <AdminRoute>
               <AdminCatalogPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/requests"
+          element={
+            <AdminRoute>
+              <AdminRequestsPage />
             </AdminRoute>
           }
         />
