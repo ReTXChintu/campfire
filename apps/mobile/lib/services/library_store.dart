@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../models/catalog.dart';
 import 'catalog_service.dart';
+import 'watch_events.dart';
 
 /// One in-memory copy of `GET /api/library`, shared by Home, Search and Browse.
 ///
@@ -9,6 +10,20 @@ import 'catalog_service.dart';
 /// list client-side. Fetching it once and notifying, rather than once per screen, is both the
 /// cheaper and the more consistent option (a pull-to-refresh on Home updates search results too).
 class LibraryStore extends ChangeNotifier {
+  LibraryStore() {
+    WatchEvents.playerClosed.addListener(_onPlayerClosed);
+  }
+
+  @override
+  void dispose() {
+    WatchEvents.playerClosed.removeListener(_onPlayerClosed);
+    super.dispose();
+  }
+
+  void _onPlayerClosed() {
+    if (_data != null) refreshQuietly();
+  }
+
   LibraryResponse? _data;
   Object? _error;
   bool _loading = false;
@@ -28,13 +43,29 @@ class LibraryStore extends ChangeNotifier {
   Map<String, WatchProgress> get progressByFileId {
     final data = _data;
     if (data == null) return const {};
-    return {for (final entry in data.continueWatching) entry.progress.fileId: entry.progress};
+    return {
+      for (final p in data.progress) p.fileId: p,
+      for (final entry in data.continueWatching) entry.progress.fileId: entry.progress,
+    };
   }
 
   /// Loads once; a second caller while a load is in flight (or after one succeeded) is a no-op.
   Future<void> ensureLoaded() async {
     if (_loading || _data != null) return;
     await refresh();
+  }
+
+  /// Re-fetches without the loading flicker — what runs when the player closes, so the progress
+  /// you just made is on the cards you land back on. Keeps the old data if the fetch fails.
+  Future<void> refreshQuietly() async {
+    if (_loading) return;
+    try {
+      _data = await CatalogService.fetchLibrary();
+      _error = null;
+      notifyListeners();
+    } catch (_) {
+      // The data on screen is still valid, just slightly stale.
+    }
   }
 
   Future<void> refresh() async {

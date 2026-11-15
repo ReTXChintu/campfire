@@ -33,9 +33,7 @@ class MediaCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final video = item is CatalogVideoItem ? item as CatalogVideoItem : null;
     final meta = MediaMeta.parse(item.name, mimeType: video?.mimeType);
-    final percent = (progress != null && progress!.durationSeconds > 0)
-        ? (progress!.positionSeconds / progress!.durationSeconds).clamp(0.0, 1.0)
-        : 0.0;
+    final percent = progress?.fraction ?? 0.0;
     final remaining = progress == null
         ? null
         : remainingLabel(
@@ -133,7 +131,7 @@ class MediaCard extends StatelessWidget {
                             child: FractionallySizedBox(
                               widthFactor: percent,
                               alignment: Alignment.centerLeft,
-                              child: Container(color: AppColors.accent),
+                              child: Container(color: progress?.completed == true ? AppColors.live : AppColors.accent),
                             ),
                           ),
                         ),

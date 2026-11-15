@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../models/catalog.dart';
 import '../services/catalog_service.dart';
+import '../services/watch_events.dart';
 import '../services/watch_party_sync_controller.dart';
 import '../widgets/media_kit_video_player.dart';
 import '../widgets/watch_party_overlay.dart';
@@ -31,11 +32,16 @@ class _WatchScreenState extends State<WatchScreen> {
     super.initState();
     _future = CatalogService.fetchVideo(widget.fileId);
     _partyId = widget.partyId;
+    // Read by the player before it opens the stream: in a party, the party says where to start.
+    _syncController.initialPartyId = widget.partyId;
   }
 
   @override
   void dispose() {
     _syncController.dispose();
+    // After the player's own dispose-time progress save has been sent; listeners re-fetch, so the
+    // screen underneath shows what was just watched. A tiny delay lets that save land first.
+    Future.delayed(const Duration(milliseconds: 600), WatchEvents.notifyPlayerClosed);
     super.dispose();
   }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../models/catalog.dart';
 import '../services/catalog_service.dart';
+import '../services/watch_events.dart';
 import '../theme/app_theme.dart';
 import '../utils/media_meta.dart';
 import '../widgets/authed_network_image.dart';
@@ -28,22 +29,52 @@ class _FolderScreenState extends State<FolderScreen> {
   String? _season;
   late Future<FolderResponse> _future;
 
+  // The last successful load. Kept so a background refresh (see [_onPlayerClosed]) swaps the
+  // episode list in place instead of flashing the skeleton.
+  FolderResponse? _last;
+
   @override
   void initState() {
     super.initState();
-    _future = CatalogService.fetchFolder(widget.folderId);
+    _future = _track(CatalogService.fetchFolder(widget.folderId));
+    WatchEvents.playerClosed.addListener(_onPlayerClosed);
+  }
+
+  @override
+  void dispose() {
+    WatchEvents.playerClosed.removeListener(_onPlayerClosed);
+    super.dispose();
+  }
+
+  Future<FolderResponse> _track(Future<FolderResponse> future) {
+    return future.then((value) {
+      _last = value;
+      return value;
+    });
+  }
+
+  /// Back from the player: the bar on the episode you just watched (and Resume's target) changed.
+  void _onPlayerClosed() {
+    if (!mounted || _last == null) return;
+    CatalogService.fetchFolder(widget.folderId, season: _season).then((value) {
+      if (!mounted) return;
+      setState(() {
+        _last = value;
+        _future = Future.value(value);
+      });
+    }).catchError((_) {});
   }
 
   void _selectSeason(String seasonId) {
     setState(() {
       _season = seasonId;
-      _future = CatalogService.fetchFolder(widget.folderId, season: seasonId);
+      _future = _track(CatalogService.fetchFolder(widget.folderId, season: seasonId));
     });
   }
 
   void _reload() {
     setState(() {
-      _future = CatalogService.fetchFolder(widget.folderId, season: _season);
+      _future = _track(CatalogService.fetchFolder(widget.folderId, season: _season));
     });
   }
 
@@ -374,9 +405,7 @@ class _EpisodeRow extends StatelessWidget {
     final isFolder = item is CatalogFolderItem;
     final video = item is CatalogVideoItem ? item as CatalogVideoItem : null;
     final meta = MediaMeta.parse(item.name, mimeType: video?.mimeType);
-    final percent = (progress != null && progress!.durationSeconds > 0)
-        ? (progress!.positionSeconds / progress!.durationSeconds).clamp(0.0, 1.0)
-        : 0.0;
+    final percent = progress?.fraction ?? 0.0;
     final remaining = progress == null
         ? null
         : remainingLabel(
@@ -436,7 +465,7 @@ class _EpisodeRow extends StatelessWidget {
                           child: FractionallySizedBox(
                             widthFactor: percent,
                             alignment: Alignment.centerLeft,
-                            child: Container(color: AppColors.accent),
+                            child: Container(color: progress?.completed == true ? AppColors.live : AppColors.accent),
                           ),
                         ),
                       ),

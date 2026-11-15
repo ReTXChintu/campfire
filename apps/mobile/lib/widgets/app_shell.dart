@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../config.dart';
@@ -19,7 +20,7 @@ import 'tv_focusable.dart';
 /// Admin entries appear here only when [isDesktopAdminCapable] *and* the signed-in user is the
 /// admin account — the same pair of conditions `app_router.dart`'s redirect enforces, which is the
 /// actual guard. Android never renders them, by design.
-class AppShell extends StatelessWidget {
+class AppShell extends StatefulWidget {
   final StatefulNavigationShell navigationShell;
 
   const AppShell({super.key, required this.navigationShell});
@@ -27,47 +28,125 @@ class AppShell extends StatelessWidget {
   /// Branch indexes, in the order `app_router.dart` registers them.
   static const branchHome = 0;
   static const branchSearch = 1;
-  static const branchBrowse = 2;
+  static const branchDiscover = 2;
   static const branchRequests = 3;
   static const branchProfile = 4;
 
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+/// Owns the **system back button** for the whole shell.
+///
+/// Destinations are switched with `goBranch`/`go`, which replace rather than push — so before this,
+/// there was never anything on the stack and Android's back button closed the app from any tab.
+/// Now the shell remembers which destinations you came through and back walks that trail one step
+/// at a time (Requests → Discover → Home), lands on Home when the trail runs out, and on Home asks
+/// for a second press within two seconds before it lets the app close.
+///
+/// Pushed screens (a title's detail page, the player) sit above the shell on the root navigator,
+/// so they pop normally and never reach this.
+class _AppShellState extends State<AppShell> {
+  final List<int> _trail = [];
+  bool _goingBack = false;
+  DateTime? _lastBackOnHome;
+
+  StatefulNavigationShell get _shell => widget.navigationShell;
+
+  @override
+  void didUpdateWidget(AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final from = oldWidget.navigationShell.currentIndex;
+    final to = _shell.currentIndex;
+    if (from == to) return;
+    if (_goingBack) {
+      _goingBack = false;
+      return;
+    }
+    // Every forward move records where it came from — whether it was a nav tap, a rail's
+    // "See all" or a button deep inside a screen.
+    _trail.remove(from);
+    _trail.add(from);
+    if (_trail.length > 8) _trail.removeAt(0);
+  }
+
   void _goBranch(int index) {
-    navigationShell.goBranch(index, initialLocation: index == navigationShell.currentIndex);
+    _shell.goBranch(index, initialLocation: index == _shell.currentIndex);
+  }
+
+  bool get _atHomeRoot => _shell.currentIndex == AppShell.branchHome && _trail.isEmpty;
+
+  void _handleBack() {
+    _lastBackOnHome = null;
+    _trail.remove(_shell.currentIndex);
+    final previous = _trail.isEmpty ? AppShell.branchHome : _trail.removeLast();
+    _goingBack = true;
+    _shell.goBranch(previous);
+  }
+
+  void _handleBackOnHome() {
+    final now = DateTime.now();
+    final last = _lastBackOnHome;
+    if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+      SystemNavigator.pop();
+      return;
+    }
+    _lastBackOnHome = now;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Press back again to exit'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final body = navigationShell;
+    final body = _shell;
 
+    final Widget scaffold;
     if (AppLayout.usesSidebar(width)) {
-      return Scaffold(
+      scaffold = Scaffold(
         body: Row(
           children: [
-            _Sidebar(
-              currentBranch: navigationShell.currentIndex,
-              onSelectBranch: _goBranch,
-            ),
+            _Sidebar(currentBranch: _shell.currentIndex, onSelectBranch: _goBranch),
             const VerticalDivider(width: 1, thickness: 1, color: AppColors.divider),
             Expanded(child: body),
           ],
         ),
       );
+    } else {
+      scaffold = Scaffold(
+        body: body,
+        bottomNavigationBar: _BottomNav(currentBranch: _shell.currentIndex, onSelectBranch: _goBranch),
+      );
     }
 
-    return Scaffold(
-      body: body,
-      bottomNavigationBar: _BottomNav(
-        currentBranch: navigationShell.currentIndex,
-        onSelectBranch: _goBranch,
-      ),
+    // Never lets the route pop on its own: the shell is the root page, so a real pop *is* closing
+    // the app, and that only happens through _handleBackOnHome's explicit second press. Windows
+    // has no system back button, so this is inert there.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_atHomeRoot) {
+          _handleBackOnHome();
+        } else {
+          _handleBack();
+        }
+      },
+      child: scaffold,
     );
   }
 }
 
-/// Phone navigation — four destinations, 48dp minimum targets, the accent bar above the active
-/// one. The browse grid shares the Home destination's highlight: you only ever reach it from a
-/// rail's "See all", so pretending it's a fifth tab would be a lie about the IA.
+/// Phone navigation — five destinations, 48dp minimum targets, the accent bar above the active
+/// one. Discover is the one place to browse everything, with Series/Movies as chips inside it
+/// rather than two separate destinations.
 class _BottomNav extends StatelessWidget {
   final int currentBranch;
   final ValueChanged<int> onSelectBranch;
@@ -79,11 +158,12 @@ class _BottomNav extends StatelessWidget {
     const items = <_NavEntry>[
       _NavEntry('Home', Icons.home_outlined, Icons.home, AppShell.branchHome),
       _NavEntry('Search', Icons.search_outlined, Icons.search, AppShell.branchSearch),
+      _NavEntry('Discover', Icons.explore_outlined, Icons.explore, AppShell.branchDiscover),
       _NavEntry('Requests', Icons.auto_awesome_outlined, Icons.auto_awesome, AppShell.branchRequests),
       _NavEntry('Profile', Icons.person_outline, Icons.person, AppShell.branchProfile),
     ];
 
-    final effective = currentBranch == AppShell.branchBrowse ? AppShell.branchHome : currentBranch;
+    final effective = currentBranch;
 
     return Container(
       decoration: const BoxDecoration(
@@ -143,16 +223,22 @@ class _BottomNavItem extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(selected ? entry.activeIcon : entry.icon, size: 23, color: color),
-                  const SizedBox(height: 3),
-                  Text(
-                    entry.label,
-                    style: TextStyle(color: color, fontSize: 10.5, fontWeight: FontWeight.w600),
-                  ),
-                ],
+              // Scales down rather than overflowing with a large system font size or a narrow
+              // phone — five destinations leave each one little room.
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(selected ? entry.activeIcon : entry.icon, size: 23, color: color),
+                    const SizedBox(height: 3),
+                    Text(
+                      entry.label,
+                      maxLines: 1,
+                      style: TextStyle(color: color, fontSize: 10.5, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
               ),
               if (selected)
                 Positioned(
@@ -174,9 +260,9 @@ class _BottomNavItem extends StatelessWidget {
   }
 }
 
-/// Windows / Android TV navigation — a 232px rail, exactly as the approved desktop prototype:
-/// brand, the viewer destinations, a Series/Movies pair that deep-links into the browse grid, an
-/// Admin group on Windows only, then the account footer.
+/// Windows / Android TV navigation — a 232px rail: brand, the viewer destinations (Discover holds
+/// both series and movies, filtered by chips), an Admin group on Windows only, then the account
+/// footer.
 class _Sidebar extends StatelessWidget {
   final int currentBranch;
   final ValueChanged<int> onSelectBranch;
@@ -187,8 +273,6 @@ class _Sidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final location = currentLocation(context);
-    final browseType = location.queryParameters['type'];
-    final onBrowse = currentBranch == AppShell.branchBrowse;
     final showAdmin = isDesktopAdminCapable && (auth.user?.isAdmin ?? false);
     final adminLocation = location.path.startsWith('/admin') ? location.path : null;
 
@@ -227,16 +311,10 @@ class _Sidebar extends StatelessWidget {
                     onTap: () => onSelectBranch(AppShell.branchSearch),
                   ),
                   SidebarItem(
-                    label: 'Series',
-                    icon: Icons.live_tv_outlined,
-                    selected: onBrowse && browseType == 'series',
-                    onTap: () => context.go('/browse?type=series'),
-                  ),
-                  SidebarItem(
-                    label: 'Movies',
-                    icon: Icons.movie_outlined,
-                    selected: onBrowse && browseType == 'movies',
-                    onTap: () => context.go('/browse?type=movies'),
+                    label: 'Discover',
+                    icon: Icons.explore_outlined,
+                    selected: currentBranch == AppShell.branchDiscover,
+                    onTap: () => onSelectBranch(AppShell.branchDiscover),
                   ),
                   SidebarItem(
                     label: 'Requests',

@@ -115,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
           MediaRail(
             title: 'Series',
             items: data.folders,
-            onSeeAll: () => context.go('/browse?type=series'),
+            onSeeAll: () => context.go('/discover?type=series'),
             autofocusFirstItem: continueItems.isEmpty,
           ),
         if (data.folders.isNotEmpty && data.videos.isNotEmpty) const FilmstripDivider(),
@@ -124,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
             title: 'Movies',
             items: data.videos,
             progressByFileId: store.progressByFileId,
-            onSeeAll: () => context.go('/browse?type=movies'),
+            onSeeAll: () => context.go('/discover?type=movies'),
             autofocusFirstItem: continueItems.isEmpty && data.folders.isEmpty,
           ),
       ],

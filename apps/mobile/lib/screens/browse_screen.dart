@@ -14,13 +14,15 @@ enum _Kind { all, series, movies }
 
 enum _Sort { library, titleAsc, titleDesc, yearDesc }
 
-/// The browse grid every rail's "See all" lands on — 2 columns on a phone, up to 6 on a desktop
-/// window, with type chips and a sort. Filtering and sorting happen over the already-fetched
+/// Discover — the whole library as one grid, 2 columns on a phone and up to 6 on a desktop window,
+/// with All/Series/Movies chips and a sort. It's a navigation destination of its own on every
+/// platform (bottom nav on a phone, the sidebar on desktop/TV); a Home rail's "See all" lands here
+/// with its chip preselected. Filtering and sorting happen over the already-fetched
 /// library ([LibraryStore]); there is no list endpoint that takes filter or sort parameters, and
 /// this doesn't pretend there is.
 class BrowseScreen extends StatefulWidget {
-  /// "series" | "movies" | null — from `/browse?type=…`, which is how the sidebar's Series and
-  /// Movies entries and the Home rails' "See all" link in.
+  /// "series" | "movies" | null — from `/discover?type=…`, which is how the Home rails' "See all"
+  /// links preselect a chip.
   final String? type;
 
   const BrowseScreen({super.key, this.type});
@@ -52,7 +54,8 @@ class _BrowseScreenState extends State<BrowseScreen> {
   @override
   void didUpdateWidget(BrowseScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // A fresh deep-link (sidebar Series → Movies) overrides whatever chip the user last tapped.
+    // A fresh deep-link (Home's Series "See all", then its Movies one) overrides whatever chip the
+    // user last tapped.
     if (oldWidget.type != widget.type) _kindOverride = null;
   }
 
@@ -90,17 +93,10 @@ class _BrowseScreenState extends State<BrowseScreen> {
     final width = MediaQuery.sizeOf(context).width;
     final gutter = AppLayout.gutter(width);
     final items = _items(store);
-    final title = switch (_kind) {
-      _Kind.series => 'Series',
-      _Kind.movies => 'Movies',
-      _Kind.all => 'Browse',
-    };
-
     return Column(
       children: [
         PaneHeader(
-          title: title,
-          showBack: !AppLayout.usesSidebar(width),
+          title: 'Discover',
           actions: [
             if (store.hasData)
               Text(

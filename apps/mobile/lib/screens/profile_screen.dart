@@ -9,7 +9,6 @@ import '../config.dart';
 import '../platform_info.dart';
 import '../services/app_update_service.dart';
 import '../services/auth_service.dart';
-import '../services/quality_prefs_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/join_party_action.dart';
@@ -17,11 +16,11 @@ import '../widgets/tv_focusable.dart';
 import '../widgets/ui_kit.dart';
 
 /// Profile / Settings — a real destination for everything the old avatar `PopupMenuButton` hid
-/// (email, version, admin links, sign out), plus the playback preference the player already
-/// persists and the TV pairing explanation.
+/// (email, version, admin links, sign out), plus the TV pairing explanation.
 ///
-/// Every row here maps to something that actually exists: the quality ceiling is
-/// [QualityPrefsService] (the same value MediaKitVideoPlayer reads), the version check is
+/// Every row here maps to something that actually exists. There is no playback-quality setting:
+/// every title streams at its one source quality, so a picker could only ever offer that. Audio
+/// and subtitle tracks are chosen in the player, per title. The version check is
 /// [AppUpdateService] / `GET /api/app-version`, pairing is the backend's `/auth/pair/*` flow. No
 /// placeholder toggles.
 class ProfileScreen extends StatefulWidget {
@@ -32,53 +31,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int? _ceiling;
-  bool _ceilingLoaded = false;
   AppUpdateInfo? _update;
   bool _checkingUpdate = false;
   String? _updateMessage;
-
-  /// `0` stands for "Original" (QualityPrefsService stores that as a null ceiling). The picker
-  /// has to deal in a non-nullable value so a dismissed sheet — which also returns null — can't
-  /// be mistaken for picking Original.
-  static const _originalCeiling = 0;
-  static const _ceilingOptions = <PickerOption<int>>[
-    PickerOption(
-      value: _originalCeiling,
-      label: 'Original',
-      detail: 'Always start at the source resolution',
-    ),
-    PickerOption(value: 1080, label: 'Up to 1080p', detail: 'Cap Auto mode at 1080p'),
-    PickerOption(value: 720, label: 'Up to 720p', detail: 'Lighter on slow connections'),
-    PickerOption(value: 480, label: 'Up to 480p', detail: 'Minimum data use'),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    QualityPrefsService.getCeiling().then((value) {
-      if (!mounted) return;
-      setState(() {
-        _ceiling = value;
-        _ceilingLoaded = true;
-      });
-    });
-  }
-
-  Future<void> _pickCeiling() async {
-    final picked = await showOptionPicker<int>(
-      context: context,
-      title: 'Default quality',
-      selected: _ceiling ?? _originalCeiling,
-      options: _ceilingOptions,
-    );
-    // A dismissed sheet returns null and changes nothing; "Original" arrives as 0.
-    if (picked == null || !mounted) return;
-    final ceiling = picked == _originalCeiling ? null : picked;
-    await QualityPrefsService.setCeiling(ceiling);
-    if (!mounted) return;
-    setState(() => _ceiling = ceiling);
-  }
 
   Future<void> _checkForUpdate() async {
     setState(() {
@@ -139,11 +94,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (confirmed == true) await auth.signOut();
   }
 
-  String get _ceilingLabel {
-    if (!_ceilingLoaded) return '…';
-    return _ceilingOptions.firstWhere((o) => o.value == (_ceiling ?? _originalCeiling)).label;
-  }
-
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
@@ -202,20 +152,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ],
                 ),
-              ),
-              const _GroupLabel('Playback'),
-              SettingsRow(
-                icon: Icons.high_quality_outlined,
-                title: 'Default quality',
-                subtitle: 'Where Auto mode starts on this device',
-                trailingLabel: _ceilingLabel,
-                onTap: _pickCeiling,
-              ),
-              SettingsRow(
-                icon: Icons.subtitles_outlined,
-                title: 'Audio & subtitle tracks',
-                subtitle: 'Chosen per title in the player; your last pick is remembered',
-                enabled: false,
               ),
               const _GroupLabel('Devices'),
               SettingsRow(

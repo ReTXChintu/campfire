@@ -51,9 +51,17 @@ class WatchProgress {
     fileId: json['fileId'] as String,
     parentFolderId: json['parentFolderId'] as String,
     positionSeconds: (json['positionSeconds'] as num).toDouble(),
-    durationSeconds: (json['durationSeconds'] as num).toDouble(),
-    completed: json['completed'] as bool,
+    durationSeconds: (json['durationSeconds'] as num? ?? 0).toDouble(),
+    completed: json['completed'] as bool? ?? false,
   );
+
+  /// How much of the bar to fill. A finished title is a *full* bar, not the 95% the completion
+  /// threshold happens to land on — "you watched this" has to read at a glance in a list.
+  double get fraction {
+    if (completed) return 1;
+    if (durationSeconds <= 0) return 0;
+    return (positionSeconds / durationSeconds).clamp(0.0, 1.0);
+  }
 }
 
 class StreamTrack {
@@ -223,6 +231,9 @@ class LibraryResponse {
   final List<ContinueWatchingEntry> continueWatching;
   final List<CatalogListItem> folders;
   final List<CatalogListItem> videos;
+  /// This user's progress on the library's own videos, finished ones included — so a movie card
+  /// can say it was watched. Absent on a backend older than this field.
+  final List<WatchProgress> progress;
 
   const LibraryResponse({
     required this.empty,
@@ -231,6 +242,7 @@ class LibraryResponse {
     required this.continueWatching,
     required this.folders,
     required this.videos,
+    this.progress = const [],
   });
 
   factory LibraryResponse.fromJson(Map<String, dynamic> json) => LibraryResponse(
@@ -244,6 +256,9 @@ class LibraryResponse {
         .toList(),
     folders: (json['folders'] as List).map((e) => CatalogListItem.fromJson(e)).toList(),
     videos: (json['videos'] as List).map((e) => CatalogListItem.fromJson(e)).toList(),
+    progress: (json['progress'] as List? ?? const [])
+        .map((e) => WatchProgress.fromJson(e as Map<String, dynamic>))
+        .toList(),
   );
 }
 
@@ -322,12 +337,21 @@ class EpisodeRef {
 
 class EpisodeProgress {
   final double positionSeconds;
+  final double durationSeconds;
   final bool completed;
-  const EpisodeProgress({required this.positionSeconds, required this.completed});
+  const EpisodeProgress({required this.positionSeconds, this.durationSeconds = 0, required this.completed});
   factory EpisodeProgress.fromJson(Map<String, dynamic> json) => EpisodeProgress(
     positionSeconds: (json['positionSeconds'] as num).toDouble(),
+    durationSeconds: (json['durationSeconds'] as num? ?? 0).toDouble(),
     completed: json['completed'] as bool,
   );
+
+  /// Full when finished, see [WatchProgress.fraction].
+  double get fraction {
+    if (completed) return 1;
+    if (durationSeconds <= 0) return 0;
+    return (positionSeconds / durationSeconds).clamp(0.0, 1.0);
+  }
 }
 
 class VideoResponse {

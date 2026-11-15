@@ -66,12 +66,12 @@ GoRouter buildRouter(AuthService auth) {
           StatefulShellBranch(
             routes: [GoRoute(path: '/search', builder: (context, state) => const SearchScreen())],
           ),
-          // 2 — the browse grid every rail's "See all" lands on. `?type=series|movies` is how the
-          // desktop sidebar's Series and Movies entries address it.
+          // 2 — Discover: the whole library as a grid, Series/Movies as chips. A Home rail's
+          // "See all" lands here with `?type=series|movies` preselecting the chip.
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: '/browse',
+                path: '/discover',
                 builder: (context, state) =>
                     BrowseScreen(type: state.uri.queryParameters['type']),
               ),
@@ -93,6 +93,14 @@ GoRouter buildRouter(AuthService auth) {
             routes: [GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen())],
           ),
         ],
+      ),
+
+      // The old name of Discover; kept so nothing that still says /browse dead-ends.
+      GoRoute(
+        path: '/browse',
+        redirect: (context, state) =>
+            Uri(path: '/discover', queryParameters: state.uri.queryParameters.isEmpty ? null : state.uri.queryParameters)
+                .toString(),
       ),
 
       // Outside the shell, pushed over it: the title/series detail, which is reachable from
