@@ -271,12 +271,15 @@ export function useUseTmdbTitlesEverywhere() {
   });
 }
 
-/** Name one series' episodes from TMDb now. */
+/** Name one series' episodes from TMDb now. `force` also replaces episode titles typed by hand,
+ * which the ordinary pass deliberately leaves alone. */
 export function useMatchEpisodes(folderId: string) {
   const invalidate = useInvalidateArtwork("folder", folderId);
   return useMutation({
-    mutationFn: () =>
-      apiPost<EpisodeMatchResult>(`/api/admin/catalog/artwork/folder/${folderId}/episodes`),
+    mutationFn: (options: { force?: boolean } = {}) =>
+      apiPost<EpisodeMatchResult>(`/api/admin/catalog/artwork/folder/${folderId}/episodes`, {
+        force: options.force === true,
+      }),
     onSuccess: invalidate,
   });
 }

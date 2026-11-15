@@ -440,12 +440,20 @@ try {
   check("and keeps its synopsis, still, air date and number", ep1?.episodeArtwork?.overview === "Viserys hosts a tourney." && ep1.episodeArtwork.stillPath === "/hotdS1E1.jpg" && ep1.episodeArtwork.airDate === "2022-08-21" && ep1.episodeArtwork.episode === 1 && ep1.episodeArtwork.season === 1, JSON.stringify(ep1?.episodeArtwork));
   check("an episode TMDb has no name for keeps the one it had", (await doc("video", "v-ep2"))?.title === "Episode 2");
   check("an episode an admin named by hand is left alone", (await doc("video", "v-ep3"))?.title === "Renamed by hand");
+  const forced = await api("/api/admin/catalog/artwork/folder/f-hotd/episodes", { token: admin, method: "POST", body: { force: true } });
+  check("…until an admin asks for TMDb's names outright", forced.status === 200 && (await doc("video", "v-ep3"))?.title === "Second of His Name", JSON.stringify(forced.json));
+  check("…and it stops counting as hand-typed", (await doc("video", "v-ep3"))?.titleOverridden === false);
+  check("…while a never-curated episode still gets no title", (await doc("video", "v-ep-pending"))?.title === null);
   check("but still gets its synopsis and still", (await doc("video", "v-ep3"))?.episodeArtwork?.name === "Second of His Name");
   check("the episode's own still is served as its image", (await api("/api/thumbnail/v-ep1", { token: viewer })).buffer.equals(jpeg("w780/hotdS1E1.jpg")));
   check("an episode with no still falls through to Drive's frame", (await api("/api/thumbnail/v-ep2", { token: viewer })).status === 404);
   const seasonPage = (await api("/api/folder/f-hotd?season=f-hotd-s1", { token: viewer })).json;
   const rows = seasonPage?.seasonItems ?? [];
   check("episode rows carry the number, synopsis, runtime and score", rows[0]?.episodeNumber === 1 && rows[0]?.overview === "Viserys hosts a tourney." && rows[0]?.runtimeMinutes === 66 && rows[0]?.rating?.average === 8.1, JSON.stringify(rows[0]));
+  const ordered = (await api("/api/folder/f-hotd?season=f-hotd-s1", { token: viewer })).json?.seasonItems ?? [];
+  // Three, not four: the never-curated episode is still "pending", so viewers don't see it.
+  check("renaming episodes doesn't scatter the season out of order", JSON.stringify(ordered.map((e) => e.episodeNumber)) === JSON.stringify([1, 2, 3]), JSON.stringify(ordered.map((e) => [e.episodeNumber, e.name])));
+  check("…because the matched number is stored as the episode's order", (await doc("video", "v-ep3"))?.episodeOrder === 3);
   const playerEp = (await api("/api/video/v-ep1", { token: viewer })).json;
   check("the player knows which episode it is", playerEp?.episode?.number === 1 && playerEp?.episode?.season === 1 && playerEp?.episode?.overview === "Viserys hosts a tourney.", JSON.stringify(playerEp?.episode));
   check("a film has no episode block", movieFacts?.episode === null);

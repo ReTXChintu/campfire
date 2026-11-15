@@ -82,15 +82,17 @@ class MetaLine extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        // The separator rides with the item *before* it, so a line that wraps begins with a fact
+        // rather than a stray dot — which on a phone otherwise reads as a bullet list.
         for (var i = 0; i < parts.length; i++)
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (i > 0) ...[
-                const Text('·', style: TextStyle(color: AppColors.textTertiary, fontSize: 12.5)),
-                const SizedBox(width: 8),
-              ],
               parts[i],
+              if (i < parts.length - 1) ...[
+                const SizedBox(width: 8),
+                const Text('·', style: TextStyle(color: AppColors.textTertiary, fontSize: 12.5)),
+              ],
             ],
           ),
       ],

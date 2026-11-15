@@ -120,6 +120,7 @@ async function matchFolder(
   folderId: string,
   plan: SeasonPlan,
   result: EpisodeMatchResult,
+  force = false,
 ): Promise<void> {
   const videos = await listVideosByParent(folderId);
   if (videos.length === 0) return;
@@ -142,12 +143,25 @@ async function matchFolder(
     if (!episode) continue;
 
     const artwork = toEpisodeArtwork(episode, plan.seriesTmdbId, plan.season);
-    const set: Record<string, unknown> = { episodeArtwork: artwork, updatedAt: new Date() };
-    // The real name replaces "Episode 4" unless an admin typed this episode's title by hand.
-    // A video with no title at all is still "pending" — giving it one here would quietly promote
-    // it into the curation flow as a side effect of fetching metadata, so it only gets the data.
-    if (artwork.name && video.title && !video.titleOverridden && video.title !== artwork.name) {
+    // Write the number down as this video's episodeOrder, which is what the library sorts by.
+    // Without it, an episode that had no order was held in place only by its own name sorting
+    // ("S1E1…", "S1E2…") — and renaming it to "The Rogue Prince" would scatter the season into
+    // alphabetical order. The number is the one we just matched it against, so the list stays in
+    // exactly the order the names were chosen for.
+    const set: Record<string, unknown> = {
+      episodeArtwork: artwork,
+      episodeOrder: number,
+      updatedAt: new Date(),
+    };
+    // The real name replaces "Episode 4" unless an admin typed this episode's title by hand —
+    // `force` is an admin saying to do it anyway, and then the name stops counting as hand-typed
+    // so later passes can keep it current.
+    //
+    // A video with no title at all is still "pending" either way: giving it one here would
+    // quietly promote it into the curation flow as a side effect of fetching metadata.
+    if (artwork.name && video.title && video.title !== artwork.name && (force || !video.titleOverridden)) {
       set.title = artwork.name;
+      if (video.titleOverridden) set.titleOverridden = false;
       result.renamed++;
     }
     await col.updateOne({ _id: video._id }, { $set: set });
@@ -191,12 +205,12 @@ export async function setEpisodeArtworkEnabled(folderId: string, enabled: boolea
 }
 
 /** One matched series: the episodes directly inside it, then each season subfolder's. */
-async function matchSeries(series: CatalogFolder, result: EpisodeMatchResult): Promise<void> {
+async function matchSeries(series: CatalogFolder, result: EpisodeMatchResult, force = false): Promise<void> {
   const seriesTmdbId = series.artwork!.tmdbId;
   // Episodes sitting straight in the series folder: season 1 unless the folder's name says
   // otherwise (a folder called "Attack on Titan" says nothing, and season 1 is the honest guess).
   const ownSeason = series.tmdbSeason ?? guessSeasonNumber(series.title, series.driveName) ?? 1;
-  await matchFolder(series._id, { seriesTmdbId, season: ownSeason }, result);
+  await matchFolder(series._id, { seriesTmdbId, season: ownSeason }, result, force);
 
   for (const child of await listChildFolders(series._id)) {
     const season = child.tmdbSeason ?? guessSeasonNumber(child.title, child.driveName);
@@ -204,12 +218,16 @@ async function matchSeries(series: CatalogFolder, result: EpisodeMatchResult): P
       result.unresolved.push({ folderId: child._id, name: child.title ?? child.driveName });
       continue;
     }
-    await matchFolder(child._id, { seriesTmdbId, season }, result);
+    await matchFolder(child._id, { seriesTmdbId, season }, result, force);
   }
 }
 
-/** Re-matches one series' episodes now, on the admin's say-so. */
-export async function matchEpisodesForSeries(folderId: string): Promise<EpisodeMatchResult> {
+/** Re-matches one series' episodes now, on the admin's say-so. With `force`, episode titles an
+ * admin typed by hand are replaced too — the deliberate version of the same button. */
+export async function matchEpisodesForSeries(
+  folderId: string,
+  options: { force?: boolean } = {},
+): Promise<EpisodeMatchResult> {
   const folder = await getCatalogFolder(folderId);
   if (!folder) throw new ArtworkLookupError("missing", "Not found");
   if (!env.tmdbApiKey) throw new ArtworkLookupError("no-key", "TMDB_API_KEY isn't set on the server");
@@ -217,7 +235,7 @@ export async function matchEpisodesForSeries(folderId: string): Promise<EpisodeM
     throw new ArtworkLookupError("not-found", "Match this series to TMDb first, then its episodes can be named.");
   }
   const result = empty();
-  await matchSeries(folder, result);
+  await matchSeries(folder, result, options.force ?? false);
   return result;
 }
 

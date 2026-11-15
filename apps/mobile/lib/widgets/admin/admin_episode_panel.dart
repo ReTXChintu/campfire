@@ -83,7 +83,10 @@ class _AdminEpisodeNamingPanelState extends State<AdminEpisodeNamingPanel> {
           style: _secondary,
         ),
         const SizedBox(height: 4),
-        const Text('An episode whose title you typed yourself is never renamed.', style: _tertiary),
+        const Text(
+          'An episode whose title you typed yourself is never renamed, unless you use the second button.',
+          style: _tertiary,
+        ),
         const SizedBox(height: 14),
         Wrap(
           spacing: 8,
@@ -97,6 +100,18 @@ class _AdminEpisodeNamingPanelState extends State<AdminEpisodeNamingPanel> {
                       if (mounted) setState(() => _result = result);
                     }),
               child: Text(_busy == 'match' ? 'Naming…' : 'Name episodes now'),
+            ),
+            OutlinedButton(
+              onPressed: _busy != null || !_enabled
+                  ? null
+                  : () => _run('force', () async {
+                      final result = await AdminCatalogService.matchEpisodes(
+                        widget.folderId,
+                        force: true,
+                      );
+                      if (mounted) setState(() => _result = result);
+                    }),
+              child: Text(_busy == 'force' ? 'Renaming…' : "Use TMDb's names for every episode"),
             ),
             OutlinedButton(
               onPressed: _busy != null

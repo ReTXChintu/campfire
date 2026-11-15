@@ -42,9 +42,13 @@ class AdminCatalogService {
     return (data as Map<String, dynamic>)['to'] as String;
   }
 
-  /// Name one series' episodes from TMDb now.
-  static Future<EpisodeMatchResult> matchEpisodes(String folderId) async {
-    final data = await ApiClient.post('/api/admin/catalog/artwork/folder/$folderId/episodes');
+  /// Name one series' episodes from TMDb now. [force] also replaces episode titles typed by
+  /// hand, which the ordinary pass deliberately leaves alone.
+  static Future<EpisodeMatchResult> matchEpisodes(String folderId, {bool force = false}) async {
+    final data = await ApiClient.post(
+      '/api/admin/catalog/artwork/folder/$folderId/episodes',
+      {'force': force},
+    );
     return EpisodeMatchResult.fromJson(data as Map<String, dynamic>);
   }
 

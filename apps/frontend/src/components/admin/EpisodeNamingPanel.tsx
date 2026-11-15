@@ -32,17 +32,25 @@ export default function EpisodeNamingPanel({
           : "Turned off. Episodes keep whatever names they already have."}
       </p>
       <p className="mt-1 text-xs text-text-tertiary">
-        An episode whose title you typed yourself is never renamed.
+        An episode whose title you typed yourself is never renamed, unless you use the second button.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => match.mutate()}
+          onClick={() => match.mutate({})}
           disabled={match.isPending || !enabled}
           className="rounded-md border border-divider px-3 py-1.5 text-sm text-white/90 transition hover:bg-white/5 disabled:opacity-50"
         >
-          {match.isPending ? "Naming…" : "Name episodes now"}
+          {match.isPending && !match.variables?.force ? "Naming…" : "Name episodes now"}
+        </button>
+        <button
+          type="button"
+          onClick={() => match.mutate({ force: true })}
+          disabled={match.isPending || !enabled}
+          className="rounded-md border border-divider px-3 py-1.5 text-sm text-white/90 transition hover:bg-white/5 disabled:opacity-50"
+        >
+          {match.isPending && match.variables?.force ? "Renaming…" : "Use TMDb's names for every episode"}
         </button>
         <button
           type="button"

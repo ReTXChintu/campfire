@@ -4,7 +4,11 @@
 // its catalog is read over the admin API and copied into a throwaway local database
 // (`campfire_visual`, dropped at the end); images come from TMDb's public CDN.
 //
-//   node apps/backend/scripts/visual-home.mjs <outDir> [prodBaseUrl]
+//   node apps/backend/scripts/visual-home.mjs <outDir> [prodBaseUrl] [--rename]
+//
+// --rename first presses the admin "use TMDb's titles" and "use TMDb's names for every episode"
+// buttons on the *local copy*, so the screenshots show what those do to a library full of raw
+// filenames. Production is never written to either way.
 //
 // Needs the backend .env (MONGODB_URI, admin login that also works on production, and
 // TMDB_API_KEY if the new metadata is to be fetched for real) and Chrome.
@@ -18,8 +22,10 @@ const require = createRequire(import.meta.url);
 const { MongoClient } = require("mongodb");
 const WebSocket = require("ws");
 
-const OUT = process.argv[2] || "visual-out";
-const PROD = process.argv[3] || "http://187.127.179.114:50001";
+const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const RENAME = process.argv.includes("--rename");
+const OUT = args[0] || "visual-out";
+const PROD = args[1] || "http://187.127.179.114:50001";
 const backendDir = join(import.meta.dirname, "..");
 const frontendDir = join(backendDir, "..", "frontend");
 // npm workspaces hoist vite to the repo root; vite's package exports hide bin/ from require.resolve.
@@ -123,6 +129,22 @@ try {
   for (let i = 0; i < 60 && !web.log.includes(String(WEB_PORT)); i++) await sleep(500);
 
   const token = await login(`http://127.0.0.1:${API_PORT}`);
+
+  if (RENAME) {
+    const admin = (path, body) =>
+      fetch(`http://127.0.0.1:${API_PORT}${path}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+      }).then((r) => r.json());
+    const renamed = await admin("/api/admin/catalog/artwork/use-tmdb-titles");
+    console.log(`renamed ${renamed.renamed?.length ?? 0} title(s):`);
+    for (const item of renamed.renamed ?? []) console.log(`  ${item.from}  ->  ${item.to}`);
+    for (const series of folders.filter((f) => f.artwork?.tmdbType === "tv")) {
+      const result = await admin(`/api/admin/catalog/artwork/folder/${series._id}/episodes`, { force: true });
+      console.log(`  ${series.title}: named ${result.matched ?? 0} episode(s), renaming ${result.renamed ?? 0}`);
+    }
+  }
 
   // 4. Headless Chrome over the DevTools protocol.
   start("C:/Program Files/Google/Chrome/Application/chrome.exe", [

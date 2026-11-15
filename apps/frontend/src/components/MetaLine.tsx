@@ -57,14 +57,16 @@ export default function MetaLine({
 
   return (
     <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-text-secondary ${className}`}>
+      {/* The separator rides with the item *before* it, so a line that wraps begins with a fact
+          rather than a stray dot — which on a phone otherwise reads as a bullet list. */}
       {parts.map((node, i) => (
         <span key={i} className="inline-flex items-center gap-2.5">
-          {i > 0 && (
+          {node}
+          {i < parts.length - 1 && (
             <span className="text-text-tertiary" aria-hidden="true">
               ·
             </span>
           )}
-          {node}
         </span>
       ))}
     </div>

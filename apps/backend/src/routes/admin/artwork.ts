@@ -64,10 +64,11 @@ router.post("/:kind/:id/use-tmdb-title", requireAdmin, async (req, res) => {
   }
 });
 
-/** Name this one series' episodes from TMDb now. */
+/** Name this one series' episodes from TMDb now. Body `{ force: true }` also replaces episode
+ * titles an admin typed by hand, which the ordinary pass deliberately leaves alone. */
 router.post("/folder/:id/episodes", requireAdmin, async (req, res) => {
   try {
-    res.json(await matchEpisodesForSeries(req.params.id));
+    res.json(await matchEpisodesForSeries(req.params.id, { force: req.body?.force === true }));
   } catch (error) {
     sendError(res, error);
   }
