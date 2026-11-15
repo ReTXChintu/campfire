@@ -9,7 +9,11 @@ import 'token_store.dart';
 class ApiException implements Exception {
   final String message;
   final int status;
-  ApiException(this.message, this.status);
+  /// The request body field the backend blamed, when it named one (`{ error, field }` — see
+  /// apps/backend/src/routes/requests.ts). Lets a form pin the server's own message to the right
+  /// input instead of duplicating its validation rules client-side.
+  final String? field;
+  ApiException(this.message, this.status, {this.field});
   @override
   String toString() => message;
 }
@@ -91,13 +95,15 @@ class ApiClient {
   static dynamic _decode(http.Response res) {
     if (res.statusCode < 200 || res.statusCode >= 300) {
       String message = res.reasonPhrase ?? 'Request failed';
+      String? field;
       try {
         final body = jsonDecode(res.body);
         if (body is Map && body['error'] is String) message = body['error'] as String;
+        if (body is Map && body['field'] is String) field = body['field'] as String;
       } catch (_) {
         // non-JSON error body — fall back to the status line above
       }
-      throw ApiException(message, res.statusCode);
+      throw ApiException(message, res.statusCode, field: field);
     }
     if (res.body.isEmpty) return null;
     return jsonDecode(res.body);
@@ -205,6 +211,31 @@ class ApiClient {
 
   static Future<dynamic> delete(String path) async {
     return _send('DELETE', path);
+  }
+
+  /// A POST whose body *is* the raw bytes, with their real Content-Type — there's no multipart
+  /// parser on the backend, so the request reference-image upload (and the admin stage route)
+  /// take the file this way. See apps/backend/src/routes/requests.ts's /reference-image.
+  static Future<dynamic> postBytes(String path, List<int> bytes, String contentType) async {
+    final uri = _uri(path);
+    final headers = await _headers();
+    headers['Content-Type'] = contentType;
+    final stopwatch = Stopwatch()..start();
+    _logRequest('POST', uri, headers, '<${bytes.length} bytes>');
+    try {
+      final res = await http.post(uri, headers: headers, body: bytes);
+      stopwatch.stop();
+      _logResponse('POST', uri, res, stopwatch.elapsed);
+      return _decode(res);
+    } on SocketException catch (e, stackTrace) {
+      stopwatch.stop();
+      _logFailure('POST', uri, e, stopwatch.elapsed, stackTrace);
+      rethrow;
+    } on http.ClientException catch (e, stackTrace) {
+      stopwatch.stop();
+      _logFailure('POST', uri, e, stopwatch.elapsed, stackTrace);
+      rethrow;
+    }
   }
 
   /// Mirrors apps/frontend/src/lib/api.ts's apiPostText — a POST with a raw text/plain body

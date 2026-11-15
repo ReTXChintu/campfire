@@ -28,6 +28,13 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
         // navigates straight there (see _joinWatchPartyByCode). Starting a *new* party still needs
         // an actual video open (WatchPartyOverlay's "Start Watch Party", since a party is always
         // tied to whatever's currently playing).
+        // The requests board is reachable from every screen that carries the top bar — on a
+        // phone there's no side rail to put it in (see the desktop prototype's rail entry).
+        IconButton(
+          icon: const Icon(Icons.auto_awesome_outlined, color: Colors.white),
+          tooltip: 'Requests',
+          onPressed: () => context.push('/requests'),
+        ),
         IconButton(
           icon: const Icon(Icons.group_add_outlined, color: Colors.white),
           tooltip: 'Join Watch Party',
@@ -47,6 +54,7 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
           onSelected: (value) {
             if (value == 'signout') auth.signOut();
             if (value == 'admin') context.push('/admin');
+            if (value == 'adminRequests') context.push('/admin/requests');
           },
           itemBuilder: (context) => [
             PopupMenuItem(
@@ -59,8 +67,10 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
             ),
             // Windows + the seeded admin account only — see app_router.dart's redirect, which is
             // the actual guard; this entry is just a shortcut, not itself a security boundary.
-            if (isDesktopAdminCapable && (auth.user?.isAdmin ?? false))
-              const PopupMenuItem(value: 'admin', child: Text('Admin')),
+            if (isDesktopAdminCapable && (auth.user?.isAdmin ?? false)) ...[
+              const PopupMenuItem(value: 'admin', child: Text('Admin · Catalog')),
+              const PopupMenuItem(value: 'adminRequests', child: Text('Admin · Requests')),
+            ],
             const PopupMenuItem(value: 'signout', child: Text('Sign out')),
           ],
         ),

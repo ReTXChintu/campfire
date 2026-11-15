@@ -3,9 +3,11 @@ import 'platform_info.dart';
 import 'screens/admin/admin_catalog_folder_page.dart';
 import 'screens/admin/admin_catalog_page.dart';
 import 'screens/admin/admin_catalog_video_page.dart';
+import 'screens/admin/admin_requests_page.dart';
 import 'screens/folder_screen.dart';
 import 'screens/library_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/requests_screen.dart';
 import 'screens/tv_pairing_login_screen.dart';
 import 'screens/watch_screen.dart';
 import 'services/auth_service.dart';
@@ -40,6 +42,13 @@ GoRouter buildRouter(AuthService auth) {
         builder: (context, state) => isAndroidTv ? const TvPairingLoginScreen() : const LoginScreen(),
       ),
       GoRoute(path: '/', builder: (context, state) => const LibraryScreen()),
+      // `?request=<id>` comes from a fulfilled-request spotlight slide — see
+      // widgets/spotlight_carousel.dart.
+      GoRoute(
+        path: '/requests',
+        builder: (context, state) =>
+            RequestsScreen(highlightRequestId: state.uri.queryParameters['request']),
+      ),
       GoRoute(
         path: '/folder/:folderId',
         builder: (context, state) => FolderScreen(folderId: state.pathParameters['folderId']!),
@@ -52,6 +61,7 @@ GoRouter buildRouter(AuthService auth) {
         ),
       ),
       GoRoute(path: '/admin', builder: (context, state) => const AdminCatalogPage()),
+      GoRoute(path: '/admin/requests', builder: (context, state) => const AdminRequestsPage()),
       GoRoute(
         path: '/admin/folder/:folderId',
         builder: (context, state) => AdminCatalogFolderPage(folderId: state.pathParameters['folderId']!),

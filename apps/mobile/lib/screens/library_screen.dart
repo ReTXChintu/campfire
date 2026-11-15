@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../models/catalog.dart';
 import '../services/catalog_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/folder_card.dart';
-import '../widgets/hero_banner.dart';
 import '../widgets/rail.dart';
+import '../widgets/spotlight_carousel.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/update_banner.dart';
 import '../widgets/video_card.dart';
@@ -48,21 +49,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
             }
             final data = snapshot.data!;
             if (data.empty) {
-              return const _ScrollableMessage('Your library is empty — curate something in the web admin to get started.');
+              return _ScrollableMessage(
+                'Your library is empty — curate something in the web admin to get started.',
+                action: FilledButton.icon(
+                  onPressed: () => context.push('/requests'),
+                  icon: const Icon(Icons.auto_awesome, size: 18),
+                  label: const Text('Request a title'),
+                ),
+              );
             }
 
             return ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
                 const UpdateBanner(),
-                if (data.hero != null)
-                  HeroBanner(
-                    title: data.hero!.title,
-                    badge: data.hero!.badge,
-                    playHref: data.hero!.playHref,
-                    infoHref: data.hero!.infoHref,
-                    thumbnailPath: data.hero!.thumbnailPath,
-                  ),
+                // `spotlight` supersedes the single `hero` the backend still sends for older
+                // installed builds — see the API contract, and models/catalog.dart.
+                if (data.spotlight.isNotEmpty) SpotlightCarousel(slides: data.spotlight),
                 if (data.continueWatching.isNotEmpty)
                   Rail(
                     title: 'Continue Watching',
@@ -91,13 +94,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
 class _ScrollableMessage extends StatelessWidget {
   final String text;
-  const _ScrollableMessage(this.text);
+  final Widget? action;
+  const _ScrollableMessage(this.text, {this.action});
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(24),
-      children: [Text(text, style: const TextStyle(color: AppColors.textSecondary))],
+      children: [
+        Text(text, style: const TextStyle(color: AppColors.textSecondary)),
+        if (action != null) ...[
+          const SizedBox(height: 16),
+          Align(alignment: Alignment.centerLeft, child: action!),
+        ],
+      ],
     );
   }
 }

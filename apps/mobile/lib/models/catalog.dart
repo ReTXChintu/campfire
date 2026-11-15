@@ -156,6 +156,53 @@ class HeroData {
   );
 }
 
+/// One slide of the Home spotlight carousel (`spotlight[]` on `GET /api/library`). Supersedes
+/// [HeroData], which the backend still sends for older installed builds — new code reads
+/// `spotlight` and ignores `hero`. `spotlight[0]` is always a library pick; fulfilled requests are
+/// interleaved from slide 2 onwards.
+class SpotlightSlide {
+  final String id;
+  /// "new" | "featured" | "request" — what the badge *says*, not what the item is.
+  final String kind;
+  final String title;
+  final String badge;
+  final String playHref;
+  final String? infoHref;
+  final String? thumbnailPath;
+  // Request slides only.
+  final String? requestId;
+  final String? requestedByName;
+  final bool youAsked;
+
+  const SpotlightSlide({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.badge,
+    required this.playHref,
+    this.infoHref,
+    this.thumbnailPath,
+    this.requestId,
+    this.requestedByName,
+    this.youAsked = false,
+  });
+
+  bool get isRequest => kind == 'request';
+
+  factory SpotlightSlide.fromJson(Map<String, dynamic> json) => SpotlightSlide(
+    id: json['id'] as String,
+    kind: json['kind'] as String? ?? 'featured',
+    title: json['title'] as String,
+    badge: json['badge'] as String? ?? '',
+    playHref: json['playHref'] as String,
+    infoHref: json['infoHref'] as String?,
+    thumbnailPath: json['thumbnailPath'] as String?,
+    requestId: json['requestId'] as String?,
+    requestedByName: json['requestedByName'] as String?,
+    youAsked: json['youAsked'] as bool? ?? false,
+  );
+}
+
 class ContinueWatchingEntry {
   final CatalogListItem item;
   final WatchProgress progress;
@@ -169,7 +216,10 @@ class ContinueWatchingEntry {
 
 class LibraryResponse {
   final bool empty;
+  /// Deprecated server-side, kept only so an older build keeps working — the carousel reads
+  /// [spotlight]. See widgets/spotlight_carousel.dart.
   final HeroData? hero;
+  final List<SpotlightSlide> spotlight;
   final List<ContinueWatchingEntry> continueWatching;
   final List<CatalogListItem> folders;
   final List<CatalogListItem> videos;
@@ -177,6 +227,7 @@ class LibraryResponse {
   const LibraryResponse({
     required this.empty,
     this.hero,
+    this.spotlight = const [],
     required this.continueWatching,
     required this.folders,
     required this.videos,
@@ -185,6 +236,9 @@ class LibraryResponse {
   factory LibraryResponse.fromJson(Map<String, dynamic> json) => LibraryResponse(
     empty: json['empty'] as bool,
     hero: json['hero'] == null ? null : HeroData.fromJson(json['hero'] as Map<String, dynamic>),
+    spotlight: (json['spotlight'] as List? ?? const [])
+        .map((e) => SpotlightSlide.fromJson(e as Map<String, dynamic>))
+        .toList(),
     continueWatching: (json['continueWatching'] as List)
         .map((e) => ContinueWatchingEntry.fromJson(e))
         .toList(),
