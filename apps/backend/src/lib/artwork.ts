@@ -25,6 +25,13 @@ import { parseReferenceLink, tmdbFetch } from "./referenceLink";
 
 export type ArtworkKind = "folder" | "video";
 
+/** One billed cast member, in TMDb's own billing order. */
+export type CatalogCastMember = {
+  name: string;
+  character: string | null;
+  profilePath: string | null; // TMDb image path for the headshot
+};
+
 export type CatalogArtwork = {
   source: "link" | "auto";
   tmdbType: "movie" | "tv";
@@ -35,6 +42,26 @@ export type CatalogArtwork = {
   backdropPath: string | null; // TMDb image path, e.g. "/abc123.jpg"
   posterPath: string | null;
   matchedAt: Date;
+
+  // Everything below came later, so it's all optional: a title matched by an older build has a
+  // doc without these fields, and re-matching it (or the next scan's auto-match top-up) fills
+  // them in. Readers must treat absent and null the same way.
+  /** The marketing one-liner ("Every hero has a beginning"), not the synopsis. */
+  tagline?: string | null;
+  /** A film's length, or a series' typical episode length. */
+  runtimeMinutes?: number | null;
+  /** At most three, in TMDb's order — enough for a facts line, not a tag cloud. */
+  genres?: string[];
+  /** Age rating as the local board writes it ("U/A 16+", "PG-13"), preferring India then the US. */
+  certificate?: string | null;
+  /** TMDb's own user score. Not IMDb's — TMDb doesn't publish those. */
+  rating?: { average: number; count: number } | null;
+  /** The title's wordmark on transparency, for the spotlight. */
+  logoPath?: string | null;
+  /** Series only. */
+  seasonCount?: number | null;
+  episodeCount?: number | null;
+  cast?: CatalogCastMember[];
 };
 
 /** The artwork fields both catalog collections carry. All optional — docs written before this
@@ -46,9 +73,40 @@ export type ArtworkFields = {
   /** The search last tried automatically without a match, so a scan doesn't repeat it every time.
    * A changed title produces a different key, so it is searched again. */
   artworkTriedFor?: string | null;
+  /** Folders only: which season of the matched series this folder holds. A series whose episodes
+   * sit directly in it is season 1; a "Season 2"/"S02" subfolder is 2. Guessed from the name and
+   * overridable in admin — see lib/episodeArtwork.ts. */
+  tmdbSeason?: number | null;
+  /** Folders only: an admin turned off naming this series' episodes from TMDb. */
+  episodeArtworkOff?: boolean;
+  /** Videos only: this video's episode on TMDb (name, synopsis, still). Set by the episode match,
+   * which needs the series' own `artwork` on an ancestor folder. */
+  episodeArtwork?: CatalogEpisodeArtwork | null;
 };
 
-type ArtworkDoc = { _id: string; parentFolderId: string; driveName: string; title: string | null } & ArtworkFields;
+/** One episode's TMDb data, matched by position within its season (see lib/episodeArtwork.ts).
+ * Separate from `artwork`, which means "this video is a film in its own right". */
+export type CatalogEpisodeArtwork = {
+  seriesTmdbId: string;
+  season: number;
+  episode: number;
+  name: string | null;
+  overview: string | null;
+  stillPath: string | null; // 16:9 frame from the episode itself
+  airDate: string | null; // ISO date, as TMDb gives it
+  runtimeMinutes: number | null;
+  rating: { average: number; count: number } | null;
+  matchedAt: Date;
+};
+
+type ArtworkDoc = {
+  _id: string;
+  parentFolderId: string;
+  driveName: string;
+  title: string | null;
+  /** Videos only (see CatalogVideo): an admin typed this title, so nothing rewrites it. */
+  titleOverridden?: boolean;
+} & ArtworkFields;
 
 async function collection(kind: ArtworkKind) {
   const db = await getDb();
@@ -137,7 +195,89 @@ function yearOf(r: TmdbResult): number | null {
   return /^\d{4}/.test(date) ? Number(date.slice(0, 4)) : null;
 }
 
-function toArtwork(r: TmdbResult, tmdbType: "movie" | "tv", source: CatalogArtwork["source"]): CatalogArtwork {
+/** An image from a `/images` block. `iso_639_1` is the language of the text burnt into it, and
+ * null means there is none — which is what a hero wants, since it draws the title itself. */
+type TmdbImage = { file_path?: string | null; iso_639_1?: string | null; vote_average?: number };
+
+/** A `/movie/{id}` or `/tv/{id}` response with everything we append to it in one round trip. */
+type TmdbDetail = TmdbResult & {
+  tagline?: string | null;
+  runtime?: number | null; // movie
+  episode_run_time?: number[]; // tv
+  genres?: { name?: string }[];
+  vote_average?: number;
+  vote_count?: number;
+  number_of_seasons?: number | null;
+  number_of_episodes?: number | null;
+  images?: { backdrops?: TmdbImage[]; posters?: TmdbImage[]; logos?: TmdbImage[] };
+  credits?: { cast?: TmdbCastEntry[] };
+  aggregate_credits?: { cast?: TmdbCastEntry[] };
+  release_dates?: { results?: { iso_3166_1?: string; release_dates?: { certification?: string }[] }[] };
+  content_ratings?: { results?: { iso_3166_1?: string; rating?: string }[] };
+};
+
+type TmdbCastEntry = {
+  name?: string;
+  character?: string | null;
+  roles?: { character?: string | null }[]; // tv aggregate_credits says it this way
+  profile_path?: string | null;
+  order?: number;
+};
+
+const MAX_CAST = 12;
+const MAX_GENRES = 3;
+// Whose age rating to show, most relevant first — this is an India-based library.
+const CERTIFICATE_COUNTRIES = ["IN", "US", "GB"];
+
+/** The best image of a kind. `textless` prefers one with no burnt-in words (for backdrops the
+ * hero writes over); otherwise English text is preferred over none, then anything. Within a
+ * group TMDb's own vote decides, which is what its site shows first. */
+function pickImage(images: TmdbImage[] | undefined, opts: { textless?: boolean } = {}): string | null {
+  const usable = (images ?? []).filter((i) => i.file_path && TMDB_PATH_RE.test(i.file_path));
+  if (usable.length === 0) return null;
+  const rank = (i: TmdbImage): number => {
+    const lang = i.iso_639_1 ?? null;
+    if (opts.textless) return lang === null ? 0 : lang === "en" ? 1 : 2;
+    return lang === "en" ? 0 : lang === null ? 1 : 2;
+  };
+  const best = [...usable].sort((a, b) => rank(a) - rank(b) || (b.vote_average ?? 0) - (a.vote_average ?? 0))[0];
+  return best.file_path!;
+}
+
+/** A logo has to be a PNG: TMDb also serves SVG wordmarks, and those can't go through the
+ * fixed-size image CDN paths the rest of this module caches. */
+function pickLogo(logos: TmdbImage[] | undefined): string | null {
+  const png = (logos ?? []).filter((l) => l.file_path?.toLowerCase().endsWith(".png"));
+  return pickImage(png);
+}
+
+function certificateOf(detail: TmdbDetail): string | null {
+  for (const country of CERTIFICATE_COUNTRIES) {
+    const movie = detail.release_dates?.results?.find((r) => r.iso_3166_1 === country);
+    const fromMovie = movie?.release_dates?.map((r) => r.certification?.trim()).find((c) => c);
+    if (fromMovie) return fromMovie;
+    const tv = detail.content_ratings?.results?.find((r) => r.iso_3166_1 === country);
+    if (tv?.rating?.trim()) return tv.rating.trim();
+  }
+  return null;
+}
+
+function castOf(detail: TmdbDetail): CatalogCastMember[] {
+  const entries = detail.aggregate_credits?.cast ?? detail.credits?.cast ?? [];
+  return [...entries]
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+    .slice(0, MAX_CAST)
+    .map((c) => ({
+      name: c.name?.trim() || "",
+      character: (c.character ?? c.roles?.[0]?.character)?.trim() || null,
+      profilePath: c.profile_path && TMDB_PATH_RE.test(c.profile_path) ? c.profile_path : null,
+    }))
+    .filter((c) => c.name);
+}
+
+function toArtwork(r: TmdbDetail, tmdbType: "movie" | "tv", source: CatalogArtwork["source"]): CatalogArtwork {
+  const runtime = tmdbType === "movie" ? r.runtime : r.episode_run_time?.[0];
+  const voteCount = r.vote_count ?? 0;
   return {
     source,
     tmdbType,
@@ -145,10 +285,46 @@ function toArtwork(r: TmdbResult, tmdbType: "movie" | "tv", source: CatalogArtwo
     title: r.title || r.name || "",
     year: yearOf(r),
     overview: r.overview?.trim() || null,
-    backdropPath: r.backdrop_path || null,
-    posterPath: r.poster_path || null,
+    // A hand-picked textless backdrop beats TMDb's default, which often has the title burnt in —
+    // the spotlight draws its own title over it. Falls back to the default when there's no
+    // `images` block (an older cached response, or a title with none).
+    backdropPath: pickImage(r.images?.backdrops, { textless: true }) ?? r.backdrop_path ?? null,
+    posterPath: pickImage(r.images?.posters) ?? r.poster_path ?? null,
     matchedAt: new Date(),
+    tagline: r.tagline?.trim() || null,
+    runtimeMinutes: typeof runtime === "number" && runtime > 0 ? runtime : null,
+    genres: (r.genres ?? []).map((g) => g.name?.trim()).filter((n): n is string => !!n).slice(0, MAX_GENRES),
+    certificate: certificateOf(r),
+    // A score with nobody behind it is noise, not information.
+    rating: typeof r.vote_average === "number" && r.vote_average > 0 && voteCount > 0
+      ? { average: Math.round(r.vote_average * 10) / 10, count: voteCount }
+      : null,
+    logoPath: pickLogo(r.images?.logos),
+    seasonCount: tmdbType === "tv" ? (r.number_of_seasons ?? null) : null,
+    episodeCount: tmdbType === "tv" ? (r.number_of_episodes ?? null) : null,
+    cast: castOf(r),
   };
+}
+
+/** The full record for a title. A search result alone carries only a name, year and two images,
+ * so every match ends with this one extra call — `append_to_response` keeps it to one request,
+ * and `include_image_language` limits the image lists to ones we would actually choose. */
+async function fetchDetail(type: "movie" | "tv", id: string | number): Promise<TmdbDetail | null> {
+  return tmdbFetch<TmdbDetail>(`/${type}/${id}`, {
+    append_to_response: type === "movie" ? "images,credits,release_dates" : "images,aggregate_credits,content_ratings",
+    include_image_language: "en,null",
+  });
+}
+
+/** Search result → artwork, by way of the detail call. Falls back to the search result alone if
+ * the detail call fails, so a TMDb hiccup still leaves a matched title with its images. */
+async function detailedArtwork(
+  r: TmdbResult,
+  type: "movie" | "tv",
+  source: CatalogArtwork["source"],
+): Promise<CatalogArtwork> {
+  const detail = await fetchDetail(type, r.id);
+  return toArtwork(detail ? { ...r, ...detail } : r, type, source);
 }
 
 /** The confident pick from a search, or null. A name has to match exactly (after normalising);
@@ -189,7 +365,7 @@ async function search(kind: ArtworkKind, query: string, year: number | null): Pr
       include_adult: "false",
     });
     const match = found ? pickMatch(found.results ?? [], query, year) : null;
-    if (match) return toArtwork(match, type, "auto");
+    if (match) return detailedArtwork(match, type, "auto");
   }
   return null;
 }
@@ -200,16 +376,16 @@ async function fromLink(link: string): Promise<CatalogArtwork | null> {
   if (!parsed) return null;
   if (parsed.source === "tmdb") {
     const type = parsed.type === "series" ? "tv" : "movie";
-    const raw = await tmdbFetch<TmdbResult>(`/${type}/${parsed.id}`, {});
+    const raw = await fetchDetail(type, parsed.id);
     return raw ? toArtwork(raw, type, "link") : null;
   }
   const found = await tmdbFetch<{ movie_results: TmdbResult[]; tv_results: TmdbResult[] }>(`/find/${parsed.id}`, {
     external_source: "imdb_id",
   });
   const movie = found?.movie_results?.[0];
-  if (movie) return toArtwork(movie, "movie", "link");
+  if (movie) return detailedArtwork(movie, "movie", "link");
   const tv = found?.tv_results?.[0];
-  if (tv) return toArtwork(tv, "tv", "link");
+  if (tv) return detailedArtwork(tv, "tv", "link");
   return null;
 }
 
@@ -242,20 +418,33 @@ async function getDoc(kind: ArtworkKind, id: string): Promise<ArtworkDoc> {
   return doc;
 }
 
-async function save(kind: ArtworkKind, id: string, set: Partial<ArtworkFields>): Promise<void> {
+async function save(
+  kind: ArtworkKind,
+  id: string,
+  set: Partial<ArtworkFields> & { title?: string },
+): Promise<void> {
   await (await collection(kind)).updateOne({ _id: id }, { $set: set });
+}
+
+/** The `{ title }` to write alongside a new match, or nothing. Skipped when an admin typed the
+ * title themselves (videos carry that flag) and whenever the names aren't the same title — see
+ * cleanedTitle. */
+function titleUpdate(doc: ArtworkDoc, artwork: CatalogArtwork): { title?: string } {
+  if (doc.titleOverridden) return {};
+  const title = cleanedTitle(doc.title, artwork);
+  return title ? { title } : {};
 }
 
 /** Admin pasted a link: resolve it and make it this title's artwork. */
 export async function setArtworkFromLink(kind: ArtworkKind, id: string, link: string): Promise<CatalogArtwork> {
-  await getDoc(kind, id);
+  const doc = await getDoc(kind, id);
   if (!env.tmdbApiKey) throw new ArtworkLookupError("no-key", "TMDB_API_KEY isn't set on the server");
   if (!parseReferenceLink(link)) {
     throw new ArtworkLookupError("bad-link", "Paste an IMDb link (imdb.com/title/tt…) or a TMDb movie or TV link");
   }
   const artwork = await fromLink(link);
   if (!artwork) throw new ArtworkLookupError("not-found", "TMDb doesn't have that title");
-  await save(kind, id, { artwork, artworkAutoOff: false });
+  await save(kind, id, { artwork, artworkAutoOff: false, ...titleUpdate(doc, artwork) });
   warmImage(artwork);
   return artwork;
 }
@@ -273,7 +462,7 @@ export async function matchArtworkNow(kind: ArtworkKind, id: string): Promise<Ca
       `No confident match for "${query}"${year ? ` (${year})` : ""}. Paste its IMDb or TMDb link instead.`,
     );
   }
-  await save(kind, id, { artwork, artworkAutoOff: false, artworkTriedFor: key });
+  await save(kind, id, { artwork, artworkAutoOff: false, artworkTriedFor: key, ...titleUpdate(doc, artwork) });
   warmImage(artwork);
   return artwork;
 }
@@ -288,6 +477,10 @@ export type AutoMatchResult = {
   skipped?: "no-key";
   matched: { kind: ArtworkKind; id: string; name: string; tmdbTitle: string; year: number | null }[];
   unmatched: { kind: ArtworkKind; id: string; name: string; query: string; year: number | null }[];
+  /** Titles whose own name was replaced with TMDb's, as "<before>" → "<after>". */
+  renamed: { kind: ArtworkKind; id: string; from: string; to: string }[];
+  /** Already-matched titles topped up with the metadata a newer build knows how to fetch. */
+  enriched: number;
 };
 
 let running: Promise<AutoMatchResult> | null = null;
@@ -301,11 +494,31 @@ export function autoMatchArtwork(options: { retry?: boolean } = {}): Promise<Aut
 }
 
 async function runAutoMatch(retry: boolean): Promise<AutoMatchResult> {
-  const result: AutoMatchResult = { matched: [], unmatched: [] };
+  const result: AutoMatchResult = { matched: [], unmatched: [], renamed: [], enriched: 0 };
   if (!env.tmdbApiKey) return { ...result, skipped: "no-key" };
 
   for (const kind of ["folder", "video"] as const) {
     const col = await collection(kind);
+
+    // Pass 1: titles matched by an earlier build, before there was anything to store beyond two
+    // image paths. `artwork.cast` is the marker — set on every match this build makes, even when
+    // the list comes back empty. Re-fetching is one call each and happens once.
+    const stale = await col
+      .find({ artwork: { $ne: null }, "artwork.cast": { $exists: false } })
+      .toArray();
+    for (const doc of stale) {
+      const old = doc.artwork!;
+      const detail = await fetchDetail(old.tmdbType, old.tmdbId);
+      if (!detail) continue;
+      const artwork = { ...toArtwork(detail, old.tmdbType, old.source), matchedAt: old.matchedAt };
+      const rename = titleUpdate(doc, artwork);
+      await col.updateOne({ _id: doc._id }, { $set: { artwork, ...rename } });
+      warmImage(artwork);
+      result.enriched++;
+      if (rename.title) result.renamed.push({ kind, id: doc._id, from: doc.title!, to: rename.title });
+    }
+
+    // Pass 2: top-level titles with no match yet.
     const docs = await col
       .find({ parentFolderId: env.driveRootFolderId, artwork: null, artworkAutoOff: { $ne: true } })
       .toArray();
@@ -319,16 +532,19 @@ async function runAutoMatch(retry: boolean): Promise<AutoMatchResult> {
       }
       const artwork = await search(kind, query, year);
       if (artwork) {
+        const rename = titleUpdate(doc, artwork);
         // `artwork: null` again in the filter: an admin may have pasted a link meanwhile.
-        await col.updateOne({ _id: doc._id, artwork: null }, { $set: { artwork, artworkTriedFor: key } });
+        await col.updateOne({ _id: doc._id, artwork: null }, { $set: { artwork, artworkTriedFor: key, ...rename } });
         warmImage(artwork);
         result.matched.push({ kind, id: doc._id, name, tmdbTitle: artwork.title, year: artwork.year });
+        if (rename.title) result.renamed.push({ kind, id: doc._id, from: name, to: rename.title });
       } else {
         await col.updateOne({ _id: doc._id }, { $set: { artworkTriedFor: key } });
         result.unmatched.push({ kind, id: doc._id, name, query, year });
       }
     }
   }
+
   return result;
 }
 
@@ -338,13 +554,18 @@ async function runAutoMatch(retry: boolean): Promise<AutoMatchResult> {
 // 2:3, for the web's poster-shaped cards, which ask for them with ?shape=poster.
 const BACKDROP_SIZE = "w1280";
 const POSTER_SIZE = "w780";
+const LOGO_SIZE = "w500";
+const STILL_SIZE = "w780";
+const PROFILE_SIZE = "w185";
 
-/** The frame an image is for: "wide" (16:9 cards, heroes — the default, and all older clients ask
- * for) or "poster" (2:3 cards). */
-export type ArtworkShape = "wide" | "poster";
+/** The frame an image is for: "wide" (16:9 cards, heroes — the default, and what every older
+ * client asks for), "poster" (2:3 cards), or "logo" (the title's wordmark on transparency, which
+ * unlike the others has no fallback — a title without one gets a 404 and the client writes the
+ * title in text, as it always has). */
+export type ArtworkShape = "wide" | "poster" | "logo";
 
 export function parseArtworkShape(value: unknown): ArtworkShape {
-  return value === "poster" ? "poster" : "wide";
+  return value === "poster" ? "poster" : value === "logo" ? "logo" : "wide";
 }
 const TMDB_PATH_RE = /^\/[A-Za-z0-9_-]{4,64}\.(jpg|jpeg|png|webp)$/;
 const DOWNLOAD_TIMEOUT_MS = 15000;
@@ -358,15 +579,37 @@ export function artworkImage(
   artwork: CatalogArtwork | null | undefined,
   shape: ArtworkShape = "wide",
 ): ArtworkImage | null {
-  const backdrop =
-    artwork?.backdropPath && TMDB_PATH_RE.test(artwork.backdropPath)
-      ? { tmdbPath: artwork.backdropPath, size: BACKDROP_SIZE }
-      : null;
-  const poster =
-    artwork?.posterPath && TMDB_PATH_RE.test(artwork.posterPath)
-      ? { tmdbPath: artwork.posterPath, size: POSTER_SIZE }
-      : null;
+  const at = (path: string | null | undefined, size: string): ArtworkImage | null =>
+    path && TMDB_PATH_RE.test(path) ? { tmdbPath: path, size } : null;
+  // A wordmark is never substituted with a photo: half a logo treatment looks worse than none.
+  if (shape === "logo") return at(artwork?.logoPath, LOGO_SIZE);
+  const backdrop = at(artwork?.backdropPath, BACKDROP_SIZE);
+  const poster = at(artwork?.posterPath, POSTER_SIZE);
   return shape === "poster" ? (poster ?? backdrop) : (backdrop ?? poster);
+}
+
+/** An episode's own still, for its card and the player header. Shape-independent: a still is
+ * always 16:9, so a poster-shaped card crops it rather than showing the wrong picture. */
+export function episodeStillImage(episode: CatalogEpisodeArtwork | null | undefined): ArtworkImage | null {
+  const path = episode?.stillPath;
+  return path && TMDB_PATH_RE.test(path) ? { tmdbPath: path, size: STILL_SIZE } : null;
+}
+
+/** A cast member's headshot. Served by index into the title's stored `cast`, so no client ever
+ * supplies a TMDb path. */
+export function castImage(artwork: CatalogArtwork | null | undefined, index: number): ArtworkImage | null {
+  const path = artwork?.cast?.[index]?.profilePath;
+  return path && TMDB_PATH_RE.test(path) ? { tmdbPath: path, size: PROFILE_SIZE } : null;
+}
+
+/** What a video's card and player header show, in order: its own film artwork (a top-level
+ * movie), then its episode still, then — handled by the caller — Drive's own frame grab. */
+export function videoImage(
+  video: { artwork?: CatalogArtwork | null; episodeArtwork?: CatalogEpisodeArtwork | null },
+  shape: ArtworkShape = "wide",
+): ArtworkImage | null {
+  if (shape === "logo") return artworkImage(video.artwork, "logo");
+  return artworkImage(video.artwork, shape) ?? episodeStillImage(video.episodeArtwork);
 }
 
 type FolderImageFields = { thumbnailFileId: string | null } & ArtworkFields;
@@ -380,7 +623,9 @@ export function folderImageSource(
 ): { kind: "artwork"; image: ArtworkImage } | { kind: "drive"; fileId: string } | null {
   const image = artworkImage(folder.artwork, shape);
   if (image) return { kind: "artwork", image };
-  if (folder.thumbnailFileId) return { kind: "drive", fileId: folder.thumbnailFileId };
+  // A Drive thumbnail is a picture, never a wordmark — it can stand in for a backdrop or poster
+  // but not for a logo.
+  if (shape !== "logo" && folder.thumbnailFileId) return { kind: "drive", fileId: folder.thumbnailFileId };
   return null;
 }
 
@@ -448,9 +693,34 @@ async function ensureImage(image: ArtworkImage, fileName: string, recentlyFailed
   }
 }
 
-/** Fetches a newly matched title's image in the background, so the first person to open the
- * library doesn't wait on TMDb. */
-function warmImage(artwork: CatalogArtwork): void {
-  const image = artworkImage(artwork);
-  if (image) void artworkImageFile(image);
+/** Fetches a newly matched title's images in the background, so the first person to open the
+ * library doesn't wait on TMDb. All three shapes, because web asks for posters and the spotlight
+ * asks for logos — one title is three small downloads, done once. */
+export function warmImage(artwork: CatalogArtwork): void {
+  for (const shape of ["wide", "poster", "logo"] as const) {
+    const image = artworkImage(artwork, shape);
+    if (image) void artworkImageFile(image);
+  }
+}
+
+/** The TMDb title, when it's safe to use as this item's own title. Null means "keep what we have",
+ * which is the answer unless one of two things is true:
+ *
+ *  - the names already are the same title, down to punctuation and case ("House of The Dragon" →
+ *    "House of the Dragon", "Avengers Endgame" → "Avengers: Endgame"); or
+ *  - what we have is that title plus release noise — a year, a resolution, a codec, a rip tag
+ *    ("Gargi.2022.1080p.HD.mkv" → "Gargi").
+ *
+ * Anything else is left alone, because the difference may well be deliberate: "The Office (US)"
+ * is not an untidy "The Office", and "Gargi — Director's Cut" is not "Gargi". The one thing this
+ * must never do is overwrite a distinction an admin drew on purpose. */
+export function cleanedTitle(current: string | null, artwork: CatalogArtwork): string | null {
+  const tmdbTitle = artwork.title.trim();
+  if (!tmdbTitle || !current) return null;
+  if (current.trim() === tmdbTitle) return null;
+  const target = normaliseTitle(tmdbTitle);
+  if (normaliseTitle(current) === target) return tmdbTitle;
+  const { query, year } = parseReleaseName(current);
+  const hadReleaseNoise = year != null || RELEASE_JUNK_RE.test(current);
+  return hadReleaseNoise && normaliseTitle(query) === target ? tmdbTitle : null;
 }

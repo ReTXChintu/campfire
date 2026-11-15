@@ -12,6 +12,7 @@ import {
   setFolderPublishRule,
   type CatalogFolderPublishRule,
 } from "../../lib/catalogFolders";
+import { guessSeasonNumber } from "../../lib/episodeArtwork";
 import {
   listVideosByParent,
   applyRuleToVideo,
@@ -37,7 +38,22 @@ router.get("/:folderId", requireAdmin, async (req, res) => {
 
   // Only top-level folders (series) get artwork — seasons inside one don't.
   const isTopLevel = folder.parentFolderId === env.driveRootFolderId;
-  res.json({ folder, breadcrumbs, childFolders, childVideos, isTopLevel });
+
+  // A season folder inside a matched series: the admin panel offers to set which season it is,
+  // which is what lets this folder's episodes be named from TMDb. Null for anything else.
+  const parent = isTopLevel ? null : await getCatalogFolder(folder.parentFolderId);
+  const episodeSeries =
+    parent?.artwork?.tmdbType === "tv"
+      ? {
+          folderId: parent._id,
+          title: parent.artwork.title,
+          /** Set on this folder by an admin, else what its name says, else unknown. */
+          season: folder.tmdbSeason ?? guessSeasonNumber(folder.title, folder.driveName),
+          seasonFromName: folder.tmdbSeason == null,
+        }
+      : null;
+
+  res.json({ folder, breadcrumbs, childFolders, childVideos, isTopLevel, episodeSeries });
 });
 
 router.patch("/:folderId", requireAdmin, async (req, res) => {

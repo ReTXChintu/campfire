@@ -22,6 +22,8 @@ import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
 import { listedThumbnailFileId } from "../lib/artwork";
+import { episodeMeta, titleMeta } from "../lib/catalogMeta";
+import type { CatalogArtwork, CatalogEpisodeArtwork } from "../lib/artwork";
 
 const router = Router();
 
@@ -36,6 +38,9 @@ type SpotlightSlide = {
   playHref: string;
   infoHref: string | null;
   thumbnailPath: string | null;
+  /** The title's wordmark, when TMDb has one — the client draws it instead of the title text,
+   * and falls back to the text when this is null. */
+  logoPath: string | null;
   /** Request slides only. */
   requestId?: string;
   requestedByName?: string | null;
@@ -44,16 +49,25 @@ type SpotlightSlide = {
   youAsked?: boolean;
 };
 
-type SpotlightSource = { kind: "folder" | "video"; id: string; name: string; thumbnailFileId?: string | null };
+type SpotlightSource = {
+  kind: "folder" | "video";
+  id: string;
+  name: string;
+  thumbnailFileId?: string | null;
+  hasLogo?: boolean;
+};
 
 /** Resolves an item to the hrefs/thumbnail a slide needs. A folder plays its first episode, which
  * is why this is async — same rule the single hero has always used. */
-async function toSlideTargets(item: SpotlightSource): Promise<Pick<SpotlightSlide, "playHref" | "infoHref" | "thumbnailPath">> {
+async function toSlideTargets(
+  item: SpotlightSource,
+): Promise<Pick<SpotlightSlide, "playHref" | "infoHref" | "thumbnailPath" | "logoPath">> {
   if (item.kind === "video") {
     return {
       playHref: `/watch/${item.id}`,
       infoHref: null,
       thumbnailPath: `/api/thumbnail/${item.id}`,
+      logoPath: item.hasLogo ? `/api/thumbnail/${item.id}?shape=logo` : null,
     };
   }
 
@@ -68,6 +82,39 @@ async function toSlideTargets(item: SpotlightSource): Promise<Pick<SpotlightSlid
     playHref: episodes[0] ? `/watch/${episodes[0].id}` : `/folder/${item.id}`,
     infoHref: `/folder/${item.id}`,
     thumbnailPath: item.thumbnailFileId ? `/api/thumbnail-folder/${item.id}` : null,
+    logoPath: item.hasLogo ? `/api/thumbnail-folder/${item.id}?shape=logo` : null,
+  };
+}
+
+/** The TMDb facts small enough to fit on a card: a year and a score. Absent on anything
+ * unmatched, and ignored by clients that predate them. */
+function cardFacts(doc: { artwork?: CatalogArtwork | null }) {
+  return { year: doc.artwork?.year ?? null, rating: doc.artwork?.rating ?? null };
+}
+
+/** An episode row: the library's own ordering fields plus whatever TMDb knows about it. `name`
+ * is already the real episode name by this point — the episode match writes it onto the video's
+ * own title (see lib/episodeArtwork.ts) — and `episodeNumber` is what an "E4" label should read,
+ * which is TMDb's number rather than the row's position. */
+function episodeRow(v: {
+  _id: string;
+  title: string | null;
+  mimeType: string;
+  episodeOrder: number | null;
+  episodeArtwork?: CatalogEpisodeArtwork | null;
+}) {
+  const episode = episodeMeta(v.episodeArtwork);
+  return {
+    kind: "video" as const,
+    id: v._id,
+    name: v.title!,
+    mimeType: v.mimeType,
+    episodeOrder: v.episodeOrder,
+    episodeNumber: episode?.number ?? v.episodeOrder,
+    overview: episode?.overview ?? null,
+    runtimeMinutes: episode?.runtimeMinutes ?? null,
+    rating: episode?.rating ?? null,
+    airDate: episode?.airDate ?? null,
   };
 }
 
@@ -86,10 +133,17 @@ router.get("/library", requireAuth, async (req, res) => {
       id: f._id,
       name: f.title!,
       thumbnailFileId: listedThumbnailFileId(f),
+      ...cardFacts(f),
     })),
   );
   const videos = naturalSort(
-    videoDocs.map((v) => ({ kind: "video" as const, id: v._id, name: v.title!, mimeType: v.mimeType })),
+    videoDocs.map((v) => ({
+      kind: "video" as const,
+      id: v._id,
+      name: v.title!,
+      mimeType: v.mimeType,
+      ...cardFacts(v),
+    })),
   );
   const items: (CatalogListItem & { curatedAt: Date | null })[] = [
     ...folderDocs.map((f) => ({
@@ -97,14 +151,18 @@ router.get("/library", requireAuth, async (req, res) => {
       id: f._id,
       name: f.title!,
       thumbnailFileId: listedThumbnailFileId(f),
+      hasLogo: !!f.artwork?.logoPath,
       curatedAt: f.curatedAt,
+      ...cardFacts(f),
     })),
     ...videoDocs.map((v) => ({
       kind: "video" as const,
       id: v._id,
       name: v.title!,
       mimeType: v.mimeType,
+      hasLogo: !!v.artwork?.logoPath,
       curatedAt: v.curatedAt,
+      ...cardFacts(v),
     })),
   ];
 
@@ -189,6 +247,7 @@ router.get("/library", requireAuth, async (req, res) => {
           id: request.catalogRef.id,
           name: target.title ?? request.title,
           thumbnailFileId: "thumbnailFileId" in target ? listedThumbnailFileId(target) : null,
+          hasLogo: !!target.artwork?.logoPath,
         };
         return {
           id: request.catalogRef.id,
@@ -228,6 +287,7 @@ router.get("/library", requireAuth, async (req, res) => {
       playHref: heroTargets.playHref,
       infoHref: heroTargets.infoHref,
       thumbnailPath: heroTargets.thumbnailPath,
+      logoPath: heroTargets.logoPath,
     },
     continueWatching: continueWatchingItems,
     folders,
@@ -265,8 +325,9 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
         id: f._id,
         name: f.title!,
         thumbnailFileId: listedThumbnailFileId(f),
+        ...cardFacts(f),
       })),
-      ...videoDocs.map((v) => ({ kind: "video" as const, id: v._id, name: v.title!, mimeType: v.mimeType })),
+      ...videoDocs.map(episodeRow),
     ]);
     res.json({
       mode: "flat",
@@ -274,8 +335,9 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
       title: folder.title,
       backHref,
       thumbnailFileId: listedThumbnailFileId(folder),
-      year: folder.artwork?.year ?? null,
-      overview: folder.artwork?.overview ?? null,
+      // `year` and `overview` are part of this — same field names as before, so an older client
+      // keeps reading exactly what it used to and ignores the rest.
+      ...titleMeta(folder.artwork, "folder", folderId),
       items,
       progress: progressList,
     });
@@ -298,24 +360,8 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
     getProgressForFolder(req.authUser!.userId, selectedSeasonId, folderId),
   ]);
 
-  const seasonItems = orderEpisodes(
-    seasonVideoDocs.map((v) => ({
-      kind: "video" as const,
-      id: v._id,
-      name: v.title!,
-      mimeType: v.mimeType,
-      episodeOrder: v.episodeOrder,
-    })),
-  );
-  const specialItems = orderEpisodes(
-    specialVideoDocs.map((v) => ({
-      kind: "video" as const,
-      id: v._id,
-      name: v.title!,
-      mimeType: v.mimeType,
-      episodeOrder: v.episodeOrder,
-    })),
-  );
+  const seasonItems = orderEpisodes(seasonVideoDocs.map(episodeRow));
+  const specialItems = orderEpisodes(specialVideoDocs.map(episodeRow));
 
   res.json({
     mode: "series",
@@ -323,8 +369,7 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
     title: folder.title,
     backHref,
     thumbnailFileId: listedThumbnailFileId(folder),
-    year: folder.artwork?.year ?? null,
-    overview: folder.artwork?.overview ?? null,
+    ...titleMeta(folder.artwork, "folder", folderId),
     seasons,
     selectedSeasonId,
     seasonItems,
@@ -351,7 +396,7 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
 
   let nextFileId: string | null = null;
   let previousFileId: string | null = null;
-  let episodes: { id: string; name: string }[] = [];
+  let episodes: ReturnType<typeof episodeRow>[] = [];
   let progressByFileId: Record<string, { positionSeconds: number; durationSeconds: number; completed: boolean }> = {};
 
   if (!isStandalone) {
@@ -359,9 +404,7 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
       listPublishedVideosByParent(parentFolderId),
       getProgressForFolder(req.authUser!.userId, parentFolderId),
     ]);
-    const episodeList = orderEpisodes(
-      episodeDocs.map((e) => ({ id: e._id, name: e.title!, episodeOrder: e.episodeOrder })),
-    );
+    const episodeList = orderEpisodes(episodeDocs.map(episodeRow));
     const index = episodeList.findIndex((e) => e.id === fileId);
     nextFileId = index >= 0 ? (episodeList[index + 1]?.id ?? null) : null;
     previousFileId = index >= 0 ? (episodeList[index - 1]?.id ?? null) : null;
@@ -409,9 +452,11 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   res.json({
     fileId,
     title: video.title,
-    // From the movie's TMDb match, when it has one (episodes don't).
-    year: video.artwork?.year ?? null,
-    overview: video.artwork?.overview ?? null,
+    // From the film's own TMDb match when it is one (`year`/`overview` keep their old names, so
+    // an older client is unaffected); `episode` is the other case — a series episode, whose
+    // synopsis and number come from its series' season listing instead.
+    ...titleMeta(video.artwork, "video", fileId),
+    episode: episodeMeta(video.episodeArtwork),
     backHref,
     parentFolderId,
     nextFileId,

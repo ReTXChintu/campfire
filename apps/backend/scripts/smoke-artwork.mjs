@@ -16,7 +16,8 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MongoClient } from "mongodb";
-import { parseReleaseName, pickMatch } from "../src/lib/artwork.ts";
+import { cleanedTitle, parseReleaseName, pickMatch } from "../src/lib/artwork.ts";
+import { guessSeasonNumber } from "../src/lib/episodeArtwork.ts";
 
 let pass = 0;
 const failures = [];
@@ -60,6 +61,37 @@ for (const [raw, query, year] of names) {
   check(`"${raw.slice(0, 60)}" → "${query}"${year ? ` ${year}` : ""}`, got.query === query && got.year === year, JSON.stringify(got));
 }
 
+console.log("\nTitles safe to replace");
+const asArtwork = (title) => ({ source: "auto", tmdbType: "movie", tmdbId: "1", title, year: null, overview: null, backdropPath: null, posterPath: null, matchedAt: new Date() });
+const cleans = [
+  ["Gargi.2022.1080p.HD.mkv", "Gargi", "Gargi"],
+  ["House of The Dragon", "House of the Dragon", "House of the Dragon"],
+  ["Weapons (2025) Dual Audio 1080p", "Weapons", "Weapons"],
+  // Already right, or deliberately not the same title — left alone either way.
+  ["Gargi", "Gargi", null],
+  ["Gargi - Director's Cut", "Gargi", null],
+  ["The Office (US)", "The Office", null],
+  ["Avengers Endgame", "Avengers: Endgame", "Avengers: Endgame"],
+];
+for (const [current, tmdbTitle, expected] of cleans) {
+  const got = cleanedTitle(current, asArtwork(tmdbTitle));
+  check(`"${current}" + "${tmdbTitle}" → ${expected === null ? "kept" : `"${expected}"`}`, got === expected, JSON.stringify(got));
+}
+check("a title we have nothing for is left alone", cleanedTitle(null, asArtwork("Gargi")) === null);
+
+console.log("\nSeason numbers in folder names");
+const seasonNames = [
+  ["Season 1", 1], ["Season 02", 2], ["season-3", 3], ["S4", 4], ["S05", 5],
+  ["Series 2", 2], ["2", 2], ["Specials", 0], ["Extras", 0],
+  ["India's got Latent s2", 2], ["Attack on Titan", null], ["Behind The Scenes", null],
+  ["Stranger Things", null], ["Part One", null],
+];
+for (const [name, expected] of seasonNames) {
+  const got = guessSeasonNumber(name);
+  check(`"${name}" → ${expected === null ? "unknown" : expected}`, got === expected, JSON.stringify(got));
+}
+check("the Drive name is used when the title has lost the hint", guessSeasonNumber("India's Got Latent", "India's got Latent s2") === 2);
+
 console.log("\nMatch picking");
 const weapons = { id: 1, title: "Weapons", release_date: "2025-08-06", popularity: 80 };
 const weaponsOld = { id: 2, title: "Weapons", release_date: "2007-03-01", popularity: 2 };
@@ -100,14 +132,95 @@ const tmdb = {
     Gargi: [{ id: 5, title: "Gargi", release_date: "2022-07-15", backdrop_path: "/brokenOnCdn.jpg" }],
   },
 };
+// Detail responses, as TMDb returns them for `/movie/{id}` and `/tv/{id}` with everything
+// appended. These carry the facts, the image lists and the cast — the deliberately awkward bits
+// are what the checks below are about: a higher-voted English backdrop that must lose to a
+// textless one, a higher-voted Hindi poster that must lose to the English one, an SVG wordmark
+// that must be skipped for the PNG, a blank Indian certificate that must fall through to the
+// real one, and four genres where only three are kept.
+const details = {
+  "movie/1078605": {
+    id: 1078605, title: "Weapons", release_date: "2025-08-06", overview: "Kids vanish.",
+    backdrop_path: "/weaponsBackdrop.jpg", poster_path: "/weaponsPoster.jpg",
+    tagline: "Who took the children?", runtime: 128, vote_average: 7.432, vote_count: 1200,
+    genres: [{ name: "Horror" }, { name: "Mystery" }, { name: "Thriller" }, { name: "Drama" }],
+    images: {
+      backdrops: [
+        { file_path: "/weaponsTexted.jpg", iso_639_1: "en", vote_average: 9 },
+        { file_path: "/weaponsClean.jpg", iso_639_1: null, vote_average: 4 },
+      ],
+      posters: [
+        { file_path: "/weaponsEnPoster.jpg", iso_639_1: "en", vote_average: 5 },
+        { file_path: "/weaponsHiPoster.jpg", iso_639_1: "hi", vote_average: 9 },
+      ],
+      logos: [
+        { file_path: "/weaponsLogo.svg", iso_639_1: "en", vote_average: 10 },
+        { file_path: "/weaponsLogo.png", iso_639_1: "en", vote_average: 6 },
+      ],
+    },
+    credits: {
+      cast: [
+        { name: "Josh Brolin", character: "Archer Graff", profile_path: "/brolin.jpg", order: 1 },
+        { name: "Julia Garner", character: "Justine Gandy", profile_path: "/garner.jpg", order: 0 },
+        { name: "Nobody Pictured", character: "Extra", profile_path: null, order: 2 },
+      ],
+    },
+    release_dates: {
+      results: [
+        { iso_3166_1: "US", release_dates: [{ certification: "R" }] },
+        { iso_3166_1: "IN", release_dates: [{ certification: "" }, { certification: "A" }] },
+      ],
+    },
+  },
+  "movie/43949": {
+    id: 43949, title: "Flipped", release_date: "2010-08-06", overview: "First love.",
+    backdrop_path: "/flippedBackdrop.jpg", poster_path: "/flippedPoster.jpg", runtime: 90,
+    vote_average: 7.6, vote_count: 900, genres: [{ name: "Romance" }],
+  },
+  "movie/5": {
+    id: 5, title: "Gargi", release_date: "2022-07-15", overview: "A father accused.",
+    backdrop_path: "/brokenOnCdn.jpg", runtime: 141, vote_average: 7.9, vote_count: 60,
+    genres: [{ name: "Drama" }],
+  },
+  "tv/94997": {
+    id: 94997, name: "House of the Dragon", first_air_date: "2022-08-21", overview: "Targaryens.",
+    backdrop_path: "/hotdBackdrop.jpg", poster_path: "/hotdPoster.jpg",
+    tagline: "All must choose.", episode_run_time: [60], vote_average: 8.4, vote_count: 5000,
+    number_of_seasons: 2, number_of_episodes: 18, genres: [{ name: "Drama" }, { name: "Fantasy" }],
+    images: { backdrops: [{ file_path: "/hotdClean.jpg", iso_639_1: null, vote_average: 5 }], logos: [{ file_path: "/hotdLogo.png", iso_639_1: "en" }] },
+    content_ratings: { results: [{ iso_3166_1: "US", rating: "TV-MA" }, { iso_3166_1: "IN", rating: "A" }] },
+    aggregate_credits: { cast: [{ name: "Matt Smith", roles: [{ character: "Daemon Targaryen" }], profile_path: "/smith.jpg", order: 0 }] },
+  },
+  "tv/101": {
+    id: 101, name: "India's Got Latent", first_air_date: "2024-06-16", overview: "A comedy talent show.",
+    backdrop_path: "/latentBackdrop.jpg", poster_path: "/latentPoster.jpg",
+    episode_run_time: [75], number_of_seasons: 2, number_of_episodes: 20, genres: [{ name: "Comedy" }],
+  },
+};
+
+// Season listings, keyed `<seriesId>/<seasonNumber>`. Episode 2 has no still and no name, so the
+// checks can show an episode TMDb knows nothing about keeps the name it already had.
+const seasons = {
+  "94997/1": [
+    { episode_number: 1, name: "The Heirs of the Dragon", overview: "Viserys hosts a tourney.", still_path: "/hotdS1E1.jpg", air_date: "2022-08-21", runtime: 66, vote_average: 8.1, vote_count: 400 },
+    { episode_number: 2, name: "", overview: "", still_path: null, air_date: "2022-08-28", runtime: 54 },
+    { episode_number: 3, name: "Second of His Name", overview: "A war in the Stepstones.", still_path: "/hotdS1E3.jpg", air_date: "2022-09-04", runtime: 63 },
+  ],
+  "101/2": [
+    { episode_number: 1, name: "Episode One", overview: "The judges arrive.", still_path: "/latentS2E1.jpg", air_date: "2025-01-05", runtime: 80 },
+  ],
+};
+
+const detailHits = new Map();
 const mock = createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${MOCK_PORT}`);
-  const image = url.pathname.match(/^\/t\/p\/(w\d+)(\/[A-Za-z]+\.jpg)$/);
+  const image = url.pathname.match(/^\/t\/p\/(w\d+)(\/[A-Za-z0-9]+\.(?:jpg|png))$/);
   if (image) {
     const key = `${image[1]}${image[2]}`;
     imageHits.set(key, (imageHits.get(key) ?? 0) + 1);
     if (image[2] === "/brokenOnCdn.jpg") return res.writeHead(500).end();
-    return res.writeHead(200, { "content-type": "image/jpeg" }).end(jpeg(key));
+    const type = image[2].endsWith(".png") ? "image/png" : "image/jpeg";
+    return res.writeHead(200, { "content-type": type }).end(jpeg(key));
   }
   if (url.searchParams.get("api_key") !== "smoke-key") return res.writeHead(401).end("{}");
   const json = (body) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
@@ -115,13 +228,24 @@ const mock = createServer((req, res) => {
   if (search) {
     const query = url.searchParams.get("query");
     searchHits.set(`${search[1]}:${query}`, (searchHits.get(`${search[1]}:${query}`) ?? 0) + 1);
-    return json({ results: tmdb[search[1]][query] ?? [] });
+    const table = tmdb[search[1]];
+    const key = Object.keys(table).find((k) => k.toLowerCase() === query.toLowerCase());
+    return json({ results: (key ? table[key] : null) ?? [] });
+  }
+  const detail = url.pathname.match(/^\/3\/(movie|tv)\/(\d+)$/);
+  if (detail) {
+    detailHits.set(`${detail[1]}/${detail[2]}`, (detailHits.get(`${detail[1]}/${detail[2]}`) ?? 0) + 1);
+    const body = details[`${detail[1]}/${detail[2]}`];
+    if (body) return json(body);
+  }
+  const season = url.pathname.match(/^\/3\/tv\/(\d+)\/season\/(\d+)$/);
+  if (season) {
+    const episodes = seasons[`${season[1]}/${season[2]}`];
+    if (episodes) return json({ season_number: Number(season[2]), episodes });
+    return res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ status_code: 34 }));
   }
   if (url.pathname === "/3/find/tt0817177") {
     return json({ movie_results: [{ id: 43949, title: "Flipped", release_date: "2010-08-06", overview: "First love.", backdrop_path: "/flippedBackdrop.jpg", poster_path: "/flippedPoster.jpg" }], tv_results: [] });
-  }
-  if (url.pathname === "/3/tv/94997") {
-    return json({ id: 94997, name: "House of the Dragon", first_air_date: "2022-08-21", overview: "Targaryens.", backdrop_path: "/hotdLinkBackdrop.jpg" });
   }
   if (url.pathname.startsWith("/3/find/") || url.pathname.match(/^\/3\/(movie|tv)\//)) {
     return res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ status_code: 34 }));
@@ -140,24 +264,31 @@ const folder = (id, parentFolderId, name, thumbnailFileId = null) => ({
   _id: id, parentFolderId, driveName: name, status: "published", title: name, thumbnailFileId,
   publishRule: null, createdAt: now, curatedAt: now, curatedBy: "smoke", updatedAt: now,
 });
-const video = (id, parentFolderId, driveName, title) => ({
+const video = (id, parentFolderId, driveName, title, extra = {}) => ({
   _id: id, parentFolderId, driveName, mimeType: "video/x-matroska", sizeBytes: 1, durationSeconds: 6000,
   status: "published", title, subtitleSetIds: [], introStart: null, introEnd: null, outroStart: null,
   episodeOrder: null, titleOverridden: true, introOverridden: false, renditions: {},
-  createdAt: now, curatedAt: now, curatedBy: "smoke", updatedAt: now,
+  createdAt: now, curatedAt: now, curatedBy: "smoke", updatedAt: now, ...extra,
 });
 await db.collection("catalogFolders").insertMany([
   folder("f-latent", ROOT, "India's got Latent s2"),
   folder("f-hotd", ROOT, "House of The Dragon", "drive-thumb-hotd"),
   folder("f-unknown", ROOT, "Zzqx Unheard Of Show"),
   folder("f-hotd-s1", "f-hotd", "Season 1"),
+  folder("f-hotd-extras", "f-hotd", "Behind The Scenes"),
 ]);
 const weaponsName = "Weapons (2025) (Hindi DD5.1-224Kbps HQ   English DD5.1-192Kbps) Dual Audio Hollywood Movie HD 1080p ESub.mkv";
 await db.collection("catalogVideos").insertMany([
   video("v-weapons", ROOT, weaponsName, weaponsName),
   video("v-flipped", ROOT, "Flipped.2010.1080P.Bluray.English.Esub.MoviesMod.org.mkv", "Flipped (2010)"),
-  video("v-gargi", ROOT, "Gargi.2022.1080p.HD.mkv", "Gargi.2022.1080p.HD.mkv"),
-  video("v-ep1", "f-hotd-s1", "House of the Dragon S01E01.mkv", "House of The Dragon S01E01"),
+  // Never curated by hand, so its raw filename is open to being replaced by TMDb's title.
+  video("v-gargi", ROOT, "Gargi.2022.1080p.HD.mkv", "Gargi.2022.1080p.HD.mkv", { titleOverridden: false }),
+  // A season folder's episodes: numbered, un-overridden, named by a publish-rule pattern.
+  video("v-ep1", "f-hotd-s1", "HOTD S01E01.mkv", "Episode 1", { titleOverridden: false, episodeOrder: 1 }),
+  video("v-ep2", "f-hotd-s1", "HOTD S01E02.mkv", "Episode 2", { titleOverridden: false, episodeOrder: 2 }),
+  video("v-ep3", "f-hotd-s1", "HOTD S01E03.mkv", "Renamed by hand", { titleOverridden: true, episodeOrder: 3 }),
+  // A flat series: episodes straight inside the series folder, whose own name says "s2".
+  video("v-latent-e1", "f-latent", "Latent S02E01.mkv", "Episode 1", { titleOverridden: false, episodeOrder: 1 }),
 ]);
 
 // Start the real backend against all of that.
@@ -218,9 +349,10 @@ try {
   const flippedDoc = await doc("video", "v-flipped");
   check("same-name film from another year is not taken", flippedDoc?.artwork == null && flippedDoc?.artworkTriedFor === "Flipped|2010", JSON.stringify(flippedDoc));
   check("unknown series stays unmatched", (await doc("folder", "f-unknown"))?.artwork == null);
-  check("seasons and episodes are left alone", (await doc("folder", "f-hotd-s1"))?.artwork === undefined && (await doc("video", "v-ep1"))?.artwork === undefined);
+  check("seasons and episodes get no title match of their own", (await doc("folder", "f-hotd-s1"))?.artwork === undefined && (await doc("video", "v-ep1"))?.artwork === undefined);
   await sleep(500); // let the background image warm-up land
-  check("matched images are fetched ahead of the first view", imageHits.get("w1280/latentBackdrop.jpg") === 1 && imageHits.get("w1280/weaponsBackdrop.jpg") === 1, JSON.stringify([...imageHits]));
+  check("matched images are fetched ahead of the first view", imageHits.get("w1280/latentBackdrop.jpg") === 1 && imageHits.get("w1280/weaponsClean.jpg") === 1, JSON.stringify([...imageHits]));
+  check("the wordmark is warmed too, so the spotlight has it", imageHits.get("w500/weaponsLogo.png") === 1, JSON.stringify([...imageHits]));
 
   console.log("\nWhat clients see");
   const library = (await api("/api/library", { token: viewer })).json;
@@ -237,16 +369,87 @@ try {
   check("second view comes from the disk cache, not TMDb", imageHits.get("w1280/latentBackdrop.jpg") === 1);
   check("cache is a plain file in ARTWORK_DIR", readdirSync(artworkDir).includes("w1280_latentBackdrop.jpg"), readdirSync(artworkDir).join(","));
   const movieImage = await api("/api/thumbnail/v-weapons", { token: viewer });
-  check("movie image route serves its backdrop", movieImage.status === 200 && movieImage.buffer.equals(jpeg("w1280/weaponsBackdrop.jpg")));
-  check("?shape=poster serves the 2:3 poster instead", (await api("/api/thumbnail/v-weapons?shape=poster", { token: viewer })).buffer.equals(jpeg("w780/weaponsPoster.jpg")));
+  check("movie image route serves its backdrop", movieImage.status === 200 && movieImage.buffer.equals(jpeg("w1280/weaponsClean.jpg")));
+  check("?shape=poster serves the 2:3 poster instead", (await api("/api/thumbnail/v-weapons?shape=poster", { token: viewer })).buffer.equals(jpeg("w780/weaponsEnPoster.jpg")));
   check("folder ?shape=poster too", (await api("/api/thumbnail-folder/f-hotd?shape=poster", { token: viewer })).buffer.equals(jpeg("w780/hotdPoster.jpg")));
-  check("unknown shape is treated as wide", (await api("/api/thumbnail/v-weapons?shape=../../x", { token: viewer })).buffer.equals(jpeg("w1280/weaponsBackdrop.jpg")));
+  check("unknown shape is treated as wide", (await api("/api/thumbnail/v-weapons?shape=../../x", { token: viewer })).buffer.equals(jpeg("w1280/weaponsClean.jpg")));
   check("image routes still require sign-in", (await api("/api/thumbnail/v-weapons")).status === 401);
 
   const seriesPage = (await api("/api/folder/f-latent", { token: viewer })).json;
   check("series page carries year and synopsis", seriesPage?.year === 2024 && seriesPage?.overview === "A comedy talent show.", JSON.stringify({ y: seriesPage?.year, o: seriesPage?.overview }));
   const moviePage = (await api("/api/video/v-weapons", { token: viewer })).json;
   check("movie player data carries year and synopsis", moviePage?.year === 2025 && moviePage?.overview === "Kids vanish.");
+
+
+  console.log("\nFacts from TMDb");
+  const movieFacts = (await api("/api/video/v-weapons", { token: viewer })).json;
+  check("tagline", movieFacts?.tagline === "Who took the children?", JSON.stringify(movieFacts?.tagline));
+  check("runtime", movieFacts?.runtimeMinutes === 128);
+  check("at most three genres, in TMDb's order", JSON.stringify(movieFacts?.genres) === JSON.stringify(["Horror", "Mystery", "Thriller"]), JSON.stringify(movieFacts?.genres));
+  check("certificate prefers India and skips a blank one", movieFacts?.certificate === "A", JSON.stringify(movieFacts?.certificate));
+  check("TMDb score, rounded, with its vote count", movieFacts?.rating?.average === 7.4 && movieFacts.rating.count === 1200, JSON.stringify(movieFacts?.rating));
+  check("the film has a wordmark", movieFacts?.hasLogo === true);
+  const seriesFacts = (await api("/api/folder/f-hotd", { token: viewer })).json;
+  check("a series reports its episode length, seasons and episode count", seriesFacts?.runtimeMinutes === 60 && seriesFacts?.seasonCount === 2 && seriesFacts?.episodeCount === 18, JSON.stringify(seriesFacts && { r: seriesFacts.runtimeMinutes, s: seriesFacts.seasonCount, e: seriesFacts.episodeCount }));
+  check("a series certificate comes from content ratings", seriesFacts?.certificate === "A");
+  const unmatchedPage = (await api("/api/folder/f-unknown", { token: viewer })).json;
+  check("an unmatched title reports no facts rather than failing", unmatchedPage?.certificate === null && unmatchedPage?.rating === null && JSON.stringify(unmatchedPage?.genres) === "[]" && unmatchedPage?.cast.length === 0, JSON.stringify(unmatchedPage?.genres));
+
+  console.log("\nCast");
+  check("billing order is TMDb's, not the order it sent them in", movieFacts?.cast?.[0]?.name === "Julia Garner" && movieFacts.cast[1].name === "Josh Brolin", JSON.stringify(movieFacts?.cast?.map((c) => c.name)));
+  check("characters come through", movieFacts?.cast?.[0]?.character === "Justine Gandy");
+  check("someone with no headshot gets no image path", movieFacts?.cast?.[2]?.imagePath === null && movieFacts.cast[2].name === "Nobody Pictured");
+  check("a series' cast comes from its aggregate credits", seriesFacts?.cast?.[0]?.character === "Daemon Targaryen", JSON.stringify(seriesFacts?.cast));
+  const headshot = await api(movieFacts.cast[0].imagePath, { token: viewer });
+  check("headshot route serves the right person's image", headshot.status === 200 && headshot.buffer.equals(jpeg("w185/garner.jpg")), String(headshot.status));
+  check("headshot past the end of the cast list is a 404", (await api("/api/cast-image/video/v-weapons/99", { token: viewer })).status === 404);
+  check("headshots require sign-in", (await api("/api/cast-image/video/v-weapons/0")).status === 401);
+
+  console.log("\nWordmarks");
+  const logo = await api("/api/thumbnail/v-weapons?shape=logo", { token: viewer });
+  check("?shape=logo serves the PNG wordmark, not the SVG", logo.status === 200 && logo.buffer.equals(jpeg("w500/weaponsLogo.png")), String(logo.status));
+  check("a title with no wordmark 404s rather than serving a photo", (await api("/api/thumbnail-folder/f-latent?shape=logo", { token: viewer })).status === 404);
+  check("a folder with a Drive image doesn't stand in for one either", (await api("/api/thumbnail-folder/f-unknown?shape=logo", { token: viewer })).status === 404);
+  const spotlightHotd = (await api("/api/library", { token: viewer })).json?.spotlight?.find((s) => s.id === "f-hotd");
+  check("spotlight slide points at the wordmark when there is one", spotlightHotd?.logoPath === "/api/thumbnail-folder/f-hotd?shape=logo", JSON.stringify(spotlightHotd?.logoPath));
+  check("and at null when there isn't", (await api("/api/library", { token: viewer })).json?.spotlight?.find((s) => s.id === "f-latent")?.logoPath === null);
+
+  console.log("\nReal titles");
+  check("a raw filename is replaced by TMDb's title", (await doc("video", "v-gargi"))?.title === "Gargi", JSON.stringify((await doc("video", "v-gargi"))?.title));
+  check("a title an admin typed is left alone", (await doc("video", "v-weapons"))?.title === weaponsName);
+  check("a folder's capitalisation is corrected to TMDb's", (await doc("folder", "f-hotd"))?.title === "House of the Dragon", JSON.stringify((await doc("folder", "f-hotd"))?.title));
+  check("cards carry the year and score", (await api("/api/library", { token: viewer })).json?.videos?.find((v) => v.id === "v-weapons")?.rating?.average === 7.4);
+
+  console.log("\nEpisodes");
+  const ep1 = await doc("video", "v-ep1");
+  check("episode 1 is named from TMDb", ep1?.title === "The Heirs of the Dragon", JSON.stringify(ep1?.title));
+  check("and keeps its synopsis, still, air date and number", ep1?.episodeArtwork?.overview === "Viserys hosts a tourney." && ep1.episodeArtwork.stillPath === "/hotdS1E1.jpg" && ep1.episodeArtwork.airDate === "2022-08-21" && ep1.episodeArtwork.episode === 1 && ep1.episodeArtwork.season === 1, JSON.stringify(ep1?.episodeArtwork));
+  check("an episode TMDb has no name for keeps the one it had", (await doc("video", "v-ep2"))?.title === "Episode 2");
+  check("an episode an admin named by hand is left alone", (await doc("video", "v-ep3"))?.title === "Renamed by hand");
+  check("but still gets its synopsis and still", (await doc("video", "v-ep3"))?.episodeArtwork?.name === "Second of His Name");
+  check("the episode's own still is served as its image", (await api("/api/thumbnail/v-ep1", { token: viewer })).buffer.equals(jpeg("w780/hotdS1E1.jpg")));
+  check("an episode with no still falls through to Drive's frame", (await api("/api/thumbnail/v-ep2", { token: viewer })).status === 404);
+  const seasonPage = (await api("/api/folder/f-hotd?season=f-hotd-s1", { token: viewer })).json;
+  const rows = seasonPage?.seasonItems ?? [];
+  check("episode rows carry the number, synopsis, runtime and score", rows[0]?.episodeNumber === 1 && rows[0]?.overview === "Viserys hosts a tourney." && rows[0]?.runtimeMinutes === 66 && rows[0]?.rating?.average === 8.1, JSON.stringify(rows[0]));
+  const playerEp = (await api("/api/video/v-ep1", { token: viewer })).json;
+  check("the player knows which episode it is", playerEp?.episode?.number === 1 && playerEp?.episode?.season === 1 && playerEp?.episode?.overview === "Viserys hosts a tourney.", JSON.stringify(playerEp?.episode));
+  check("a film has no episode block", movieFacts?.episode === null);
+  const latentEp = await doc("video", "v-latent-e1");
+  check("a flat series takes its season from its own name", latentEp?.episodeArtwork?.season === 2 && latentEp?.title === "Episode One", JSON.stringify(latentEp?.episodeArtwork));
+
+  console.log("\nSeasons the names don't give away");
+  const extras = (await api("/api/admin/catalog/folder/f-hotd-extras", { token: admin })).json;
+  check("a folder whose name says no season is offered the control", extras?.episodeSeries?.title === "House of the Dragon" && extras.episodeSeries.season === null, JSON.stringify(extras?.episodeSeries));
+  check("a season folder's guess is reported as a guess", (await api("/api/admin/catalog/folder/f-hotd-s1", { token: admin })).json?.episodeSeries?.season === 1);
+  const named = await api("/api/admin/catalog/artwork/folder/f-hotd/episodes", { token: admin, method: "POST" });
+  check("naming one series' episodes on demand reports what it couldn't place", named.status === 200 && named.json?.unresolved?.some((u) => u.folderId === "f-hotd-extras"), JSON.stringify(named.json));
+  check("setting a season is validated", (await api("/api/admin/catalog/artwork/folder/f-hotd-extras/season", { token: admin, method: "PUT", body: { season: 200 } })).status === 400);
+  const setSeason = await api("/api/admin/catalog/artwork/folder/f-hotd-extras/season", { token: admin, method: "PUT", body: { season: 1 } });
+  check("setting it sticks", setSeason.status === 200 && (await doc("folder", "f-hotd-extras"))?.tmdbSeason === 1);
+  check("a title that isn't a series can't have episodes named", (await api("/api/admin/catalog/artwork/folder/f-unknown/episodes", { token: admin, method: "POST" })).json?.code === "not-found");
+  await api("/api/admin/catalog/artwork/folder/f-hotd/episode-naming", { token: admin, method: "PUT", body: { enabled: false } });
+  check("episode naming can be turned off for a series", (await doc("folder", "f-hotd"))?.episodeArtworkOff === true);
 
   console.log("\nAdmin");
   check("viewer can't use admin artwork routes", (await api("/api/admin/catalog/artwork/video/v-flipped", { token: viewer, method: "PUT", body: { link: "tt0817177" } })).status === 403);
@@ -263,7 +466,7 @@ try {
 
   const hotdLink = await api("/api/admin/catalog/artwork/folder/f-hotd", { token: admin, method: "PUT", body: { link: "https://www.themoviedb.org/tv/94997-house-of-the-dragon" } });
   check("pasted TMDb TV link resolves", hotdLink.json?.artwork?.tmdbType === "tv" && hotdLink.json.artwork.tmdbId === "94997");
-  check("a pasted link replaces the automatic match", (await api("/api/thumbnail-folder/f-hotd", { token: viewer })).buffer.equals(jpeg("w1280/hotdLinkBackdrop.jpg")));
+  check("a pasted link replaces the automatic match", hotdLink.json?.artwork?.source === "link" && (await api("/api/thumbnail-folder/f-hotd", { token: viewer })).buffer.equals(jpeg("w1280/hotdClean.jpg")));
   await api("/api/admin/catalog/artwork/folder/f-hotd", { token: admin, method: "DELETE" });
   check("removing artwork brings the Drive thumbnail.* back", (await api("/api/library", { token: viewer })).json.folders.find((f) => f.id === "f-hotd")?.thumbnailFileId === "drive-thumb-hotd");
 

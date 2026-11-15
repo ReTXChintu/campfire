@@ -51,7 +51,8 @@ router.get("/:fileId", requireAdmin, async (req, res) => {
     tracks: set.subtitles.map((s) => ({ index: s.index, language: s.language, title: s.title })),
   }));
 
-  // Only top-level videos (movies) get artwork — episodes keep Drive's frame.
+  // Only top-level videos (movies) get their own TMDb title match; an episode instead carries
+  // `episodeArtwork`, filled in from its series' season listing (see lib/episodeArtwork.ts).
   const isTopLevel = video.parentFolderId === env.driveRootFolderId;
   res.json({ video, parentFolder, subtitleSetOptions, isTopLevel });
 });

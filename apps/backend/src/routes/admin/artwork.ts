@@ -2,12 +2,17 @@ import { Router, type Response } from "express";
 import { requireAdmin } from "../../middleware/auth";
 import {
   ArtworkLookupError,
-  autoMatchArtwork,
   clearArtwork,
   matchArtworkNow,
   setArtworkFromLink,
   type ArtworkKind,
 } from "../../lib/artwork";
+import {
+  matchCatalog,
+  matchEpisodesForSeries,
+  setEpisodeArtworkEnabled,
+  setFolderSeason,
+} from "../../lib/episodeArtwork";
 
 /** Artwork curation for a movie or series (see lib/artwork.ts). Mounted at
  * /api/admin/catalog/artwork; web and the Windows app's admin screens both use it. */
@@ -26,14 +31,54 @@ function sendError(res: Response, error: unknown): void {
   throw error;
 }
 
-/** Match every movie and series that still has no artwork, retrying earlier misses. */
+/** Match every movie and series that still has no artwork, retrying earlier misses, then name
+ * every episode underneath the ones that matched. */
 router.post("/auto-match", requireAdmin, async (_req, res) => {
-  const result = await autoMatchArtwork({ retry: true });
+  const result = await matchCatalog({ retry: true });
   if (result.skipped === "no-key") {
     res.status(503).json({ error: "TMDB_API_KEY isn't set on the server", code: "no-key" });
     return;
   }
   res.json(result);
+});
+
+/** Name this one series' episodes from TMDb now. */
+router.post("/folder/:id/episodes", requireAdmin, async (req, res) => {
+  try {
+    res.json(await matchEpisodesForSeries(req.params.id));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Body `{ season }` (a number, or null to go back to guessing from the folder's name): which
+ * season of its series this folder holds. Re-matches the series' episodes straight away. */
+router.put("/folder/:id/season", requireAdmin, async (req, res) => {
+  const raw = req.body?.season;
+  const season = raw == null || raw === "" ? null : Number(raw);
+  if (season != null && (!Number.isInteger(season) || season < 0 || season > 99)) {
+    res.status(400).json({ error: "season must be a whole number from 0 to 99, or empty" });
+    return;
+  }
+  try {
+    res.json(await setFolderSeason(req.params.id, season));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Body `{ enabled }`: whether this series' episodes take their names from TMDb. */
+router.put("/folder/:id/episode-naming", requireAdmin, async (req, res) => {
+  if (typeof req.body?.enabled !== "boolean") {
+    res.status(400).json({ error: "enabled must be true or false" });
+    return;
+  }
+  try {
+    await setEpisodeArtworkEnabled(req.params.id, req.body.enabled);
+    res.json({ ok: true });
+  } catch (error) {
+    sendError(res, error);
+  }
 });
 
 /** Body `{ link }`: an IMDb or TMDb link that becomes this title's artwork. */
