@@ -49,15 +49,14 @@ export function isSupportedReferenceLink(raw: string): boolean {
   return parseReferenceLink(raw) !== null;
 }
 
-const TMDB_API = "https://api.themoviedb.org/3";
 const POSTER_BASE = "https://image.tmdb.org/t/p/w342";
 const LOOKUP_TIMEOUT_MS = 6000;
 
-async function tmdbFetch<T>(path: string, params: Record<string, string>): Promise<T | null> {
+export async function tmdbFetch<T>(path: string, params: Record<string, string>): Promise<T | null> {
   const key = env.tmdbApiKey;
   if (!key) return null;
 
-  const url = new URL(`${TMDB_API}${path}`);
+  const url = new URL(`${env.tmdbApiBase}${path}`);
   url.searchParams.set("api_key", key);
   for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
 

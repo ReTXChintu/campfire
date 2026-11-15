@@ -27,6 +27,8 @@ import adminCatalogFolderRoutes from "./routes/admin/catalogFolder";
 import adminCatalogVideoRoutes from "./routes/admin/catalogVideo";
 import adminSubtitleSetRoutes from "./routes/admin/subtitleSets";
 import adminRequestRoutes from "./routes/admin/requests";
+import adminArtworkRoutes from "./routes/admin/artwork";
+import { autoMatchArtwork } from "./lib/artwork";
 
 const app = express();
 
@@ -56,6 +58,7 @@ app.use("/api/admin/catalog/folder", adminCatalogFolderRoutes);
 app.use("/api/admin/catalog/video", adminCatalogVideoRoutes);
 app.use("/api/admin/subtitle-sets", adminSubtitleSetRoutes);
 app.use("/api/admin/requests", adminRequestRoutes);
+app.use("/api/admin/catalog/artwork", adminArtworkRoutes);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
@@ -74,6 +77,13 @@ Promise.all([
     server.listen(env.port, () => {
       console.log(`Campfire backend listening on http://0.0.0.0:${env.port}`);
     });
+    // Titles already in the library before artwork existed (or added while the key was unset)
+    // are matched once on startup. Anything that misses is not retried until its title changes.
+    autoMatchArtwork()
+      .then((r) => {
+        if (r.matched.length > 0) console.log(`Artwork: matched ${r.matched.length} title(s) on TMDb`);
+      })
+      .catch((error) => console.error("Artwork auto-match failed:", error));
   })
   .catch((error) => {
     console.error("Failed to seed admin user:", error);

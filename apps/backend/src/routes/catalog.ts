@@ -21,6 +21,7 @@ import {
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
+import { listedThumbnailFileId } from "../lib/artwork";
 
 const router = Router();
 
@@ -84,7 +85,7 @@ router.get("/library", requireAuth, async (req, res) => {
       kind: "folder" as const,
       id: f._id,
       name: f.title!,
-      thumbnailFileId: f.thumbnailFileId,
+      thumbnailFileId: listedThumbnailFileId(f),
     })),
   );
   const videos = naturalSort(
@@ -95,7 +96,7 @@ router.get("/library", requireAuth, async (req, res) => {
       kind: "folder" as const,
       id: f._id,
       name: f.title!,
-      thumbnailFileId: f.thumbnailFileId,
+      thumbnailFileId: listedThumbnailFileId(f),
       curatedAt: f.curatedAt,
     })),
     ...videoDocs.map((v) => ({
@@ -187,7 +188,7 @@ router.get("/library", requireAuth, async (req, res) => {
           kind: request.catalogRef.kind,
           id: request.catalogRef.id,
           name: target.title ?? request.title,
-          thumbnailFileId: "thumbnailFileId" in target ? target.thumbnailFileId : null,
+          thumbnailFileId: "thumbnailFileId" in target ? listedThumbnailFileId(target) : null,
         };
         return {
           id: request.catalogRef.id,
@@ -263,7 +264,7 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
         kind: "folder" as const,
         id: f._id,
         name: f.title!,
-        thumbnailFileId: f.thumbnailFileId,
+        thumbnailFileId: listedThumbnailFileId(f),
       })),
       ...videoDocs.map((v) => ({ kind: "video" as const, id: v._id, name: v.title!, mimeType: v.mimeType })),
     ]);
@@ -272,7 +273,9 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
       folderId,
       title: folder.title,
       backHref,
-      thumbnailFileId: folder.thumbnailFileId,
+      thumbnailFileId: listedThumbnailFileId(folder),
+      year: folder.artwork?.year ?? null,
+      overview: folder.artwork?.overview ?? null,
       items,
       progress: progressList,
     });
@@ -319,7 +322,9 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
     folderId,
     title: folder.title,
     backHref,
-    thumbnailFileId: folder.thumbnailFileId,
+    thumbnailFileId: listedThumbnailFileId(folder),
+    year: folder.artwork?.year ?? null,
+    overview: folder.artwork?.overview ?? null,
     seasons,
     selectedSeasonId,
     seasonItems,
@@ -404,6 +409,9 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   res.json({
     fileId,
     title: video.title,
+    // From the movie's TMDb match, when it has one (episodes don't).
+    year: video.artwork?.year ?? null,
+    overview: video.artwork?.overview ?? null,
     backHref,
     parentFolderId,
     nextFileId,

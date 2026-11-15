@@ -35,7 +35,9 @@ router.get("/:folderId", requireAdmin, async (req, res) => {
     listVideosByParent(folderId),
   ]);
 
-  res.json({ folder, breadcrumbs, childFolders, childVideos });
+  // Only top-level folders (series) get artwork — seasons inside one don't.
+  const isTopLevel = folder.parentFolderId === env.driveRootFolderId;
+  res.json({ folder, breadcrumbs, childFolders, childVideos, isTopLevel });
 });
 
 router.patch("/:folderId", requireAdmin, async (req, res) => {

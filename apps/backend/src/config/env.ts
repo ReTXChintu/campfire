@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -71,10 +71,22 @@ export const env = {
   get requestImagesDir() {
     return process.env.REQUEST_IMAGES_DIR || join(__dirname, "..", "..", "request-images");
   },
+  // TMDb posters/backdrops for catalog titles (see lib/artwork.ts), downloaded once on first view
+  // and served from here. A cache, not a source of truth: delete it and images are re-fetched.
+  get artworkDir() {
+    return resolve(process.env.ARTWORK_DIR || join(__dirname, "..", "..", "artwork"));
+  },
   // Optional. With it, a pasted IMDb/TMDb link on a request is resolved to a real title, year,
   // type and poster; without it the link is simply stored and the admin opens it themselves.
   // Nothing fails when it's missing — see lib/referenceLink.ts.
   get tmdbApiKey(): string | undefined {
     return process.env.TMDB_API_KEY || undefined;
+  },
+  // Test hooks only (scripts/smoke-artwork.mjs points them at a local mock); never set in prod.
+  get tmdbApiBase() {
+    return process.env.TMDB_API_BASE || "https://api.themoviedb.org/3";
+  },
+  get tmdbImageBase() {
+    return process.env.TMDB_IMAGE_BASE || "https://image.tmdb.org/t/p";
   },
 };

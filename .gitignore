@@ -26,6 +26,10 @@ apps/frontend/dist/
 # via the admin "Generate renditions" button, never checked in
 apps/backend/renditions/
 
+# server-side disk caches/uploads: TMDb artwork (lib/artwork.ts) and request reference images
+apps/backend/artwork/
+apps/backend/request-images/
+
 # mobile/desktop app builds served for download - too large for git, regenerate from a flutter build
 apps/frontend/public/*.apk
 apps/frontend/public/*.zip

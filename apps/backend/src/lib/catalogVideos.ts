@@ -1,5 +1,6 @@
 import { getDb } from "./mongodb";
 import type { RenditionHeight } from "./qualityLadder";
+import type { ArtworkFields } from "./artwork";
 
 export type CatalogVideoStatus = "pending" | "curated" | "published";
 
@@ -41,7 +42,7 @@ export type CatalogVideo = {
   curatedAt: Date | null;
   curatedBy: string | null;
   updatedAt: Date;
-};
+} & ArtworkFields;
 
 async function collection() {
   const db = await getDb();

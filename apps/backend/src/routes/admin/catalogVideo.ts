@@ -51,7 +51,9 @@ router.get("/:fileId", requireAdmin, async (req, res) => {
     tracks: set.subtitles.map((s) => ({ index: s.index, language: s.language, title: s.title })),
   }));
 
-  res.json({ video, parentFolder, subtitleSetOptions });
+  // Only top-level videos (movies) get artwork — episodes keep Drive's frame.
+  const isTopLevel = video.parentFolderId === env.driveRootFolderId;
+  res.json({ video, parentFolder, subtitleSetOptions, isTopLevel });
 });
 
 router.patch("/:fileId", requireAdmin, async (req, res) => {
