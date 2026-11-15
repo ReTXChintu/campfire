@@ -204,6 +204,11 @@ export default function SettingsPage() {
               </a>
             </div>
           )}
+          {/* TMDb's API terms ask for this notice wherever its data appears. */}
+          <p className="text-xs text-text-tertiary">
+            Artwork and synopses come from TMDb. This product uses the TMDB API but is not endorsed or certified by
+            TMDB.
+          </p>
         </Panel>
 
         <Panel title="Sign out" description="Signs this browser out. Other devices stay signed in.">

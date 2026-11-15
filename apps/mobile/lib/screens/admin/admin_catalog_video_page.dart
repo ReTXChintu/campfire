@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../widgets/admin/admin_artwork_panel.dart';
 import 'package:go_router/go_router.dart';
 import '../../models/admin_catalog.dart';
 import '../../services/admin_catalog_service.dart';
@@ -147,6 +148,17 @@ class _AdminCatalogVideoPageState extends State<AdminCatalogVideoPage> {
                       renditions: data.video.renditions,
                       onChanged: _reload,
                     ),
+                    if (data.isTopLevel) ...[
+                      const SizedBox(height: 24),
+                      AdminArtworkPanel(
+                        kind: 'video',
+                        id: widget.fileId,
+                        artwork: data.video.artwork,
+                        autoOff: data.video.artworkAutoOff,
+                        hasDriveThumbnail: false,
+                        onChanged: _reload,
+                      ),
+                    ],
                     const SizedBox(height: 40),
                     Container(
                       padding: const EdgeInsets.all(16),

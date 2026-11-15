@@ -34,6 +34,8 @@ export default function SeriesView({
   title,
   backHref,
   thumbnailFileId,
+  year,
+  overview,
   seasons,
   selectedSeasonId,
   seasonItems,
@@ -44,6 +46,8 @@ export default function SeriesView({
   title: string;
   backHref?: string;
   thumbnailFileId: string | null;
+  year?: number | null;
+  overview?: string | null;
   seasons: { id: string; name: string }[];
   selectedSeasonId: string;
   seasonItems: CatalogListItem[];
@@ -61,9 +65,11 @@ export default function SeriesView({
         id={folderId}
         title={title}
         eyebrow="Series"
+        overview={overview}
         thumbnailPath={thumbnailFileId ? `/api/thumbnail-folder/${folderId}` : null}
         backHref={backHref}
         facts={[
+          ...(year ? [{ label: "Year", value: year }] : []),
           { label: "Seasons", value: seasons.length },
           {
             label: "Episodes",

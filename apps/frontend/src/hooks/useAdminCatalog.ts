@@ -1,6 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPostText } from "../lib/api";
-import type { CatalogFolder, CatalogVideo } from "../lib/types";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostText, apiPut } from "../lib/api";
+import type { CatalogArtwork, CatalogFolder, CatalogVideo } from "../lib/types";
 import { useInvalidateCatalog } from "./useCatalog";
 
 type AdminOverview = {
@@ -24,6 +24,8 @@ type AdminFolderDetail = {
   breadcrumbs: CatalogFolder[];
   childFolders: CatalogFolder[];
   childVideos: CatalogVideo[];
+  /** A series (or film folder) in the library root — the only folders artwork applies to. */
+  isTopLevel?: boolean;
 };
 
 export function useAdminFolder(folderId: string) {
@@ -44,6 +46,8 @@ type AdminVideoDetail = {
   video: CatalogVideo;
   parentFolder: CatalogFolder | null;
   subtitleSetOptions: SubtitleSetOption[];
+  /** A movie in the library root — episodes don't get artwork. */
+  isTopLevel?: boolean;
 };
 
 export function useAdminVideo(fileId: string) {
@@ -179,5 +183,53 @@ export function useUploadSubtitle(fileId: string) {
         text,
       ),
     onSuccess: invalidate,
+  });
+}
+
+// --- Artwork (backend routes/admin/artwork.ts) --------------------------------------------------
+
+export type ArtworkKind = "folder" | "video";
+
+function useInvalidateArtwork(kind: ArtworkKind, id: string) {
+  const queryClient = useQueryClient();
+  const invalidateCatalog = useInvalidateCatalog();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: [kind === "folder" ? "admin-folder" : "admin-video", id] });
+    queryClient.invalidateQueries({ queryKey: ["admin-overview"] });
+    invalidateCatalog();
+  };
+}
+
+/** Paste an IMDb/TMDb link, search TMDb now, or remove the artwork — one hook, three actions,
+ * since the panel only ever runs one at a time. */
+export function useArtworkAction(kind: ArtworkKind, id: string) {
+  const invalidate = useInvalidateArtwork(kind, id);
+  return useMutation({
+    mutationFn: (action: { type: "link"; link: string } | { type: "auto" } | { type: "remove" }): Promise<unknown> => {
+      const path = `/api/admin/catalog/artwork/${kind}/${id}`;
+      if (action.type === "link") return apiPut<{ artwork: CatalogArtwork }>(path, { link: action.link });
+      if (action.type === "auto") return apiPost<{ artwork: CatalogArtwork }>(`${path}/auto`);
+      return apiDelete<{ ok: true }>(path);
+    },
+    onSuccess: invalidate,
+  });
+}
+
+export type ArtworkAutoMatchResult = {
+  matched: { kind: ArtworkKind; id: string; name: string; tmdbTitle: string; year: number | null }[];
+  unmatched: { kind: ArtworkKind; id: string; name: string; query: string; year: number | null }[];
+};
+
+export function useMatchMissingArtwork() {
+  const queryClient = useQueryClient();
+  const invalidateCatalog = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: () => apiPost<ArtworkAutoMatchResult>("/api/admin/catalog/artwork/auto-match"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-overview"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-folder"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-video"] });
+      invalidateCatalog();
+    },
   });
 }

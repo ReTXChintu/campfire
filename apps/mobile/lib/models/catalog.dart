@@ -279,6 +279,9 @@ class FolderResponse {
   final String title;
   final String backHref;
   final String? thumbnailFileId;
+  /// From the title's TMDb match; null when unmatched or on an older backend.
+  final int? year;
+  final String? overview;
   final List<CatalogListItem> items; // flat mode only
   final List<Season> seasons; // series mode only
   final String? selectedSeasonId;
@@ -292,6 +295,8 @@ class FolderResponse {
     required this.title,
     required this.backHref,
     this.thumbnailFileId,
+    this.year,
+    this.overview,
     this.items = const [],
     this.seasons = const [],
     this.selectedSeasonId,
@@ -308,6 +313,8 @@ class FolderResponse {
     title: (json['title'] as String?) ?? '',
     backHref: json['backHref'] as String,
     thumbnailFileId: json['thumbnailFileId'] as String?,
+    year: (json['year'] as num?)?.toInt(),
+    overview: json['overview'] as String?,
     items: json['items'] == null
         ? const []
         : (json['items'] as List).map((e) => CatalogListItem.fromJson(e)).toList(),

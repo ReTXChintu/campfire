@@ -3,6 +3,13 @@ import '../config.dart';
 import '../services/media_headers.dart';
 import '../theme/app_theme.dart';
 
+/// Drops a cached image so the next build fetches it again. Flutter's image cache keys a network
+/// image by its URL alone, so without this a changed picture (new artwork picked in admin) would
+/// keep showing the old one until the app restarts.
+void evictAuthedImage(String path) {
+  PaintingBinding.instance.imageCache.evict(NetworkImage('$apiBaseUrl$path'));
+}
+
 /// A thumbnail/poster image behind an auth-gated backend route (see services/media_headers.dart
 /// for why this can just use headers directly, unlike the web app's blob-URL workaround).
 class AuthedNetworkImage extends StatelessWidget {

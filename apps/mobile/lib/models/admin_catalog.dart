@@ -3,6 +3,44 @@
 // models/catalog.dart's lightweight CatalogListItem — the admin screens need the full curation
 // fields (status, driveName, intro/outro, etc.) that the viewer-facing catalog never touches.
 
+/// A movie's or series' TMDb match — mirrors apps/frontend/src/lib/types.ts's CatalogArtwork
+/// (backend lib/artwork.ts). Viewers never see this object; they get the image through the usual
+/// thumbnail routes.
+class CatalogArtwork {
+  final String source; // "link" | "auto"
+  final String tmdbType; // "movie" | "tv"
+  final String tmdbId;
+  final String title;
+  final int? year;
+  final String? overview;
+  final String matchedAt;
+
+  const CatalogArtwork({
+    required this.source,
+    required this.tmdbType,
+    required this.tmdbId,
+    required this.title,
+    this.year,
+    this.overview,
+    required this.matchedAt,
+  });
+
+  String get tmdbUrl => 'https://www.themoviedb.org/$tmdbType/$tmdbId';
+
+  static CatalogArtwork? tryParse(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    return CatalogArtwork(
+      source: json['source'] as String? ?? 'auto',
+      tmdbType: json['tmdbType'] as String? ?? 'movie',
+      tmdbId: json['tmdbId'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      year: (json['year'] as num?)?.toInt(),
+      overview: json['overview'] as String?,
+      matchedAt: json['matchedAt'] as String? ?? '',
+    );
+  }
+}
+
 class CatalogFolder {
   final String id;
   final String parentFolderId;
@@ -11,6 +49,8 @@ class CatalogFolder {
   final String status; // "pending" | "curated" | "published"
   final String? title;
   final String? curatedAt;
+  final CatalogArtwork? artwork;
+  final bool artworkAutoOff;
 
   const CatalogFolder({
     required this.id,
@@ -20,6 +60,8 @@ class CatalogFolder {
     required this.status,
     this.title,
     this.curatedAt,
+    this.artwork,
+    this.artworkAutoOff = false,
   });
 
   factory CatalogFolder.fromJson(Map<String, dynamic> json) => CatalogFolder(
@@ -30,6 +72,8 @@ class CatalogFolder {
     status: json['status'] as String,
     title: json['title'] as String?,
     curatedAt: json['curatedAt'] as String?,
+    artwork: CatalogArtwork.tryParse(json['artwork']),
+    artworkAutoOff: json['artworkAutoOff'] == true,
   );
 }
 
@@ -57,6 +101,8 @@ class CatalogVideo {
   final double? introEnd;
   final double? outroStart;
   final Map<String, RenditionEntry> renditions;
+  final CatalogArtwork? artwork;
+  final bool artworkAutoOff;
 
   const CatalogVideo({
     required this.id,
@@ -70,6 +116,8 @@ class CatalogVideo {
     this.introEnd,
     this.outroStart,
     this.renditions = const {},
+    this.artwork,
+    this.artworkAutoOff = false,
   });
 
   // Mirrors apps/backend/src/lib/drive.ts's isMkv() — Drive's own detector reports plain
@@ -90,6 +138,8 @@ class CatalogVideo {
     renditions: (json['renditions'] as Map<String, dynamic>? ?? const {}).map(
       (key, value) => MapEntry(key, RenditionEntry.fromJson(value as Map<String, dynamic>)),
     ),
+    artwork: CatalogArtwork.tryParse(json['artwork']),
+    artworkAutoOff: json['artworkAutoOff'] == true,
   );
 }
 
@@ -125,12 +175,15 @@ class AdminFolderDetail {
   final List<CatalogFolder> breadcrumbs;
   final List<CatalogFolder> childFolders;
   final List<CatalogVideo> childVideos;
+  /// A series in the library root — the only folders artwork applies to.
+  final bool isTopLevel;
 
   const AdminFolderDetail({
     required this.folder,
     required this.breadcrumbs,
     required this.childFolders,
     required this.childVideos,
+    this.isTopLevel = false,
   });
 
   factory AdminFolderDetail.fromJson(Map<String, dynamic> json) => AdminFolderDetail(
@@ -138,6 +191,7 @@ class AdminFolderDetail {
     breadcrumbs: (json['breadcrumbs'] as List).map((e) => CatalogFolder.fromJson(e)).toList(),
     childFolders: (json['childFolders'] as List).map((e) => CatalogFolder.fromJson(e)).toList(),
     childVideos: (json['childVideos'] as List).map((e) => CatalogVideo.fromJson(e)).toList(),
+    isTopLevel: json['isTopLevel'] == true,
   );
 }
 
@@ -174,7 +228,15 @@ class AdminVideoDetail {
   final CatalogFolder? parentFolder;
   final List<SubtitleSetOption> subtitleSetOptions;
 
-  const AdminVideoDetail({required this.video, this.parentFolder, required this.subtitleSetOptions});
+  /// A movie in the library root — episodes don't get artwork.
+  final bool isTopLevel;
+
+  const AdminVideoDetail({
+    required this.video,
+    this.parentFolder,
+    required this.subtitleSetOptions,
+    this.isTopLevel = false,
+  });
 
   factory AdminVideoDetail.fromJson(Map<String, dynamic> json) => AdminVideoDetail(
     video: CatalogVideo.fromJson(json['video'] as Map<String, dynamic>),
@@ -184,6 +246,7 @@ class AdminVideoDetail {
     subtitleSetOptions: (json['subtitleSetOptions'] as List)
         .map((e) => SubtitleSetOption.fromJson(e))
         .toList(),
+    isTopLevel: json['isTopLevel'] == true,
   );
 }
 
@@ -228,5 +291,21 @@ class ScanResult {
     deletedFolders: (json['deletedFolders'] as List).map((e) => DeletedCatalogItem.fromJson(e)).toList(),
     deletedVideos: (json['deletedVideos'] as List).map((e) => DeletedCatalogItem.fromJson(e)).toList(),
     erroredFolderIds: (json['erroredFolderIds'] as List).map((e) => e as String).toList(),
+  );
+}
+
+/// Result of "Match missing artwork" (POST /api/admin/catalog/artwork/auto-match).
+class ArtworkAutoMatchResult {
+  final int matched;
+  final List<({String kind, String id, String name})> unmatched;
+
+  const ArtworkAutoMatchResult({required this.matched, required this.unmatched});
+
+  factory ArtworkAutoMatchResult.fromJson(Map<String, dynamic> json) => ArtworkAutoMatchResult(
+    matched: (json['matched'] as List? ?? const []).length,
+    unmatched: [
+      for (final item in (json['unmatched'] as List? ?? const []).cast<Map<String, dynamic>>())
+        (kind: item['kind'] as String, id: item['id'] as String, name: item['name'] as String),
+    ],
   );
 }

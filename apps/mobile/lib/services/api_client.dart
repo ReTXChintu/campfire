@@ -68,6 +68,13 @@ class ApiClient {
             body: body != null ? jsonEncode(body) : null,
           );
           break;
+        case 'PUT':
+          res = await http.put(
+            uri,
+            headers: headers,
+            body: body != null ? jsonEncode(body) : null,
+          );
+          break;
         case 'DELETE':
           res = await http.delete(uri, headers: headers);
           break;
@@ -207,6 +214,10 @@ class ApiClient {
 
   static Future<dynamic> patch(String path, Object body, [Map<String, String>? headers]) async {
     return _send('PATCH', path, body: body, extraHeaders: headers);
+  }
+
+  static Future<dynamic> put(String path, Object body) async {
+    return _send('PUT', path, body: body);
   }
 
   static Future<dynamic> delete(String path) async {

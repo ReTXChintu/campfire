@@ -202,6 +202,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: Text('Download ${_update!.version}'),
                   ),
                 ),
+              // TMDb's API terms ask for this notice wherever its data appears.
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'Artwork and synopses come from TMDb. This product uses the TMDB API but is not '
+                  'endorsed or certified by TMDB.',
+                  style: TextStyle(color: AppColors.textTertiary, fontSize: 12, height: 1.4),
+                ),
+              ),
               const FilmstripDivider(),
               OutlinedButton.icon(
                 onPressed: () => _confirmSignOut(auth),

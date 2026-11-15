@@ -25,6 +25,7 @@ export default function DetailHeader({
   id,
   title,
   eyebrow,
+  overview,
   thumbnailPath,
   backHref,
   facts,
@@ -34,6 +35,8 @@ export default function DetailHeader({
   id: string;
   title: string;
   eyebrow?: string;
+  /** A synopsis, when the title is matched on TMDb. */
+  overview?: string | null;
   thumbnailPath: string | null;
   backHref?: string;
   facts: { label: string; value: ReactNode }[];
@@ -62,6 +65,10 @@ export default function DetailHeader({
               <p className="font-display text-xs tracking-[0.16em] text-text-tertiary uppercase">{eyebrow}</p>
             )}
             <h1 className="font-display text-4xl leading-none tracking-wide text-white sm:text-5xl">{title}</h1>
+            {overview && (
+              // Capped in characters per line for reading, not a page-width wrapper.
+              <p className="mt-3 line-clamp-4 max-w-[68ch] text-sm leading-relaxed text-text-secondary">{overview}</p>
+            )}
             {actions && <div className="mt-5 flex flex-wrap gap-2.5">{actions}</div>}
             {aside && <div className="mt-5">{aside}</div>}
           </div>

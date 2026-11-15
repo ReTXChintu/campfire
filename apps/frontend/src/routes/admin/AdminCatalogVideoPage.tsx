@@ -3,6 +3,7 @@ import { useAdminVideo, useDeleteVideo } from "../../hooks/useAdminCatalog";
 import { ApiError } from "../../lib/api";
 import AdminShell from "../../components/admin/AdminShell";
 import VideoCurationForm from "../../components/admin/VideoCurationForm";
+import ArtworkPanel from "../../components/admin/ArtworkPanel";
 import NotFoundPage from "../NotFoundPage";
 
 export default function AdminCatalogVideoPage() {
@@ -21,7 +22,7 @@ export default function AdminCatalogVideoPage() {
 
   if (error || !data) return <NotFoundPage />;
 
-  const { video, parentFolder, subtitleSetOptions } = data;
+  const { video, parentFolder, subtitleSetOptions, isTopLevel } = data;
   const displayName = video.title ?? video.driveName;
 
   const handleDelete = () => {
@@ -66,6 +67,18 @@ export default function AdminCatalogVideoPage() {
         titleOverridden={video.titleOverridden}
         introOverridden={video.introOverridden}
       />
+
+      {isTopLevel && (
+        <div className="mt-8">
+          <ArtworkPanel
+            kind="video"
+            id={fileId!}
+            artwork={video.artwork}
+            autoOff={video.artworkAutoOff}
+            hasDriveThumbnail={false}
+          />
+        </div>
+      )}
 
       <section className="mt-10 rounded-xl border border-danger/30 bg-danger-soft p-4">
         <h2 className="text-sm font-semibold text-danger">Danger zone</h2>

@@ -125,6 +125,11 @@ class _FolderScreenState extends State<FolderScreen> {
                       runSpacing: 6,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
+                        if (data.year != null)
+                          Text(
+                            '${data.year} ·',
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
+                          ),
                         Text(
                           data.isSeries
                               ? '${data.seasons.length} ${data.seasons.length == 1 ? "season" : "seasons"}'
@@ -138,6 +143,10 @@ class _FolderScreenState extends State<FolderScreen> {
                           ),
                       ],
                     ),
+                    if (data.overview != null) ...[
+                      const SizedBox(height: 10),
+                      _Synopsis(text: data.overview!),
+                    ],
                     const SizedBox(height: 16),
                     Row(
                       children: [
@@ -316,6 +325,37 @@ class _Hero extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A series' TMDb synopsis: three lines, tap for the rest.
+class _Synopsis extends StatefulWidget {
+  final String text;
+  const _Synopsis({required this.text});
+
+  @override
+  State<_Synopsis> createState() => _SynopsisState();
+}
+
+class _SynopsisState extends State<_Synopsis> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: _expanded ? 'Synopsis, tap to collapse' : 'Synopsis, tap to read all',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Text(
+          widget.text,
+          maxLines: _expanded ? null : 3,
+          overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13.5, height: 1.45),
+        ),
       ),
     );
   }

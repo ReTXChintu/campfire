@@ -4,6 +4,7 @@ import '../../models/admin_catalog.dart';
 import '../../services/admin_catalog_service.dart';
 import '../../services/api_client.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/admin/admin_artwork_panel.dart';
 import '../../widgets/admin/admin_folder_title_form.dart';
 import '../../widgets/admin/catalog_children_list.dart';
 
@@ -77,6 +78,17 @@ class _AdminCatalogFolderPageState extends State<AdminCatalogFolderPage> {
                       status: data.folder.status,
                       onChanged: _reload,
                     ),
+                    if (data.isTopLevel) ...[
+                      const SizedBox(height: 24),
+                      AdminArtworkPanel(
+                        kind: 'folder',
+                        id: widget.folderId,
+                        artwork: data.folder.artwork,
+                        autoOff: data.folder.artworkAutoOff,
+                        hasDriveThumbnail: data.folder.thumbnailFileId != null,
+                        onChanged: _reload,
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     const Text('Contents', style: TextStyle(color: AppColors.foreground, fontSize: 16, fontWeight: FontWeight.bold)),
                     const Divider(height: 24),

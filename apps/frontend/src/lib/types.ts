@@ -30,6 +30,26 @@ export type ConvertedSubtitle = {
   vtt: string;
 };
 
+/** A movie's or series' TMDb match (backend lib/artwork.ts). Admin-only detail; viewers just get
+ * the image through the usual thumbnail routes plus `year`/`overview` on the detail responses. */
+export type CatalogArtwork = {
+  source: "link" | "auto";
+  tmdbType: "movie" | "tv";
+  tmdbId: string;
+  title: string;
+  year: number | null;
+  overview: string | null;
+  backdropPath: string | null;
+  posterPath: string | null;
+  matchedAt: string;
+};
+
+type ArtworkFields = {
+  artwork?: CatalogArtwork | null;
+  /** Removed by an admin; not matched automatically again until they ask. */
+  artworkAutoOff?: boolean;
+};
+
 export type CatalogFolderStatus = "pending" | "curated" | "published";
 
 export type CatalogFolderPublishRule = {
@@ -51,7 +71,7 @@ export type CatalogFolder = {
   curatedAt: string | null;
   curatedBy: string | null;
   updatedAt: string;
-};
+} & ArtworkFields;
 
 export type CatalogVideoStatus = "pending" | "curated" | "published";
 
@@ -81,7 +101,7 @@ export type CatalogVideo = {
   curatedAt: string | null;
   curatedBy: string | null;
   updatedAt: string;
-};
+} & ArtworkFields;
 
 /** One slide of the Home spotlight carousel. `kind` describes what the badge is saying, not what
  * the item is: "new"/"featured" are library picks, "request" is a title somebody asked for that
@@ -122,6 +142,9 @@ export type FolderFlatResponse = {
   title: string | null;
   backHref: string;
   thumbnailFileId: string | null;
+  /** From the TMDb match; absent from older backends. */
+  year?: number | null;
+  overview?: string | null;
   items: CatalogListItem[];
   progress: WatchProgress[];
 };
@@ -132,6 +155,8 @@ export type FolderSeriesResponse = {
   title: string | null;
   backHref: string;
   thumbnailFileId: string | null;
+  year?: number | null;
+  overview?: string | null;
   seasons: { id: string; name: string }[];
   selectedSeasonId: string;
   seasonItems: CatalogListItem[];
@@ -144,6 +169,9 @@ export type FolderResponse = FolderFlatResponse | FolderSeriesResponse;
 export type VideoResponse = {
   fileId: string;
   title: string | null;
+  /** A movie's TMDb year and synopsis, when it's matched. */
+  year?: number | null;
+  overview?: string | null;
   backHref: string;
   parentFolderId: string;
   nextFileId: string | null;

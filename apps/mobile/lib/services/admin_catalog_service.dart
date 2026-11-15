@@ -21,6 +21,25 @@ class AdminCatalogService {
     return AdminVideoDetail.fromJson(data);
   }
 
+  // --- Artwork (backend routes/admin/artwork.ts); kind is "folder" or "video". ---
+
+  static Future<void> setArtworkLink(String kind, String id, String link) {
+    return ApiClient.put('/api/admin/catalog/artwork/$kind/$id', {'link': link});
+  }
+
+  static Future<void> matchArtwork(String kind, String id) {
+    return ApiClient.post('/api/admin/catalog/artwork/$kind/$id/auto');
+  }
+
+  static Future<void> clearArtwork(String kind, String id) {
+    return ApiClient.delete('/api/admin/catalog/artwork/$kind/$id');
+  }
+
+  static Future<ArtworkAutoMatchResult> matchMissingArtwork() async {
+    final data = await ApiClient.post('/api/admin/catalog/artwork/auto-match') as Map<String, dynamic>;
+    return ArtworkAutoMatchResult.fromJson(data);
+  }
+
   static Future<void> saveFolderTitle(String folderId, String title) {
     return ApiClient.patch('/api/admin/catalog/folder/$folderId', {'title': title});
   }

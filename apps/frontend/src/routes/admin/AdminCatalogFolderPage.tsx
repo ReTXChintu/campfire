@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router-dom";
 import { useAdminFolder } from "../../hooks/useAdminCatalog";
 import AdminShell from "../../components/admin/AdminShell";
 import FolderTitleForm from "../../components/admin/FolderTitleForm";
+import ArtworkPanel from "../../components/admin/ArtworkPanel";
 import FolderPublishRule from "../../components/admin/FolderPublishRule";
 import CatalogChildrenList from "../../components/admin/CatalogChildrenList";
 import NotFoundPage from "../NotFoundPage";
@@ -20,7 +21,7 @@ export default function AdminCatalogFolderPage() {
 
   if (error || !data) return <NotFoundPage />;
 
-  const { folder, breadcrumbs, childFolders, childVideos } = data;
+  const { folder, breadcrumbs, childFolders, childVideos, isTopLevel } = data;
 
   return (
     <AdminShell section="catalog" title={folder.title ?? folder.driveName}>
@@ -44,6 +45,16 @@ export default function AdminCatalogFolderPage() {
         driveName={folder.driveName}
         status={folder.status}
       />
+
+      {isTopLevel && (
+        <ArtworkPanel
+          kind="folder"
+          id={folderId!}
+          artwork={folder.artwork}
+          autoOff={folder.artworkAutoOff}
+          hasDriveThumbnail={Boolean(folder.thumbnailFileId)}
+        />
+      )}
 
       {childVideos.length > 0 && (
         <FolderPublishRule

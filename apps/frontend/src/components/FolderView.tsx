@@ -15,6 +15,8 @@ export default function FolderView({
   title,
   backHref,
   thumbnailFileId,
+  year,
+  overview,
   items,
   progressByFileId,
 }: {
@@ -22,6 +24,8 @@ export default function FolderView({
   title: string;
   backHref?: string;
   thumbnailFileId: string | null;
+  year?: number | null;
+  overview?: string | null;
   items: CatalogListItem[];
   progressByFileId: Map<string, WatchProgress>;
 }) {
@@ -36,9 +40,11 @@ export default function FolderView({
         id={folderId}
         title={title}
         eyebrow="Collection"
+        overview={overview}
         thumbnailPath={thumbnailFileId ? `/api/thumbnail-folder/${folderId}` : null}
         backHref={backHref}
         facts={[
+          ...(year ? [{ label: "Year", value: year }] : []),
           { label: "Items", value: items.length },
           ...(folders.length > 0 ? [{ label: "Folders", value: folders.length }] : []),
           ...(formats.length > 0 ? [{ label: "Formats", value: formats.join(", ") }] : []),

@@ -3,6 +3,7 @@ import '../../models/admin_catalog.dart';
 import '../../services/admin_catalog_service.dart';
 import '../../services/api_client.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/admin/admin_artwork_panel.dart';
 import '../../widgets/admin/admin_scan_button.dart';
 import '../../widgets/admin/catalog_children_list.dart';
 import '../../widgets/app_shell.dart';
@@ -90,7 +91,14 @@ class _AdminCatalogPageState extends State<AdminCatalogPage> {
                     style: TextStyle(color: AppColors.textSecondary, height: 1.45),
                   ),
                   const SizedBox(height: 16),
-                  Align(alignment: Alignment.centerLeft, child: AdminScanButton(onScanned: _reload)),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      AdminScanButton(onScanned: _reload),
+                      AdminMatchArtworkButton(onMatched: _reload),
+                    ],
+                  ),
                   const SizedBox(height: 24),
                   if (data.pendingFolders.isNotEmpty || data.pendingVideos.isNotEmpty) ...[
                     Text(

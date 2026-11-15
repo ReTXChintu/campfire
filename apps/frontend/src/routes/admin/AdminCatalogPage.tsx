@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useAdminOverview } from "../../hooks/useAdminCatalog";
 import AdminShell from "../../components/admin/AdminShell";
 import ScanButton from "../../components/admin/ScanButton";
+import MatchArtworkButton from "../../components/admin/MatchArtworkButton";
 import CatalogChildrenList from "../../components/admin/CatalogChildrenList";
 import { ErrorCard, Skeleton } from "../../components/ui/States";
 
@@ -56,7 +57,12 @@ export default function AdminCatalogPage() {
       section="catalog"
       title="Catalog"
       description="Scan Drive to find new folders and videos, curate them, then publish so they show up in the app. Curating alone does not make something visible to viewers — Publish does."
-      actions={<ScanButton />}
+      actions={
+        <div className="flex flex-wrap items-start gap-3">
+          <ScanButton />
+          <MatchArtworkButton />
+        </div>
+      }
     >
       {error && (
         <ErrorCard
