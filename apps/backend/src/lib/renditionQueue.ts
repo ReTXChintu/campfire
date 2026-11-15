@@ -1,4 +1,4 @@
-// Mirrors conversionQueue.ts's shape (single always-on VPS process, deliberately one ffmpeg job at
+// Single always-on VPS process, deliberately one ffmpeg job at
 // a time — never runs a rendition encode concurrently with a Converter job or another rendition,
 // since both are CPU-heavy libx264 encodes competing for the same box).
 import { generateRenditionFile } from "./drive";

@@ -6,7 +6,7 @@ export type SubtitleSet = {
   _id: ObjectId;
   sourceLabel: string; // the title typed into the Converter form (or the video's title, for a direct upload)
   subtitles: ConvertedSubtitle[];
-  jobId: string; // uploadJobs.jobId, or "manual-upload" for a subtitle uploaded directly during curation
+  jobId: string; // historical conversion-job id, or "manual-upload" for one uploaded during curation
   createdAt: Date;
   createdBy: string;
   linkedVideoId: string | null; // catalogVideos._id once attached — a set links to at most one video

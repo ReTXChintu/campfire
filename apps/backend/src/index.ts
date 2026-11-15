@@ -6,7 +6,6 @@ import { env } from "./config/env";
 import { seedAdminUser } from "./lib/users";
 import { ensureIndexes as ensureDevicePairingIndexes } from "./lib/devicePairings";
 import { ensureIndexes as ensureMediaRequestIndexes } from "./lib/mediaRequests";
-import { startConversionQueue } from "./lib/conversionQueue";
 import { startRenditionQueue } from "./lib/renditionQueue";
 
 import authRoutes from "./routes/auth";
@@ -22,10 +21,6 @@ import appVersionRoutes from "./routes/appVersion";
 import watchPartyRoutes from "./routes/watchParties";
 import requestRoutes, { requestImageRouter } from "./routes/requests";
 
-import adminStageRoutes from "./routes/admin/stage";
-import adminConvertRoutes from "./routes/admin/convert";
-import adminJobsRoutes from "./routes/admin/jobs";
-import adminDownloadRoutes from "./routes/admin/download";
 import adminScanRoutes from "./routes/admin/scan";
 import adminOverviewRoutes from "./routes/admin/overview";
 import adminCatalogFolderRoutes from "./routes/admin/catalogFolder";
@@ -55,10 +50,6 @@ app.use("/api/watch-parties", watchPartyRoutes);
 app.use("/api/requests", requestRoutes);
 app.use("/api/request-image", requestImageRouter);
 
-app.use("/api/admin/stage", adminStageRoutes);
-app.use("/api/admin/convert", adminConvertRoutes);
-app.use("/api/admin/jobs", adminJobsRoutes);
-app.use("/api/admin/download", adminDownloadRoutes);
 app.use("/api/admin/scan", adminScanRoutes);
 app.use("/api/admin/catalog/overview", adminOverviewRoutes);
 app.use("/api/admin/catalog/folder", adminCatalogFolderRoutes);
@@ -79,7 +70,6 @@ Promise.all([
   ensureMediaRequestIndexes(),
 ])
   .then(() => {
-    startConversionQueue();
     startRenditionQueue();
     server.listen(env.port, () => {
       console.log(`Campfire backend listening on http://0.0.0.0:${env.port}`);

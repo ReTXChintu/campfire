@@ -8,8 +8,7 @@ import { env } from "../config/env";
 
 /** A reference image is a poster or a screenshot somebody attached to a request so the admin can
  * tell which release they actually mean. Small, permanent-ish files — they live next to the
- * renditions on disk, not in the OS temp dir (unlike lib/staging.ts's short-lived uploads), since
- * a request can sit in the queue for weeks. */
+ * renditions on disk, not in the OS temp dir, since a request can sit in the queue for weeks. */
 
 export const MAX_REQUEST_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -32,7 +31,8 @@ export function mimeForImageId(imageId: string): string {
 
 // Ids are `<uuid><ext>` and are built here, never taken from the client — but they do come back
 // from the client on the way out (GET /api/request-image/:id), so the shape is re-validated
-// before any of them is turned into a path. Same reasoning as staging.ts's assertValidStagingId.
+// before any of them is turned into a path — it's the only thing between a client-supplied
+// string and a filesystem path.
 const IMAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|webp|gif)$/i;
 
 export function isValidImageId(imageId: string): boolean {

@@ -409,15 +409,14 @@ const TEXT_SUBTITLE_CODECS = new Set(["subrip", "ass", "ssa", "mov_text", "webvt
 
 const probeCache = new Map<string, ProbeResult>();
 
-// A probe/convert operation reads either from Drive (over HTTP, with a bearer token) or from a
-// local file already staged on disk (see the admin upload staging flow) — the ffmpeg/ffprobe
-// argument-building logic is identical either way except for how the input is specified, so both
-// entry points funnel through here rather than duplicating the (already debugged once) details
-// like `-ss` placement, video-codec detection, and subtitle extraction.
-type MediaSource = { type: "drive"; fileId: string } | { type: "local"; path: string };
+// Every probe/remux/rendition operation reads from Drive over HTTP with a bearer token. This used
+// to also cover local files staged on disk by the admin upload/convert flow, which is gone now
+// that every client plays MKV directly — hence the one-variant union: it keeps the ffmpeg/ffprobe
+// argument-building (the `-ss` placement, video-codec detection and subtitle mapping, all debugged
+// once) in a single place, and leaves room for a non-Drive source when storage changes.
+type MediaSource = { type: "drive"; fileId: string };
 
 async function sourceInputArgs(source: MediaSource): Promise<string[]> {
-  if (source.type === "local") return ["-i", source.path];
   const accessToken = await getDriveAccessToken();
   const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(source.fileId)}?alt=media`;
   return ["-headers", `Authorization: Bearer ${accessToken}\r\n`, "-i", mediaUrl];
@@ -492,13 +491,6 @@ export async function probeStreams(fileId: string): Promise<ProbeResult> {
   return result;
 }
 
-/** Probes a file already staged on local disk (admin upload flow, before it's on Drive at all) —
- * much faster/more reliable than the Drive-URL path since there's no network or bearer-token
- * round trip involved. Not cached — staged files are single-use and short-lived. */
-export async function probeLocalFile(filePath: string): Promise<ProbeResult> {
-  return probeSource({ type: "local", path: filePath });
-}
-
 /**
  * Extracts one subtitle stream and converts it to WebVTT for use in a <track> element, streamed
  * (not buffered) and seeking near `startSeconds` first — like `remuxToMp4`. This has to work the
@@ -549,141 +541,9 @@ export type ConvertedSubtitle = {
   vtt: string;
 };
 
-export type ConvertResult = {
-  tempFilePath: string;
-  chosenAudioTrack: StreamTrack | null;
-  durationSeconds: number | null;
-  subtitles: ConvertedSubtitle[];
-};
-
-/** Converts a file already staged on local disk to MP4 — no Drive round trip for the source at
- * all, only the eventual upload of the result. */
-export async function convertLocalFileToMp4(
-  filePath: string,
-  audioIndex: number,
-): Promise<ConvertResult> {
-  const source: MediaSource = { type: "local", path: filePath };
-  const probe = await probeLocalFile(filePath);
-  const tempFilePath = join(tmpdir(), `convert-local-${randomUUID()}.mp4`);
-  return convertWithInputArgs(source, probe, audioIndex, tempFilePath);
-}
-
-async function convertWithInputArgs(
-  source: MediaSource,
-  probe: ProbeResult,
-  audioIndex: number,
-  tempFilePath: string,
-): Promise<ConvertResult> {
-  const videoArgs = probe.videoTrack?.codecName === "h264" ? ["-c:v", "copy"] : ["-c:v", "libx264"];
-  const inputArgs = await sourceInputArgs(source);
-  const subtitleMapArgs = probe.subtitleTracks.flatMap((t) => ["-map", `0:${t.index}`]);
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const ffmpeg = spawn(env.ffmpegPath, [
-        ...inputArgs,
-        "-map", "0:v:0",
-        "-map", `0:${audioIndex}`,
-        ...subtitleMapArgs,
-        ...videoArgs,
-        "-c:a", "aac",
-        "-b:a", "192k",
-        // Downmix to stereo: ffmpeg's native AAC encoder can't reliably encode >2 channels (hit
-        // live: "Unsupported channel layout '6 channels'" on a 5.1 AC3/EAC3 source track, which is
-        // common in MKV rips) — browsers don't render surround differently from stereo anyway, so
-        // this is a pure reliability fix, not a quality tradeoff that matters for web playback.
-        "-ac", "2",
-        ...(subtitleMapArgs.length > 0 ? ["-c:s", "mov_text"] : []),
-        "-movflags", "+faststart",
-        "-f", "mp4",
-        "-y",
-        tempFilePath,
-      ]);
-      const stderrTail: string[] = [];
-      ffmpeg.stderr.on("data", (chunk: Buffer) => {
-        process.stderr.write(`[ffmpeg-convert ${chunk}`);
-        stderrTail.push(chunk.toString("utf-8"));
-        if (stderrTail.length > 20) stderrTail.shift();
-      });
-      ffmpeg.on("error", (err) => reject(friendlyBinaryError(err, "ffmpeg")));
-      ffmpeg.on("close", (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          // Surface ffmpeg's own diagnostic (e.g. "Unsupported channel layout") in the error that
-          // ends up on the job doc, instead of just the exit code — that's what's actually useful
-          // for figuring out what went wrong without digging through server logs.
-          const detail = stderrTail.join("").trim().split("\n").slice(-5).join(" | ");
-          reject(new Error(`ffmpeg conversion failed (exit ${code})${detail ? `: ${detail}` : ""}`));
-        }
-      });
-    });
-
-    const chosenAudioTrack = probe.audioTracks.find((t) => t.index === audioIndex) ?? null;
-    const subtitles = await extractAllSubtitlesToVtt(tempFilePath, probe.subtitleTracks);
-
-    return { tempFilePath, chosenAudioTrack, durationSeconds: probe.durationSeconds, subtitles };
-  } catch (error) {
-    // ffmpeg's -y flag creates/truncates tempFilePath immediately, so a failure partway through
-    // (bad channel layout, unsupported codec, killed process, ...) leaves a broken partial file
-    // behind — nothing else ever cleans this up, since the caller's own cleanup only covers the
-    // staged *input*. Best-effort delete before re-throwing so the real error still propagates.
-    await unlink(tempFilePath).catch(() => {});
-    throw error;
-  }
-}
-
-/**
- * Extracts every subtitle track to full WebVTT text, for permanent storage (subtitle sets get
- * linked to a catalog video later, independent of this conversion job). Reads from the
- * just-produced `outputPath`, not the original (possibly multi-GB) source — the output already has
- * these tracks muxed in as `mov_text` (see `convertWithInputArgs`), so this is a fast read of a
- * small, already-muxed file rather than a full demux pass over a huge source (which live subtitle
- * extraction elsewhere in this file notes can take minutes per track on a large MKV). Uses ordinal
- * subtitle-stream selectors (`0:s:N`) rather than the original absolute stream indices, since the
- * output's stream numbering doesn't match the source's — `-map 0:s:N` addresses the Nth subtitle
- * stream regardless of container, working identically against source or output.
- */
-// Pirated rips commonly embed a fake extra "subtitle" stream that's really just a promotional
-// watermark (e.g. a single cue reading "Downloaded From <site>" for the first few seconds) — not
-// a real subtitle track. A genuine track for a full-length video is always at least tens of KB;
-// confirmed live on a real file where the watermark track was 76 bytes against a legitimate
-// 32KB track for the same episode. Anything this small is filtered out rather than surfaced as a
-// confusing, effectively-empty "subtitle" option.
-const MIN_REAL_SUBTITLE_BYTES = 500;
-
-async function extractAllSubtitlesToVtt(
-  outputPath: string,
-  tracks: StreamTrack[],
-): Promise<ConvertedSubtitle[]> {
-  const subtitles: ConvertedSubtitle[] = [];
-  for (let i = 0; i < tracks.length; i++) {
-    const track = tracks[i];
-    try {
-      const vtt = await runBuffered(
-        env.ffmpegPath,
-        "ffmpeg",
-        ["-i", outputPath, "-map", `0:s:${i}`, "-c:s", "webvtt", "-f", "webvtt", "pipe:1"],
-        120_000,
-      );
-      if (vtt.byteLength < MIN_REAL_SUBTITLE_BYTES) continue;
-      subtitles.push({
-        index: track.index,
-        language: track.language,
-        title: track.title,
-        vtt: vtt.toString("utf-8"),
-      });
-    } catch {
-      // Don't fail the whole conversion over one bad subtitle track — just skip it.
-    }
-  }
-  return subtitles;
-}
-
 /** Converts a standalone .srt file's text to WebVTT — for a subtitle uploaded directly on a
- * video's curation page (not extracted from a converted video, see `extractAllSubtitlesToVtt`).
- * ffmpeg needs a real input, not stdin piping (keeps this consistent with the rest of this file's
- * temp-file-based conversion calls), so this writes to a short-lived temp file first. */
+ * video's curation page. ffmpeg needs a real input, not stdin piping, so this writes to a
+ * short-lived temp file first. */
 export async function convertSrtTextToVtt(srtText: string): Promise<string> {
   const tempPath = join(tmpdir(), `subtitle-upload-${randomUUID()}.srt`);
   await writeFile(tempPath, srtText, "utf-8");

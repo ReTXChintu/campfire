@@ -61,7 +61,7 @@ export const env = {
     return process.env.FFPROBE_PATH || "ffprobe";
   },
   // Where pre-generated quality-rendition files (see lib/renditions.ts) live on disk — a real,
-  // permanent directory, not the OS temp dir (unlike staging.ts/downloads.ts's short-lived files).
+  // permanent directory, not the OS temp dir — these are generated once and then served for good.
   // Defaults to a sibling of dist/ inside the backend package; override for a different disk/mount.
   get renditionsDir() {
     return process.env.RENDITIONS_DIR || join(__dirname, "..", "..", "renditions");

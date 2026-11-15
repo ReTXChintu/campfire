@@ -7,7 +7,7 @@ Monorepo: `apps/frontend` (Vite + React SPA, deploys as a static site), `apps/ba
 ## How it works
 
 - **Login**: no OAuth — plain email/password. One admin account is seeded into Mongo from `ADMIN_EMAIL`/`ADMIN_PASSWORD` on every backend startup (edit those two vars and restart the backend to change the password); anyone else can sign up for their own account from the login screen, same as the old "any Google account can sign in" behavior, just with a password instead of an OAuth handshake. Signup never grants admin — only the seeded `ADMIN_EMAIL` account gets the admin UI.
-- **Google Drive access**: server-side only, via a Service Account (`GOOGLE_SERVICE_ACCOUNT_KEY_BASE64`) — unrelated to login. Service accounts have no storage quota of their own, so the target Drive folder only needs to be shared with the service account's email as **Viewer**; the app never writes to Drive. New content is uploaded by hand through Drive's own UI; the admin **Converter** page is a local convert-and-download tool (device → server → browser-native MP4 download), not a Drive uploader.
+- **Google Drive access**: server-side only, via a Service Account (`GOOGLE_SERVICE_ACCOUNT_KEY_BASE64`) — unrelated to login. Service accounts have no storage quota of their own, so the target Drive folder only needs to be shared with the service account's email as **Viewer**; the app never writes to Drive. New content is uploaded by hand through Drive's own UI.
 
 ## Google Cloud setup (Drive access only)
 
@@ -47,9 +47,11 @@ And copy `apps/frontend/.env.example` to `apps/frontend/.env`:
 VITE_API_URL=http://localhost:4000    # your deployed backend URL in prod
 ```
 
-## Admin Converter
+## Movie/series requests
 
-The seeded `ADMIN_EMAIL` account can visit `/admin` to convert a video from their own device into a browser-native MP4 entirely on the server (no Drive round trip for the source file), then download the result and upload it to the Drive folder by hand. `ffprobe` runs once during staging so the admin can pick an audio track and see real track info before converting; extracted subtitle tracks are saved and can be linked to a catalog video afterwards without re-uploading them.
+Any signed-in viewer can ask for something that isn't in the library: a **title plus one reference** — either an IMDb/TMDb link or an uploaded image — and nothing else. Movie-vs-series and year are never asked of the requester; they come from the TMDb lookup when `TMDB_API_KEY` is set (entirely optional — without it the link is simply stored and the admin opens it themselves) and are otherwise the admin's to set. The board is visible to everyone, so duplicate asks become upvotes on the existing one.
+
+The seeded `ADMIN_EMAIL` account works the queue at `/admin/requests` (web, and the Windows desktop build): status tabs, bulk status changes, and a detail panel for the note the requester will read. Marking a request **added** requires linking the catalog item that fulfilled it, which is what makes it appear on everyone's home screen as a "Requested by … · Now available" spotlight slide.
 
 ## Content conventions
 
@@ -72,7 +74,7 @@ This runs both `apps/backend` (http://localhost:4000) and `apps/frontend` (http:
 
 ## Mobile / desktop app
 
-`apps/mobile` is a separate Flutter app (Android + Windows desktop), not an npm workspace — see `apps/mobile/README.md` for its own setup. It mirrors the web app's screens, dark theme, and email/password login. Admin/curation screens exist there too, but only in the Windows build — Android has none, same as before. The Converter tool is still web-only.
+`apps/mobile` is a separate Flutter app (Android + Windows desktop), not an npm workspace — see `apps/mobile/README.md` for its own setup. It mirrors the web app's screens, dark theme, and email/password login. Admin/curation screens exist there too, but only in the Windows build — Android has none, same as before.
 
 ## Deployment
 
