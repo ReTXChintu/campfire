@@ -330,7 +330,7 @@ class SpotlightSlideView extends StatelessWidget {
                     // for this" is checkable rather than just flattering.
                     if (slide.isRequest && slide.requestId != null)
                       OutlinedButton.icon(
-                        onPressed: () => context.push('/requests?request=${slide.requestId}'),
+                        onPressed: () => context.go('/requests?request=${slide.requestId}'),
                         style: _ghostButtonStyle,
                         icon: const Icon(Icons.auto_awesome, size: 18),
                         label: Text(slide.youAsked ? 'Your request' : 'See the request'),

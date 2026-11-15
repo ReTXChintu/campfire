@@ -21,6 +21,7 @@ import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
 import 'episodes_panel.dart';
 import 'lock_banner.dart';
+import 'tv_focusable.dart';
 
 // TEMP diagnostic logging — remove once the Android resume/subtitle investigation is done.
 void _dbg(String msg) => debugPrint('[MKV ${DateTime.now().toIso8601String().substring(11, 23)}] $msg');
@@ -1351,24 +1352,37 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
             child: GestureDetector(onTap: _closePanels, child: Container(color: Colors.black54)),
           ),
           Container(
-            width: 260,
-            color: const Color(0xF2141414),
+            width: 300,
+            decoration: const BoxDecoration(
+              color: AppColors.bgElevated,
+              border: Border(left: BorderSide(color: AppColors.dividerStrong)),
+            ),
             child: SafeArea(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),
                     child: Row(
                       children: [
                         Expanded(
-                          child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                          child: Text(title.toUpperCase(), style: AppTheme.display(fontSize: 20)),
                         ),
-                        IconButton(icon: const Icon(Icons.close, color: Colors.white70), onPressed: _closePanels),
+                        IconButton(
+                          tooltip: 'Close',
+                          icon: const Icon(Icons.close, color: AppColors.textSecondary),
+                          onPressed: _closePanels,
+                        ),
                       ],
                     ),
                   ),
-                  Expanded(child: ListView(children: children)),
+                  const Divider(height: 1, color: AppColors.divider),
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      children: children,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1378,40 +1392,86 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     );
   }
 
+  /// One row of a player track/quality menu. Focusable with a visible ring (a `RadioListTile`
+  /// gave an Android TV remote nothing it could see), 50dp minimum, and carrying the track's own
+  /// detail line — language, title or source — when there is one worth showing.
+  Widget _trackRow({
+    required String label,
+    String? detail,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return TvFocusable(
+      autofocus: selected,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      onTap: onTap,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        excludeSemantics: true,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 50),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.accentSoft : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: selected ? AppColors.foreground : AppColors.textSecondary,
+                        fontSize: 14,
+                        fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                      ),
+                    ),
+                    if (detail != null)
+                      Text(
+                        detail,
+                        style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
+                      ),
+                  ],
+                ),
+              ),
+              if (selected) const Icon(Icons.check, size: 18, color: AppColors.accent),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _qualityMenu() {
     final heights = _ladderHeights;
     final sourceHeight = _probe?.sourceHeight;
     return _sidePanel('Quality', [
-      RadioListTile<String>(
-        value: 'auto',
-        groupValue: _qualitySelection,
-        title: Text(
-          _qualitySelection == 'auto' && _autoResolvedHeight != null
-              ? 'Auto (${_autoResolvedHeight}p)'
-              : 'Auto',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        activeColor: AppColors.accent,
-        onChanged: (_) => _changeQuality('auto'),
+      _trackRow(
+        label: _qualitySelection == 'auto' && _autoResolvedHeight != null
+            ? 'Auto (${_autoResolvedHeight}p)'
+            : 'Auto',
+        detail: 'Steps down if playback struggles',
+        selected: _qualitySelection == 'auto',
+        onTap: () => _changeQuality('auto'),
       ),
-      RadioListTile<String>(
-        value: 'original',
-        groupValue: _qualitySelection,
-        title: Text(
-          sourceHeight != null ? 'Original (${sourceHeight}p)' : 'Original',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        activeColor: AppColors.accent,
-        onChanged: (_) => _changeQuality('original'),
+      _trackRow(
+        label: sourceHeight != null ? 'Original (${sourceHeight}p)' : 'Original',
+        detail: 'Straight from the source file',
+        selected: _qualitySelection == 'original',
+        onTap: () => _changeQuality('original'),
       ),
       ...heights.map((h) {
         final option = _probe!.availableQualities.firstWhere((q) => q.height == h);
-        return RadioListTile<String>(
-          value: h.toString(),
-          groupValue: _qualitySelection,
-          title: Text(option.label, style: const TextStyle(color: Colors.white70)),
-          activeColor: AppColors.accent,
-          onChanged: (_) => _changeQuality(h.toString()),
+        return _trackRow(
+          label: option.label,
+          selected: _qualitySelection == h.toString(),
+          onTap: () => _changeQuality(h.toString()),
         );
       }),
     ]);
@@ -1432,12 +1492,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         .toList();
 
     return _sidePanel('Subtitles', [
-      RadioListTile<String>(
-        value: 'no',
-        groupValue: _track.subtitle.id,
-        title: const Text('Off', style: TextStyle(color: Colors.white70)),
-        activeColor: AppColors.accent,
-        onChanged: (_) {
+      _trackRow(
+        label: 'Off',
+        selected: _track.subtitle.id == 'no',
+        onTap: () {
           _selectedSubtitleTrack = SubtitleTrack.no();
           _player.setSubtitleTrack(_selectedSubtitleTrack);
           _subtitlePreferenceSource = 'off';
@@ -1449,13 +1507,13 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         },
       ),
       ...external.map((entry) {
-        final label = entry.subtitle.language ?? entry.subtitle.title ?? 'Track ${entry.subtitle.index}';
-        return RadioListTile<String>(
-          value: entry.track.id,
-          groupValue: _track.subtitle.id,
-          title: Text(label, style: const TextStyle(color: Colors.white70)),
-          activeColor: AppColors.accent,
-          onChanged: (_) {
+        final label =
+            entry.subtitle.language ?? entry.subtitle.title ?? 'Track ${entry.subtitle.index}';
+        return _trackRow(
+          label: label,
+          detail: 'Uploaded alongside this title',
+          selected: _track.subtitle.id == entry.track.id,
+          onTap: () {
             _selectedSubtitleTrack = entry.track;
             _player.setSubtitleTrack(_selectedSubtitleTrack);
             _subtitlePreferenceSource = 'external';
@@ -1469,12 +1527,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       }),
       ...embedded.map((t) {
         final label = t.language ?? t.title ?? 'Embedded track ${t.id}';
-        return RadioListTile<String>(
-          value: t.id,
-          groupValue: _track.subtitle.id,
-          title: Text(label, style: const TextStyle(color: Colors.white70)),
-          activeColor: AppColors.accent,
-          onChanged: (_) {
+        return _trackRow(
+          label: label,
+          detail: 'Embedded in the file',
+          selected: _track.subtitle.id == t.id,
+          onTap: () {
             // Embedded tracks have no identifier worth persisting (mpv's own id isn't stable/
             // portable across opens or players) — leaves any existing saved preference untouched.
             _selectedSubtitleTrack = t;
@@ -1492,12 +1549,16 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       'Audio Track',
       real.map((t) {
         final label = t.id == 'auto' ? 'Default' : (t.language ?? t.title ?? 'Track ${t.id}');
-        return RadioListTile<String>(
-          value: t.id,
-          groupValue: _track.audio.id,
-          title: Text(label, style: const TextStyle(color: Colors.white70)),
-          activeColor: AppColors.accent,
-          onChanged: (_) {
+        // Whatever of language/title didn't become the label, so a file with two English tracks
+        // is still tellable apart. Nothing invented: these are the fields mpv reports.
+        final detail = t.id == 'auto'
+            ? 'Whichever track the file marks as default'
+            : [?t.language, ?t.title].where((part) => part != label).join(' · ');
+        return _trackRow(
+          label: label,
+          detail: detail.isEmpty ? null : detail,
+          selected: _track.audio.id == t.id,
+          onTap: () {
             _player.setAudioTrack(t);
             // "Default" clears any remembered override (language/title both null still counts as
             // a real, explicit preference — see _hasAudioPreference); a specific track remembers

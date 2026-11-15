@@ -7,6 +7,7 @@ import '../../services/api_client.dart';
 import '../../services/catalog_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/admin/admin_request_detail.dart';
+import '../../widgets/app_shell.dart';
 import '../../widgets/request_poster.dart';
 import '../../widgets/request_status_pill.dart';
 
@@ -131,32 +132,39 @@ class _AdminRequestsPageState extends State<AdminRequestsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Admin · Requests', style: AppTheme.display(fontSize: 20)),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _loading ? null : _load,
-            icon: const Icon(Icons.refresh, color: Colors.white),
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _statusTabs(),
-            if (_selected.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _bulkBar(),
-            ],
-            const SizedBox(height: 14),
-            Expanded(child: _body()),
+    // Inside the admin sidebar shell (screens/admin/admin_shell.dart) — its own PaneHeader
+    // rather than an AppBar, so Overview, Catalog and Requests read as one surface.
+    return Column(
+      children: [
+        PaneHeader(
+          title: 'Requests',
+          subtitle: 'The viewer request queue',
+          actions: [
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _loading ? null : _load,
+              icon: const Icon(Icons.refresh, color: AppColors.foreground),
+            ),
           ],
         ),
-      ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(28, 16, 28, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _statusTabs(),
+                if (_selected.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _bulkBar(),
+                ],
+                const SizedBox(height: 14),
+                Expanded(child: _body()),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -86,3 +86,30 @@ class AppTheme {
     );
   }
 }
+
+/// Corner radii from the redesign's token set (`--r-sm` … `--r-pill`). Kept as plain doubles
+/// rather than BorderRadius so they compose with both ClipRRect and BoxDecoration call sites.
+class AppRadius {
+  AppRadius._();
+
+  static const sm = 8.0;
+  static const md = 12.0;
+  static const lg = 16.0;
+  static const xl = 24.0;
+  static const pill = 999.0;
+}
+
+/// Layout constants the responsive shell and every pane agree on. Layouts are full-width by
+/// product rule — these are side gutters, never a centred max-width column.
+class AppLayout {
+  AppLayout._();
+
+  /// Below this the shell uses a bottom navigation bar; at or above it, a persistent left
+  /// sidebar (Windows desktop and Android TV).
+  static const sidebarBreakpoint = 840.0;
+
+  /// 16px on phones, 24–32px on desktop.
+  static double gutter(double width) => width >= sidebarBreakpoint ? 28 : 16;
+
+  static bool usesSidebar(double width) => width >= sidebarBreakpoint;
+}

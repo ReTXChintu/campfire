@@ -7,6 +7,7 @@ import '../services/api_client.dart';
 import '../services/catalog_service.dart';
 import '../services/requests_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_shell.dart';
 import '../widgets/request_poster.dart';
 import '../widgets/request_sheet.dart';
 import '../widgets/request_status_pill.dart';
@@ -164,27 +165,33 @@ class _RequestsScreenState extends State<RequestsScreen> with SingleTickerProvid
   Widget build(BuildContext context) {
     final mineCount = _mine?.length ?? 0;
 
+    // Inside the responsive shell (widgets/app_shell.dart) this screen supplies its own
+    // PaneHeader rather than a Material AppBar, so it looks identical to Home/Search/Profile on
+    // both the phone's bottom-nav layout and the desktop sidebar one.
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Requests', style: AppTheme.display(fontSize: 22)),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _loading ? null : _refresh,
-            icon: const Icon(Icons.refresh, color: Colors.white),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabs,
-          indicatorColor: AppColors.accent,
-          indicatorWeight: 3,
-          labelColor: AppColors.foreground,
-          unselectedLabelColor: AppColors.textTertiary,
-          labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-          tabs: [
-            const Tab(text: 'Browse requests'),
-            Tab(text: mineCount > 0 ? 'My requests ($mineCount)' : 'My requests'),
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(104 + MediaQuery.paddingOf(context).top),
+        child: PaneHeader(
+          title: 'Requests',
+          actions: [
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _loading ? null : _refresh,
+              icon: const Icon(Icons.refresh, color: AppColors.foreground),
+            ),
           ],
+          bottom: TabBar(
+            controller: _tabs,
+            indicatorColor: AppColors.accent,
+            indicatorWeight: 3,
+            labelColor: AppColors.foreground,
+            unselectedLabelColor: AppColors.textTertiary,
+            labelStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+            tabs: [
+              const Tab(text: 'Browse requests'),
+              Tab(text: mineCount > 0 ? 'My requests ($mineCount)' : 'My requests'),
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
