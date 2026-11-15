@@ -104,11 +104,14 @@ export function PosterBadge({ children, tone = "neutral" }: { children: ReactNod
   );
 }
 
-/** The watch-progress bar pinned to the bottom of the artwork. */
-export function PosterProgress({ percent }: { percent: number }) {
+/** The watch-progress bar pinned to the bottom of the artwork — green and full once finished. */
+export function PosterProgress({ percent, done = false }: { percent: number; done?: boolean }) {
   return (
     <div className="absolute inset-x-0 bottom-0 h-1 bg-black/60">
-      <div className="h-full bg-accent" style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
+      <div
+        className={`h-full ${done ? "bg-live" : "bg-accent"}`}
+        style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+      />
     </div>
   );
 }

@@ -54,13 +54,18 @@ function extractPartyCode(value: string): string {
   }
 }
 
+// The server's stored state, as a sync target. effectivePositionSeconds is where the party is at
+// the moment the server answered, so it's timed from *our* receipt of it — no clock comparison.
 function toSyncState(party: WatchParty): WatchPartySyncState {
   return {
     type: "sync-state",
+    kind: "snapshot",
     playing: party.playing,
-    positionSeconds: party.positionSeconds,
+    positionSeconds: party.effectivePositionSeconds,
     playbackRate: party.playbackRate,
     updatedAt: party.updatedAt,
+    fileId: party.fileId,
+    receivedAtMs: Date.now(),
   };
 }
 
@@ -71,8 +76,7 @@ function isSyncState(value: unknown): value is WatchPartySyncState {
     candidate.type === "sync-state" &&
     typeof candidate.playing === "boolean" &&
     typeof candidate.positionSeconds === "number" &&
-    typeof candidate.playbackRate === "number" &&
-    typeof candidate.updatedAt === "string"
+    typeof candidate.playbackRate === "number"
   );
 }
 
@@ -81,6 +85,9 @@ export default function WatchPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { fileId } = useParams<{ fileId: string }>();
+  // Read from the long-lived room callbacks, which would otherwise see the fileId they mounted with.
+  const fileIdRef = useRef(fileId);
+  fileIdRef.current = fileId;
   const [searchParams, setSearchParams] = useSearchParams();
   const partyId = searchParams.get("party");
   const [joinCode, setJoinCode] = useState("");
@@ -316,12 +323,20 @@ export default function WatchPage() {
         }
         return;
       }
+      // Only the sync topic carries playback state (status, chat history etc. share the channel).
+      if (topic !== undefined && topic !== "watch-party-sync") return;
       // Sync-state broadcasts a granted guest sends now look identical to a host's — accept from
       // any current controller, not just the party's fixed host identity.
       if (!participant || !controllerIdentitiesRef.current.has(participant.identity)) return;
       try {
         const parsed = JSON.parse(new TextDecoder().decode(payload));
-        if (isSyncState(parsed)) setIncomingSyncState(parsed);
+        if (!isSyncState(parsed)) return;
+        // The party moved to another title (the leader went to the next episode) — follow it.
+        if (typeof parsed.fileId === "string" && parsed.fileId && parsed.fileId !== fileIdRef.current) {
+          navigate(`/watch/${parsed.fileId}?party=${partyId}`, { replace: true });
+          return;
+        }
+        setIncomingSyncState({ ...parsed, receivedAtMs: Date.now(), self: false });
       } catch {
         // Ignore non-sync payloads.
       }
@@ -385,7 +400,7 @@ export default function WatchPage() {
       setMicEnabled(false);
       setCameraEnabled(false);
     };
-  }, [joinedTokenData, partyId, syncParticipants, setSearchParams, queryClient, pushReaction]);
+  }, [joinedTokenData, partyId, syncParticipants, setSearchParams, queryClient, pushReaction, navigate]);
 
   const inviteLink = useMemo(() => {
     if (!party || typeof window === "undefined") return null;
@@ -451,7 +466,7 @@ export default function WatchPage() {
   const handlePartySyncState = useCallback(
     async (state: WatchPartySyncState) => {
       if (!partyId || !canControlPlayback) return;
-      setIncomingSyncState(state);
+      setIncomingSyncState({ ...state, self: true });
       await updateWatchPartyState
         .mutateAsync({
           playing: state.playing,
@@ -462,7 +477,9 @@ export default function WatchPage() {
 
       const currentRoom = roomRef.current;
       if (!currentRoom) return;
-      const payload = new TextEncoder().encode(JSON.stringify(state));
+      const payload = new TextEncoder().encode(
+        JSON.stringify({ ...state, kind: "action", fileId: fileIdRef.current ?? null }),
+      );
       await currentRoom.localParticipant.publishData(payload, { reliable: true, topic: "watch-party-sync" });
     },
     [canControlPlayback, partyId, updateWatchPartyState],

@@ -3,6 +3,7 @@ import type { CatalogVideoListItem } from "../lib/catalogListItem";
 import type { WatchProgress } from "../lib/types";
 import Poster, { PosterAction, PosterBadge, PosterProgress } from "./Poster";
 import { formatLabel, playsInBrowser, remainingLabel } from "../lib/mediaFormat";
+import { progressPercent } from "../lib/progress";
 
 /**
  * One film or episode. Everything it shows comes from the API: the Drive thumbnail, the name, the
@@ -19,10 +20,7 @@ export default function VideoCard({
   /** Continue-watching uses the wide still; rails and grids use the poster frame. */
   ratio?: "poster" | "still";
 }) {
-  const percent =
-    progress && progress.durationSeconds > 0
-      ? Math.min(100, (progress.positionSeconds / progress.durationSeconds) * 100)
-      : 0;
+  const percent = progressPercent(progress);
   const remaining = progress
     ? remainingLabel(progress.positionSeconds, progress.durationSeconds, progress.completed)
     : null;
@@ -42,7 +40,7 @@ export default function VideoCard({
           )}
         </div>
         <PosterAction label={percent > 0 && !progress?.completed ? "Resume" : "Play"} />
-        {percent > 0 && <PosterProgress percent={percent} />}
+        {percent > 0 && <PosterProgress percent={percent} done={!!progress?.completed} />}
       </Poster>
 
       <h3 className="mt-2.5 line-clamp-2 text-sm font-semibold text-white transition group-hover:text-amber">

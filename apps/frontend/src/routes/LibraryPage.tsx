@@ -9,6 +9,7 @@ import RequestModal from "../components/requests/RequestModal";
 import { CardSkeletonRail, EmptyState, ErrorCard, Skeleton } from "../components/ui/States";
 import { PAGE_X } from "../lib/layout";
 import type { CatalogFolderListItem, CatalogVideoListItem } from "../lib/catalogListItem";
+import { libraryProgressMap } from "../lib/progress";
 
 /** How many items a rail shows before "See all" takes over — a rail is a sampler, the grid is the
  * whole shelf. */
@@ -65,6 +66,7 @@ export default function LibraryPage() {
   }
 
   const { spotlight, continueWatching, folders, videos } = data;
+  const progress = libraryProgressMap(data);
 
   return (
     <main className="w-full flex-1 pb-16">
@@ -86,7 +88,7 @@ export default function LibraryPage() {
       )}
 
       {folders.length > 0 && (
-        <Rail title="Series" eyebrow={`${folders.length} in your library`} seeAllHref="/series">
+        <Rail title="Series" eyebrow={`${folders.length} in your library`} seeAllHref="/discover?type=series">
           {folders.slice(0, RAIL_LIMIT).map((folder) => (
             <RailItem key={folder.id}>
               <FolderCard item={folder as CatalogFolderListItem} />
@@ -98,10 +100,10 @@ export default function LibraryPage() {
       {videos.length > 0 && (
         <>
           <div className="filmstrip" />
-          <Rail title="Films" eyebrow={`${videos.length} in your library`} seeAllHref="/movies">
+          <Rail title="Films" eyebrow={`${videos.length} in your library`} seeAllHref="/discover?type=movies">
             {videos.slice(0, RAIL_LIMIT).map((video) => (
               <RailItem key={video.id}>
-                <VideoCard item={video as CatalogVideoListItem} />
+                <VideoCard item={video as CatalogVideoListItem} progress={progress.get(video.id)} />
               </RailItem>
             ))}
           </Rail>

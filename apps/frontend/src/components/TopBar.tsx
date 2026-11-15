@@ -11,8 +11,7 @@ const desktopAppDownloadUrl = import.meta.env.VITE_DESKTOP_APP_DOWNLOAD_URL;
  * here or on the Settings page. */
 const DESTINATIONS = [
   { to: "/", label: "Home" },
-  { to: "/series", label: "Series" },
-  { to: "/movies", label: "Movies" },
+  { to: "/discover", label: "Discover" },
   { to: "/requests", label: "Requests" },
 ];
 

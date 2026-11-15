@@ -111,6 +111,9 @@ export type LibraryResponse = {
   continueWatching: { item: CatalogListItem; progress: WatchProgress }[];
   folders: CatalogListItem[];
   videos: CatalogListItem[];
+  // This user's progress on the library's own videos, completed ones included — so a film card
+  // can show it was watched. Absent from a backend older than the field.
+  progress?: WatchProgress[];
 };
 
 export type FolderFlatResponse = {
@@ -185,6 +188,7 @@ export type WatchParty = {
   positionSeconds: number;
   effectivePositionSeconds: number;
   playbackRate: number;
+  serverTimeMs?: number;
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;
@@ -233,6 +237,17 @@ export type WatchPartySyncState = {
   positionSeconds: number;
   playbackRate: number;
   updatedAt: string;
+  // Added with the phone/desktop app's sync rewrite; all optional so either side can be older.
+  // "action" = someone did something (snap to it); "heartbeat" = the leader's periodic position
+  // (only correct real drift); "snapshot" = the server's stored state, read on join.
+  kind?: "action" | "heartbeat" | "snapshot";
+  serverTimeMs?: number;
+  fileId?: string | null;
+  // Local-only: when this state arrived here. Elapsed time is measured from arrival, never from
+  // the sender's clock, which may be seconds off from ours.
+  receivedAtMs?: number;
+  // Local-only: a state this device emitted itself, kept for display but never re-applied.
+  self?: boolean;
 };
 
 // --- Media requests ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import type { CatalogVideoListItem } from "../lib/catalogListItem";
 import type { WatchProgress } from "../lib/types";
 import Poster, { PosterProgress } from "./Poster";
 import { formatLabel, playsInBrowser, remainingLabel } from "../lib/mediaFormat";
+import { progressPercent } from "../lib/progress";
 
 /** One row of a season's episode list: the still, the position in the season, the name, and the
  * real watch state. Used by the series and folder detail pages (the prototype's episode list). */
@@ -15,10 +16,7 @@ export default function EpisodeRow({
   index: number;
   progress?: WatchProgress;
 }) {
-  const percent =
-    progress && progress.durationSeconds > 0
-      ? Math.min(100, (progress.positionSeconds / progress.durationSeconds) * 100)
-      : 0;
+  const percent = progressPercent(progress);
   const remaining = progress
     ? remainingLabel(progress.positionSeconds, progress.durationSeconds, progress.completed)
     : null;
@@ -30,7 +28,7 @@ export default function EpisodeRow({
       className="group grid grid-cols-[92px_minmax(0,1fr)] items-center gap-3 rounded-xl border border-transparent p-2 transition hover:border-divider hover:bg-surface sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-4"
     >
       <Poster path={`/api/thumbnail/${item.id}`} title={item.name} id={item.id} ratio="still">
-        {percent > 0 && <PosterProgress percent={percent} />}
+        {percent > 0 && <PosterProgress percent={percent} done={!!progress?.completed} />}
       </Poster>
       <div className="min-w-0">
         <p className="font-mono text-[11px] text-text-tertiary">{String(index + 1).padStart(2, "0")}</p>

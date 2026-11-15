@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Navigate, Routes, Route } from "react-router-dom";
 import TopBar from "./components/TopBar";
 import { ProtectedRoute, AdminRoute } from "./components/ProtectedRoute";
 import LoginPage from "./routes/LoginPage";
@@ -33,21 +33,16 @@ export default function App() {
           }
         />
         <Route
-          path="/series"
+          path="/discover"
           element={
             <ProtectedRoute>
-              <BrowsePage kind="series" />
+              <BrowsePage />
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/movies"
-          element={
-            <ProtectedRoute>
-              <BrowsePage kind="movies" />
-            </ProtectedRoute>
-          }
-        />
+        {/* The old separate shelves, kept so bookmarks land on the right chip. */}
+        <Route path="/series" element={<Navigate to="/discover?type=series" replace />} />
+        <Route path="/movies" element={<Navigate to="/discover?type=movies" replace />} />
         <Route
           path="/folder/:folderId"
           element={

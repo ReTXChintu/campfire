@@ -618,25 +618,39 @@ export default function VideoPlayer({
   }, [speed, src]);
 
   useEffect(() => {
-    if (!syncEnabled || watchPartySync?.canControl || !watchPartySync?.inboundState || !videoRef.current) return;
+    if (!syncEnabled || !watchPartySync?.inboundState || !videoRef.current) return;
     const video = videoRef.current;
     const state = watchPartySync.inboundState;
-    const elapsedSeconds = Math.max(0, Date.now() - Date.parse(state.updatedAt)) / 1000;
+    // Our own broadcast, echoed into state for display — never re-applied to ourselves.
+    if (state.self) return;
+    // A controller only takes other controllers' actions, never anyone's heartbeat.
+    if (watchPartySync.canControl && state.kind === "heartbeat") return;
+    // Elapsed since it arrived (plus a typical one-way hop), not since the sender's clock said —
+    // that clock can be seconds off from this one.
+    const elapsedSeconds =
+      state.receivedAtMs !== undefined
+        ? Math.max(0, Date.now() - state.receivedAtMs) / 1000 + 0.1
+        : Math.max(0, Date.now() - Date.parse(state.updatedAt)) / 1000;
     const targetPosition = Math.max(
       0,
       state.positionSeconds + (state.playing ? elapsedSeconds * state.playbackRate : 0),
     );
+    const drift = Math.abs(getAbsolutePosition(video) - targetPosition);
+    // Heartbeats arrive every few seconds; seeking on each would stutter. Only real drift moves us.
+    const seekThreshold = state.kind === "heartbeat" ? 1.5 : 0.4;
 
     applyingInboundSyncRef.current = true;
-    video.currentTime = targetPosition;
+    if (drift > seekThreshold) {
+      video.currentTime = targetPosition;
+      setDisplaySeconds(targetPosition);
+    }
     video.playbackRate = state.playbackRate;
     video.preservesPitch = true;
     setSpeed(state.playbackRate);
-    setDisplaySeconds(targetPosition);
 
     if (state.playing) {
-      void video.play().catch(() => {});
-    } else {
+      if (video.paused) void video.play().catch(() => {});
+    } else if (!video.paused) {
       video.pause();
     }
 
@@ -647,6 +661,7 @@ export default function VideoPlayer({
     // Keyed on the actual inbound state, not the wrapping `watchPartySync` object (see the note
     // on `emitWatchPartyState` above) — otherwise this re-applies the same, increasingly stale
     // position on every unrelated WatchPage render, visibly re-seeking/replaying a guest's video.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncEnabled, watchPartySync?.canControl, watchPartySync?.inboundState]);
 
   useEffect(() => {
