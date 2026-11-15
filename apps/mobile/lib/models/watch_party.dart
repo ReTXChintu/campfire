@@ -1,3 +1,5 @@
+import '../services/party_sync_engine.dart';
+
 // Mirrors apps/frontend/src/lib/types.ts's WatchParty*/WatchPartySyncState shapes and
 // apps/backend/src/routes/watchParties.ts's responses — same fields, Dart-side fromJson.
 
@@ -12,6 +14,11 @@ class WatchParty {
   final double positionSeconds;
   final double effectivePositionSeconds;
   final double playbackRate;
+  final PartyTrackChoice? audioTrack;
+  final PartyTrackChoice? subtitleTrack;
+  /// Server clock (epoch ms) at which [effectivePositionSeconds] was computed; null from a backend
+  /// older than the field.
+  final int? serverTimeMs;
   final String createdAt;
   final String updatedAt;
   final String? endedAt;
@@ -27,6 +34,9 @@ class WatchParty {
     required this.positionSeconds,
     required this.effectivePositionSeconds,
     required this.playbackRate,
+    this.audioTrack,
+    this.subtitleTrack,
+    this.serverTimeMs,
     required this.createdAt,
     required this.updatedAt,
     required this.endedAt,
@@ -43,9 +53,28 @@ class WatchParty {
         positionSeconds: (json['positionSeconds'] as num).toDouble(),
         effectivePositionSeconds: (json['effectivePositionSeconds'] as num).toDouble(),
         playbackRate: (json['playbackRate'] as num).toDouble(),
+        audioTrack: PartyTrackChoice.fromJson(json['audioTrack']),
+        subtitleTrack: PartyTrackChoice.fromJson(json['subtitleTrack']),
+        serverTimeMs: (json['serverTimeMs'] as num?)?.round(),
         createdAt: json['createdAt'] as String,
         updatedAt: json['updatedAt'] as String,
         endedAt: json['endedAt'] as String?,
+      );
+
+  /// Has anyone ever driven playback in this party? A party nobody has played yet has nothing for
+  /// its leader to adopt — the leader's own position becomes the party's instead.
+  bool get hasPlaybackHistory => updatedAt != createdAt;
+
+  /// The stored state as a sync target: where the party is at [serverTimeMs].
+  PartyPlaybackState toSnapshot({required int fallbackServerNowMs}) => PartyPlaybackState(
+        kind: PartyStateKind.snapshot,
+        playing: playing,
+        positionSeconds: effectivePositionSeconds,
+        playbackRate: playbackRate,
+        serverTimeMs: serverTimeMs ?? fallbackServerNowMs,
+        fileId: fileId,
+        audio: audioTrack,
+        subtitle: subtitleTrack,
       );
 }
 
@@ -58,6 +87,8 @@ class WatchPartyParticipant {
   final String userId;
   final String deviceId;
   final String deviceLabel;
+  /// The person's name — null on a session row older than the field; fall back to [deviceLabel].
+  final String? displayName;
   final String clientKind; // "web" | "windows" | "android" | "ios"
   final String role; // "host" | "guest"
   final String deviceRole; // "main" | "companion"
@@ -67,6 +98,7 @@ class WatchPartyParticipant {
     required this.userId,
     required this.deviceId,
     required this.deviceLabel,
+    this.displayName,
     required this.clientKind,
     required this.role,
     required this.deviceRole,
@@ -77,6 +109,7 @@ class WatchPartyParticipant {
         userId: json['userId'] as String,
         deviceId: json['deviceId'] as String,
         deviceLabel: json['deviceLabel'] as String,
+        displayName: json['displayName'] as String?,
         clientKind: json['clientKind'] as String,
         role: json['role'] as String,
         deviceRole: json['deviceRole'] as String,
@@ -84,6 +117,9 @@ class WatchPartyParticipant {
       );
 
   String get identity => '$role-$userId-$deviceId';
+
+  /// What the roster calls this person.
+  String get label => (displayName?.trim().isNotEmpty ?? false) ? displayName!.trim() : deviceLabel;
 }
 
 class WatchPartyExistingSession {
@@ -161,53 +197,4 @@ class WatchPartyJoinSuccess extends WatchPartyJoinResult {
         canControlPlayback: json['canControlPlayback'] as bool,
         party: WatchParty.fromJson(json['party'] as Map<String, dynamic>),
       );
-}
-
-/// The data-channel payload host/guest playback broadcasts over LiveKit's "watch-party-sync" topic
-/// — mirrors WatchPage.tsx's toSyncState/isSyncState exactly, since mobile and web must
-/// interoperate in the same room.
-class WatchPartySyncState {
-  final bool playing;
-  final double positionSeconds;
-  final double playbackRate;
-  final String updatedAt;
-
-  const WatchPartySyncState({
-    required this.playing,
-    required this.positionSeconds,
-    required this.playbackRate,
-    required this.updatedAt,
-  });
-
-  factory WatchPartySyncState.fromParty(WatchParty party) => WatchPartySyncState(
-        playing: party.playing,
-        positionSeconds: party.positionSeconds,
-        playbackRate: party.playbackRate,
-        updatedAt: party.updatedAt,
-      );
-
-  static WatchPartySyncState? tryParse(dynamic value) {
-    if (value is! Map ||
-        value['type'] != 'sync-state' ||
-        value['playing'] is! bool ||
-        value['positionSeconds'] is! num ||
-        value['playbackRate'] is! num ||
-        value['updatedAt'] is! String) {
-      return null;
-    }
-    return WatchPartySyncState(
-      playing: value['playing'] as bool,
-      positionSeconds: (value['positionSeconds'] as num).toDouble(),
-      playbackRate: (value['playbackRate'] as num).toDouble(),
-      updatedAt: value['updatedAt'] as String,
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'type': 'sync-state',
-        'playing': playing,
-        'positionSeconds': positionSeconds,
-        'playbackRate': playbackRate,
-        'updatedAt': updatedAt,
-      };
 }

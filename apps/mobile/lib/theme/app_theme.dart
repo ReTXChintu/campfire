@@ -19,6 +19,7 @@ class AppColors {
   static const accentSoft = Color(0x29FF6A3D); // accent @ 16% alpha
   static const amber = Color(0xFFFFB25E);
   static const live = Color(0xFF3FCB8E);
+  static const info = Color(0xFF7AA7D9);
   static const danger = Color(0xFFE5645E);
   static const dangerSoft = Color(0x24E5645E); // danger @ 14% alpha
   static const divider = Color(0xFF262220);

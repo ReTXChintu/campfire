@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import 'reaction_picker.dart';
 import 'tv_focusable.dart';
 import 'watch_party_chat.dart';
+import '../services/party_chat_controller.dart';
 
 /// Always-mounted right-edge rail for Android TV — never a modal/sheet, since a D-pad-only remote
 /// can't dismiss one the way a touch/mouse back-tap can. See design.html's TV mockups: roster +
@@ -18,6 +19,7 @@ class TvPartyRail extends StatefulWidget {
   final Room room;
   final WatchPartyJoinSuccess joined;
   final List<WatchPartyParticipant> participants;
+  final PartyChatController chat;
   final void Function(WatchPartyParticipant participant, bool grant) onSetControl;
   final VoidCallback onLeave;
   final VoidCallback onEnd;
@@ -33,6 +35,7 @@ class TvPartyRail extends StatefulWidget {
     required this.room,
     required this.joined,
     required this.participants,
+    required this.chat,
     required this.onSetControl,
     required this.onLeave,
     required this.onEnd,
@@ -107,7 +110,7 @@ class _TvPartyRailState extends State<TvPartyRail> {
                           ],
                         ),
                         const SizedBox(height: 12),
-                        Expanded(child: WatchPartyChat(room: widget.room)),
+                        Expanded(child: WatchPartyChat(chat: widget.chat, expand: true)),
                       ],
                     )
                   : Column(
@@ -220,7 +223,7 @@ class _RosterRow extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '${participant.deviceLabel}${isSelf ? ' (You)' : ''}',
+              '${participant.label}${isSelf ? ' (You)' : ''}',
               style: const TextStyle(color: Colors.white, fontSize: 15),
               overflow: TextOverflow.ellipsis,
             ),

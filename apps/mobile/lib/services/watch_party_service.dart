@@ -1,4 +1,5 @@
 import '../models/watch_party.dart';
+import 'party_sync_engine.dart';
 import 'api_client.dart';
 import 'device_id_service.dart';
 
@@ -32,7 +33,7 @@ class WatchPartyService {
       'deviceLabel': DeviceIdService.getDeviceLabel(),
       'clientKind': DeviceIdService.getClientKind(),
       'confirmed': confirmed,
-      if (chosenMainDeviceId != null) 'chosenMainDeviceId': chosenMainDeviceId,
+      'chosenMainDeviceId': ?chosenMainDeviceId,
     }) as Map<String, dynamic>;
     return WatchPartyJoinResult.fromJson(data);
   }
@@ -42,14 +43,36 @@ class WatchPartyService {
     required bool playing,
     required double positionSeconds,
     required double playbackRate,
+    String? fileId,
+    PartyTrackChoice? audioTrack,
+    PartyTrackChoice? subtitleTrack,
   }) async {
     final deviceId = await DeviceIdService.getDeviceId();
     final data = await ApiClient.patch(
       '/api/watch-parties/$partyId/state',
-      {'playing': playing, 'positionSeconds': positionSeconds, 'playbackRate': playbackRate},
+      {
+        'playing': playing,
+        'positionSeconds': positionSeconds,
+        'playbackRate': playbackRate,
+        'fileId': ?fileId,
+        if (audioTrack != null) 'audioTrack': audioTrack.toJson(),
+        if (subtitleTrack != null) 'subtitleTrack': subtitleTrack.toJson(),
+      },
       {'X-Watch-Party-Device-Id': deviceId},
     ) as Map<String, dynamic>;
     return WatchParty.fromJson(data['party'] as Map<String, dynamic>);
+  }
+
+  /// One clock sample for [ServerClock] — timed tightly around the request so the round trip is
+  /// as close to the network's as possible.
+  static Future<void> sampleServerClock(ServerClock clock) async {
+    final sent = clock.localNowMs();
+    final data = await ApiClient.get('/api/watch-parties/time') as Map<String, dynamic>;
+    final received = clock.localNowMs();
+    final serverTime = data['serverTimeMs'];
+    if (serverTime is num) {
+      clock.addSample(sentLocalMs: sent, receivedLocalMs: received, serverTimeMs: serverTime.round());
+    }
   }
 
   static Future<void> end(String partyId) async {
