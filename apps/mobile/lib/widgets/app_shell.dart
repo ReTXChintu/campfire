@@ -31,6 +31,7 @@ class AppShell extends StatefulWidget {
   static const branchDiscover = 2;
   static const branchRequests = 3;
   static const branchProfile = 4;
+  static const branchExplore = 5;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -144,7 +145,7 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// Phone navigation — five destinations, 48dp minimum targets, the accent bar above the active
+/// Phone navigation — six destinations, 48dp minimum targets, the accent bar above the active
 /// one. Discover is the one place to browse everything, with Series/Movies as chips inside it
 /// rather than two separate destinations.
 class _BottomNav extends StatelessWidget {
@@ -159,6 +160,7 @@ class _BottomNav extends StatelessWidget {
       _NavEntry('Home', Icons.home_outlined, Icons.home, AppShell.branchHome),
       _NavEntry('Search', Icons.search_outlined, Icons.search, AppShell.branchSearch),
       _NavEntry('Discover', Icons.explore_outlined, Icons.explore, AppShell.branchDiscover),
+      _NavEntry('Explore', Icons.travel_explore_outlined, Icons.travel_explore, AppShell.branchExplore),
       _NavEntry('Requests', Icons.auto_awesome_outlined, Icons.auto_awesome, AppShell.branchRequests),
       _NavEntry('Profile', Icons.person_outline, Icons.person, AppShell.branchProfile),
     ];
@@ -315,6 +317,12 @@ class _Sidebar extends StatelessWidget {
                     icon: Icons.explore_outlined,
                     selected: currentBranch == AppShell.branchDiscover,
                     onTap: () => onSelectBranch(AppShell.branchDiscover),
+                  ),
+                  SidebarItem(
+                    label: 'Explore',
+                    icon: Icons.travel_explore,
+                    selected: currentBranch == AppShell.branchExplore,
+                    onTap: () => onSelectBranch(AppShell.branchExplore),
                   ),
                   SidebarItem(
                     label: 'Requests',

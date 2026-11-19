@@ -7,6 +7,7 @@ import 'screens/admin/admin_overview_page.dart';
 import 'screens/admin/admin_requests_page.dart';
 import 'screens/admin/admin_shell.dart';
 import 'screens/browse_screen.dart';
+import 'screens/explore_screen.dart';
 import 'screens/folder_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -94,6 +95,11 @@ GoRouter buildRouter(AuthService auth) {
           // 4 — Profile/Settings: everything the old avatar popup menu hid.
           StatefulShellBranch(
             routes: [GoRoute(path: '/profile', builder: (context, state) => const ProfileScreen())],
+          ),
+          // 5 — Explore: all of TMDb on the fisheye wall. Last in this list so the other branch
+          // numbers stay put; the nav shows it next to Discover.
+          StatefulShellBranch(
+            routes: [GoRoute(path: '/explore', builder: (context, state) => const ExploreScreen())],
           ),
         ],
       ),

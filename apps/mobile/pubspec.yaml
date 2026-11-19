@@ -128,6 +128,10 @@ flutter:
     # nothing in the UI itself uses it.
     - assets/fonts/NotoSans-Regular.ttf
 
+  # The Explore wall's fisheye lens (widgets/fisheye_wall.dart).
+  shaders:
+    - shaders/fisheye.frag
+
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 
