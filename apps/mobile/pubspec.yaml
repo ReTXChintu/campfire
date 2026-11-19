@@ -46,7 +46,7 @@ dependencies:
   # of relying on the backend's live ffmpeg-remux fallback used for every other unsupported format.
   # See lib/widgets/mkv_video_player.dart and seekMode: "raw" in apps/backend's catalog route.
   media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
+  media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.5
 
   # Admin panel only (Windows — see platform_info.dart's isDesktopAdminCapable): picking a local
