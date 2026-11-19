@@ -9,6 +9,7 @@ import '../widgets/media_card.dart';
 import '../widgets/spotlight_carousel.dart';
 import '../widgets/ui_kit.dart';
 import '../widgets/update_banner.dart';
+import '../models/discovery.dart';
 
 /// Home — the spotlight carousel, Continue Watching, and a rail per section, each with a "See
 /// all" into the browse grid. Replaces `LibraryScreen`'s single endless rail scroll with
@@ -127,6 +128,16 @@ class _HomeScreenState extends State<HomeScreen> {
             onSeeAll: () => context.go('/discover?type=movies'),
             autofocusFirstItem: continueItems.isEmpty && data.folders.isEmpty,
           ),
+        // A row per well-stocked genre, series and films together, best rated first.
+        for (final shelf in genreShelves([...data.folders, ...data.videos])) ...[
+          const FilmstripDivider(),
+          MediaRail(
+            title: shelf.genre,
+            items: shelf.items,
+            progressByFileId: store.progressByFileId,
+            onSeeAll: () => context.go('/discover?genre=${Uri.encodeQueryComponent(shelf.genre)}'),
+          ),
+        ],
       ],
     );
   }

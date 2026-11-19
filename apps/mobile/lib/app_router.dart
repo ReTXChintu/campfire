@@ -73,7 +73,10 @@ GoRouter buildRouter(AuthService auth) {
               GoRoute(
                 path: '/discover',
                 builder: (context, state) =>
-                    BrowseScreen(type: state.uri.queryParameters['type']),
+                    BrowseScreen(
+                      type: state.uri.queryParameters['type'],
+                      genre: state.uri.queryParameters['genre'],
+                    ),
               ),
             ],
           ),

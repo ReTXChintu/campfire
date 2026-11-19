@@ -11,11 +11,25 @@ sealed class CatalogListItem {
   final int? year;
   final TmdbRating? rating;
 
-  const CatalogListItem({required this.id, required this.name, this.year, this.rating});
+  /// What search, Discover's genre chips and Home's genre rows work from (see models/discovery
+  /// .dart). Empty on anything unmatched, and on a backend older than the fields.
+  final List<String> genres;
+  final List<String> castNames;
+
+  const CatalogListItem({
+    required this.id,
+    required this.name,
+    this.year,
+    this.rating,
+    this.genres = const [],
+    this.castNames = const [],
+  });
 
   factory CatalogListItem.fromJson(Map<String, dynamic> json) {
     final year = (json['year'] as num?)?.toInt();
     final rating = TmdbRating.tryParse(json['rating']);
+    final genres = (json['genres'] as List?)?.whereType<String>().toList() ?? const <String>[];
+    final castNames = (json['castNames'] as List?)?.whereType<String>().toList() ?? const <String>[];
     return json['kind'] == 'folder'
         ? CatalogFolderItem(
             id: json['id'] as String,
@@ -23,6 +37,8 @@ sealed class CatalogListItem {
             thumbnailFileId: json['thumbnailFileId'] as String?,
             year: year,
             rating: rating,
+            genres: genres,
+            castNames: castNames,
           )
         : CatalogVideoItem(
             id: json['id'] as String,
@@ -30,6 +46,8 @@ sealed class CatalogListItem {
             mimeType: json['mimeType'] as String,
             year: year,
             rating: rating,
+            genres: genres,
+            castNames: castNames,
             episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
             overview: json['overview'] as String?,
             runtimeMinutes: (json['runtimeMinutes'] as num?)?.toInt(),
@@ -46,6 +64,8 @@ class CatalogFolderItem extends CatalogListItem {
     this.thumbnailFileId,
     super.year,
     super.rating,
+    super.genres,
+    super.castNames,
   });
 }
 
@@ -65,6 +85,8 @@ class CatalogVideoItem extends CatalogListItem {
     required this.mimeType,
     super.year,
     super.rating,
+    super.genres,
+    super.castNames,
     this.episodeNumber,
     this.overview,
     this.runtimeMinutes,

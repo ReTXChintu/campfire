@@ -11,6 +11,7 @@ import '../widgets/authed_network_image.dart';
 import '../widgets/request_sheet.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/ui_kit.dart';
+import '../models/discovery.dart';
 
 /// Search — the single biggest gap in the old app (there was none at all, on any screen).
 ///
@@ -102,9 +103,11 @@ class _SearchScreenState extends State<SearchScreen> {
 
     if (query.isEmpty) return items;
 
-    // Matched against both the raw name and the cleaned title, so "gravel sky" finds
+    // Title, genre or a lead actor (models/discovery.dart), plus — for a title TMDb doesn't know —
+    // the cleaned filename and its parsed year, so "gravel sky" still finds
     // "Gravel.Sky.2020.1080p.mkv" and "2020" still finds it by year.
     items = items.where((item) {
+      if (matchItem(item, query) != null) return true;
       final video = item is CatalogVideoItem ? item : null;
       final meta = MediaMeta.parse(item.name, mimeType: video?.mimeType);
       final haystack = '${item.name} ${meta.title} ${meta.line}'.toLowerCase();
@@ -294,7 +297,12 @@ class _SearchScreenState extends State<SearchScreen> {
       padding: EdgeInsets.fromLTRB(gutter, 4, gutter, 24),
       itemCount: results.length,
       separatorBuilder: (context, index) => const SizedBox(height: 4),
-      itemBuilder: (context, index) => _ResultRow(item: results[index], progress: store.progressByFileId[results[index].id]),
+      itemBuilder: (context, index) => _ResultRow(
+        item: results[index],
+        progress: store.progressByFileId[results[index].id],
+        // "With Matt Smith" — why an actor's name found this, which otherwise looks like a bug.
+        reason: reasonLabel(matchItem(results[index], query)),
+      ),
     );
   }
 
@@ -354,7 +362,10 @@ class _ResultRow extends StatelessWidget {
   final CatalogListItem item;
   final WatchProgress? progress;
 
-  const _ResultRow({required this.item, this.progress});
+  /// Why it matched, when it wasn't the title.
+  final String? reason;
+
+  const _ResultRow({required this.item, this.progress, this.reason});
 
   @override
   Widget build(BuildContext context) {
@@ -370,7 +381,7 @@ class _ResultRow extends StatelessWidget {
           );
     final subtitle = [
       isFolder ? 'Series' : 'Movie',
-      if (meta.hasAny) meta.line,
+      if (item.year != null) '${item.year}' else if (meta.hasAny) meta.line,
       ?remaining,
     ].join(' · ');
 
@@ -416,8 +427,14 @@ class _ResultRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    subtitle,
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        if (reason != null)
+                          TextSpan(text: '$reason · ', style: const TextStyle(color: AppColors.amber)),
+                        TextSpan(text: subtitle),
+                      ],
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),

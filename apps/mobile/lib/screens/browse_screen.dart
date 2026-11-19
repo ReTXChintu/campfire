@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../models/catalog.dart';
+import '../models/discovery.dart';
 import '../services/library_store.dart';
 import '../theme/app_theme.dart';
 import '../utils/media_meta.dart';
@@ -12,10 +13,8 @@ import '../widgets/ui_kit.dart';
 
 enum _Kind { all, series, movies }
 
-enum _Sort { library, titleAsc, titleDesc, yearDesc }
-
 /// Discover — the whole library as one grid, 2 columns on a phone and up to 6 on a desktop window,
-/// with All/Series/Movies chips and a sort. It's a navigation destination of its own on every
+/// with All/Series/Movies chips, a row of genre chips and a sort. It's a navigation destination of its own on every
 /// platform (bottom nav on a phone, the sidebar on desktop/TV); a Home rail's "See all" lands here
 /// with its chip preselected. Filtering and sorting happen over the already-fetched
 /// library ([LibraryStore]); there is no list endpoint that takes filter or sort parameters, and
@@ -25,7 +24,10 @@ class BrowseScreen extends StatefulWidget {
   /// links preselect a chip.
   final String? type;
 
-  const BrowseScreen({super.key, this.type});
+  /// A genre from `/discover?genre=…` — how a genre row's "See all" on Home preselects its chip.
+  final String? genre;
+
+  const BrowseScreen({super.key, this.type, this.genre});
 
   @override
   State<BrowseScreen> createState() => _BrowseScreenState();
@@ -33,7 +35,13 @@ class BrowseScreen extends StatefulWidget {
 
 class _BrowseScreenState extends State<BrowseScreen> {
   _Kind? _kindOverride;
-  _Sort _sort = _Sort.library;
+  SortKey _sort = SortKey.library;
+
+  /// Null until a chip is tapped; until then the route's `?genre=` decides.
+  String? _genreOverride;
+  bool _genreTouched = false;
+
+  String? get _genre => _genreTouched ? _genreOverride : widget.genre;
 
   @override
   void initState() {
@@ -57,34 +65,31 @@ class _BrowseScreenState extends State<BrowseScreen> {
     // A fresh deep-link (Home's Series "See all", then its Movies one) overrides whatever chip the
     // user last tapped.
     if (oldWidget.type != widget.type) _kindOverride = null;
+    if (oldWidget.genre != widget.genre) _genreTouched = false;
   }
 
-  List<CatalogListItem> _items(LibraryStore store) {
+  List<CatalogListItem> _source(LibraryStore store) {
     final data = store.data;
     if (data == null) return const [];
-    final items = switch (_kind) {
+    return switch (_kind) {
       _Kind.series => [...data.folders],
       _Kind.movies => [...data.videos],
       _Kind.all => [...data.folders, ...data.videos],
     };
+  }
 
-    int year(CatalogListItem item) {
+  List<CatalogListItem> _items(LibraryStore store) {
+    final genre = _genre;
+    final items = _source(store).where((item) => genre == null || item.genres.contains(genre)).toList();
+    // TMDb's year when the title is matched, else whatever year its filename carries; titles with
+    // neither sink to the bottom rather than being guessed at.
+    int? year(CatalogListItem item) {
+      if (item.year != null) return item.year;
       final video = item is CatalogVideoItem ? item : null;
-      return MediaMeta.parse(item.name, mimeType: video?.mimeType).year ?? 0;
+      return MediaMeta.parse(item.name, mimeType: video?.mimeType).year;
     }
 
-    switch (_sort) {
-      case _Sort.library:
-        break;
-      case _Sort.titleAsc:
-        items.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      case _Sort.titleDesc:
-        items.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
-      case _Sort.yearDesc:
-        // Titles whose name carries no year sink to the bottom rather than being guessed at.
-        items.sort((a, b) => year(b).compareTo(year(a)));
-    }
-    return items;
+    return sortItems(items, _sort, yearOf: year);
   }
 
   @override
@@ -93,6 +98,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
     final width = MediaQuery.sizeOf(context).width;
     final gutter = AppLayout.gutter(width);
     final items = _items(store);
+    final genres = allGenres(_source(store));
     return Column(
       children: [
         PaneHeader(
@@ -128,6 +134,27 @@ class _BrowseScreenState extends State<BrowseScreen> {
             ],
           ),
         ),
+        if (genres.isNotEmpty)
+          SizedBox(
+            height: 46,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.fromLTRB(gutter, 0, gutter, 10),
+              children: [
+                for (final g in genres) ...[
+                  CampfireChip(
+                    label: g,
+                    selected: _genre == g,
+                    onTap: () => setState(() {
+                      _genreTouched = true;
+                      _genreOverride = _genre == g ? null : g;
+                    }),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
         Expanded(child: _body(context, store, items, gutter, width)),
       ],
     );
@@ -155,6 +182,18 @@ class _BrowseScreenState extends State<BrowseScreen> {
             onRetry: store.refresh,
           ),
         ],
+      );
+    }
+    if (items.isEmpty && _genre != null) {
+      return EmptyState(
+        icon: Icons.filter_alt_off_outlined,
+        title: 'Nothing in $_genre here',
+        body: 'Try All, or another genre.',
+        actionLabel: 'Clear genre',
+        onAction: () => setState(() {
+          _genreTouched = true;
+          _genreOverride = null;
+        }),
       );
     }
     if (items.isEmpty) {
@@ -186,16 +225,17 @@ class _BrowseScreenState extends State<BrowseScreen> {
 }
 
 class _SortButton extends StatelessWidget {
-  final _Sort sort;
-  final ValueChanged<_Sort> onChanged;
+  final SortKey sort;
+  final ValueChanged<SortKey> onChanged;
 
   const _SortButton({required this.sort, required this.onChanged});
 
-  static String _label(_Sort sort) => switch (sort) {
-    _Sort.library => 'Library order',
-    _Sort.titleAsc => 'Title A–Z',
-    _Sort.titleDesc => 'Title Z–A',
-    _Sort.yearDesc => 'Year, newest',
+  static String _label(SortKey sort) => switch (sort) {
+    SortKey.library => 'Library order',
+    SortKey.az => 'Title A–Z',
+    SortKey.za => 'Title Z–A',
+    SortKey.rating => 'Highest rated',
+    SortKey.newest => 'Year, newest',
   };
 
   @override
@@ -206,12 +246,12 @@ class _SortButton extends StatelessWidget {
       child: TvFocusable(
         borderRadius: BorderRadius.circular(AppRadius.pill),
         onTap: () async {
-          final picked = await showOptionPicker<_Sort>(
+          final picked = await showOptionPicker<SortKey>(
             context: context,
             title: 'Sort by',
             selected: sort,
             options: [
-              for (final option in _Sort.values)
+              for (final option in SortKey.values)
                 PickerOption(value: option, label: _label(option)),
             ],
           );
