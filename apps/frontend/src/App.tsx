@@ -18,6 +18,7 @@ import NotFoundPage from "./routes/NotFoundPage";
 // any business in the bundle every viewer downloads on their first visit.
 const WatchPage = lazyRoute(() => import("./routes/WatchPage"));
 const RequestsPage = lazyRoute(() => import("./routes/RequestsPage"));
+const ExplorePage = lazyRoute(() => import("./routes/ExplorePage"));
 const SettingsPage = lazyRoute(() => import("./routes/SettingsPage"));
 const LinkDevicePage = lazyRoute(() => import("./routes/LinkDevicePage"));
 const ResetPasswordPage = lazyRoute(() => import("./routes/ResetPasswordPage"));
@@ -77,6 +78,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <WatchPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/explore"
+            element={
+              <ProtectedRoute>
+                <ExplorePage />
               </ProtectedRoute>
             }
           />
