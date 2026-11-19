@@ -39,7 +39,7 @@ dependencies:
   go_router: ^14.6.2
   provider: ^6.1.2
   google_fonts: ^6.2.1
-  shared_preferences: ^2.3.3
+  shared_preferences: ^2.5.6
 
   # MKV playback (Windows desktop + Android): libmpv-backed, unlike video_player this decodes the
   # real container directly (true seeking, native embedded audio/subtitle track selection) instead
@@ -62,11 +62,11 @@ dependencies:
 
   # Opens the update-banner's download link in the system browser — see
   # lib/widgets/update_banner.dart.
-  url_launcher: ^6.3.1
+  url_launcher: ^6.3.3
 
   # Windows-only fullscreen toggle for MediaKitVideoPlayer — Windows has no window-level fullscreen
   # concept otherwise. No-ops harmlessly on other platforms.
-  window_manager: ^0.4.3
+  window_manager: ^0.7.0
   # Android: MediaSession (Bluetooth/earphone/smartwatch play-pause-skip + lock-screen "now
   # playing") — see lib/services/media_session_service.dart.
   audio_service: ^0.18.15
@@ -74,7 +74,7 @@ dependencies:
   # widgets/media_kit_video_player.dart.
   screen_brightness: ^2.1.0
   # Android: system media-volume swipe gesture (right half of the player).
-  volume_controller: ^3.3.3
+  volume_controller: ^3.7.1
   # Android TV detection (systemFeatures' android.software.leanback) — see platform_info.dart's
   # isAndroidTv. Already resolved transitively (another dependency pulls it in); declared directly
   # since app code now imports it too.
