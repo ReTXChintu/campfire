@@ -513,7 +513,8 @@ export class WallRenderer {
     gl.deleteTexture(this.focusTex);
     if (this.atlas) gl.deleteTexture(this.atlas);
     gl.deleteProgram(this.program);
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    // The context itself is left alone: the canvas outlives this renderer (React mounts effects
+    // twice in development), and a lost context can't be got back on the same canvas.
   }
 }
 

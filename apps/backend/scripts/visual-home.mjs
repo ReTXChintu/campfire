@@ -11,6 +11,8 @@
 // filenames. Production is never written to either way.
 //
 // --explore takes only the Explore page's shots (rows, filters, a title's where-to-watch panel).
+// --dev serves the web app with Vite's dev server instead of a production build: React's
+// StrictMode then mounts every effect twice, which catches cleanup bugs a build never shows.
 //
 // Needs the backend .env (MONGODB_URI, admin login that also works on production, and
 // TMDB_API_KEY if the new metadata is to be fetched for real) and Chrome.
@@ -27,6 +29,7 @@ const WebSocket = require("ws");
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const RENAME = process.argv.includes("--rename");
 const EXPLORE_ONLY = process.argv.includes("--explore");
+const DEV = process.argv.includes("--dev");
 const OUT = args[0] || "visual-out";
 const PROD = args[1] || "http://187.127.179.114:50001";
 const backendDir = join(import.meta.dirname, "..");
@@ -123,12 +126,11 @@ try {
   if (!api.log.includes("listening")) throw new Error(`backend didn't start:\n${api.log}`);
 
   // 3. This checkout's web app, built against it.
-  execFileSync(process.execPath, [viteBin, "build", "--outDir", webDist, "--emptyOutDir"], {
-    cwd: frontendDir,
-    env: { ...process.env, VITE_API_URL: `http://127.0.0.1:${API_PORT}` },
-    stdio: "ignore",
-  });
-  const web = start(process.execPath, [viteBin, "preview", "--outDir", webDist, "--port", String(WEB_PORT), "--strictPort", "--host", "127.0.0.1"], { cwd: frontendDir }, "web");
+  const webEnv = { ...process.env, VITE_API_URL: `http://127.0.0.1:${API_PORT}` };
+  if (!DEV) execFileSync(process.execPath, [viteBin, "build", "--outDir", webDist, "--emptyOutDir"], { cwd: frontendDir, env: webEnv, stdio: "ignore" });
+  const web = DEV
+    ? start(process.execPath, [viteBin, "--port", String(WEB_PORT), "--strictPort", "--host", "127.0.0.1"], { cwd: frontendDir, env: webEnv }, "web")
+    : start(process.execPath, [viteBin, "preview", "--outDir", webDist, "--port", String(WEB_PORT), "--strictPort", "--host", "127.0.0.1"], { cwd: frontendDir }, "web");
   for (let i = 0; i < 60 && !web.log.includes(String(WEB_PORT)); i++) await sleep(500);
 
   const token = await login(`http://127.0.0.1:${API_PORT}`);

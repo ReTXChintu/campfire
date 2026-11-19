@@ -390,7 +390,10 @@ export default function ExplorePage() {
   };
   const setKind = (k: ExploreKind) => update({ kind: k === "all" ? null : k });
   const toggleLib = () => update({ lib: libOnly ? null : "1" });
-  const setView = (v: View) => update({ view: v === "wall" ? (reduced ? "wall" : null) : "rows" });
+  const setView = (v: View) => {
+    if (v === "wall") setWallFailed(false); // asking for the wall again tries it again
+    update({ view: v === "wall" ? (reduced ? "wall" : null) : "rows" });
+  };
 
   /** On the wall, a search pick that's on the wall glides there first; anything else just opens. */
   const searchPick = (type: "movie" | "tv", id: string) => {
