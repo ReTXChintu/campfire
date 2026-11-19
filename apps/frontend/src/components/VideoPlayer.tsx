@@ -26,6 +26,8 @@ import {
   ChevronLeftIcon,
 } from "./player-icons";
 import { UpNextCard, UpNextEndScreen } from "./UpNext";
+import TrickplayPreview from "./TrickplayPreview";
+import { useTrickplay } from "../lib/trickplay";
 import {
   type UpNextItem,
   UP_NEXT_STREAK_LIMIT,
@@ -195,6 +197,7 @@ export default function VideoPlayer({
   const navigate = useNavigate();
 
   const { data: mediaToken } = useMediaToken(fileId);
+  const trickplay = useTrickplay(fileId);
 
   // "auto" starts unresolved (null) — see QualitySection/the Auto-mode heuristic — so it behaves
   // exactly like "original" until that adaptive logic actually seeds/adjusts it.
@@ -1298,7 +1301,21 @@ export default function VideoPlayer({
             {formatTime(shownSeconds)}
           </span>
           <div className="relative flex-1">
-            {(hoverSeconds != null || scrubValue != null) && effectiveDuration != null && !locked && (
+            {(hoverSeconds != null || scrubValue != null) && effectiveDuration != null && !locked && trickplay && mediaToken ? (
+              // The frame where you'd land. Kept 98px (half its width) clear of each edge.
+              <div
+                className="pointer-events-none absolute bottom-full mb-3 -translate-x-1/2"
+                style={{ left: `clamp(98px, ${scrubValue != null ? progressPercent : hoverPercent}%, calc(100% - 98px))` }}
+              >
+                <TrickplayPreview
+                  fileId={fileId}
+                  manifest={trickplay}
+                  seconds={scrubValue ?? hoverSeconds ?? 0}
+                  mediaToken={mediaToken}
+                  label={formatTime(scrubValue ?? hoverSeconds ?? 0)}
+                />
+              </div>
+            ) : (hoverSeconds != null || scrubValue != null) && effectiveDuration != null && !locked && (
               <div
                 className="pointer-events-none absolute bottom-full mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-black/90 px-2 py-1 text-xs font-semibold tabular-nums text-white shadow-lg"
                 style={{ left: `${scrubValue != null ? progressPercent : hoverPercent}%` }}
