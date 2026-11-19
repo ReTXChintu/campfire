@@ -1,6 +1,6 @@
 {
   "name": "@campfire/backend",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "private": true,
   "type": "commonjs",
   "main": "dist/index.js",
