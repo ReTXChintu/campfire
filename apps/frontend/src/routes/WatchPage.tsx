@@ -553,6 +553,8 @@ export default function WatchPage() {
                 initialSubtitleTitle={video.initialSubtitleTitle}
                 initialAudioLanguage={video.initialAudioLanguage}
                 initialAudioTitle={video.initialAudioTitle}
+                upNext={video.upNext ?? null}
+                suggestions={video.suggestions ?? []}
                 watchPartySync={watchPartySyncProp}
               />
             )}

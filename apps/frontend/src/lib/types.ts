@@ -1,3 +1,4 @@
+import type { UpNextItem } from "./upNext";
 import type { StreamTrack } from "./languageNames";
 import type { CatalogListItem, CatalogVideoListItem } from "./catalogListItem";
 
@@ -256,6 +257,10 @@ export type VideoResponse = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  /** The up-next card's choice and the end screen's "more like this" (see lib/upNext.ts); absent
+   * from an older backend. */
+  upNext?: UpNextItem | null;
+  suggestions?: UpNextItem[];
   // Remembered track choices (see apps/backend/src/lib/progress.ts) — null means "no preference
   // recorded yet", not "off". initialSubtitleIndex is only meaningful when the source is
   // "external" (an index into `subtitles` above) or "restart" (a raw ffprobe stream index, used

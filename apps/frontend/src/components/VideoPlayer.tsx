@@ -25,6 +25,17 @@ import {
   VolumeMuteIcon,
   ChevronLeftIcon,
 } from "./player-icons";
+import { UpNextCard, UpNextEndScreen } from "./UpNext";
+import {
+  type UpNextItem,
+  UP_NEXT_STREAK_LIMIT,
+  bumpAutoplayStreak,
+  getAutoplayStreak,
+  loadAutoplay,
+  resetAutoplayStreak,
+  saveAutoplay,
+  upNextAt,
+} from "../lib/upNext";
 
 type EpisodeProgress = { positionSeconds: number; completed: boolean };
 
@@ -51,6 +62,10 @@ type Props = {
   initialSubtitleTitle: string | null;
   initialAudioLanguage: string | null;
   initialAudioTitle: string | null;
+  /** The up-next card's choice and the end screen's "more like this" (lib/upNext.ts); absent from
+   * an older backend, which keeps the plain "Next Episode" button. */
+  upNext?: UpNextItem | null;
+  suggestions?: UpNextItem[];
   watchPartySync?: {
     enabled: boolean;
     // Whether *this* session currently drives playback for the party — the host's main device
@@ -151,6 +166,8 @@ export default function VideoPlayer({
   initialSubtitleTitle,
   initialAudioLanguage,
   initialAudioTitle,
+  upNext = null,
+  suggestions = [],
   watchPartySync,
 }: Props) {
   const isNative = seekMode === "native";
@@ -370,7 +387,7 @@ export default function VideoPlayer({
     return fields;
   }, [isNative, nativeSubtitleIndex, restartSubtitleIndex, subtitles, audioIndex, probe]);
 
-  const goToNext = useCallback(() => {
+  const goToNext = useCallback((targetFileId?: string) => {
     const video = videoRef.current;
     const positionSeconds = effectiveDuration ?? (video ? getAbsolutePosition(video) : 0);
     apiPost("/api/progress", {
@@ -380,10 +397,58 @@ export default function VideoPlayer({
       durationSeconds: effectiveDuration ?? 0,
       ...trackPreferenceFields(),
     }).catch(() => {});
-    if (nextFileId) {
-      navigate(`/watch/${nextFileId}`);
+    const target = targetFileId ?? nextFileId;
+    if (target) {
+      navigate(`/watch/${target}`);
     }
   }, [fileId, parentFolderId, nextFileId, effectiveDuration, getAbsolutePosition, navigate, trackPreferenceFields]);
+
+  // ---- Up next ------------------------------------------------------------------------------
+  // In a watch party the party decides what plays next, so the card (and its autoplay) is a
+  // solo-viewing thing; a party keeps the plain next-episode hop it always had.
+  const upNextEnabled = upNext != null && !syncEnabled;
+  const [autoplay, setAutoplay] = useState(loadAutoplay);
+  const [upNextDismissed, setUpNextDismissed] = useState(false);
+  const [endScreen, setEndScreen] = useState(false);
+  const [upNextLeft, setUpNextLeft] = useState<number | null>(null);
+  const [needsStillWatching, setNeedsStillWatching] = useState(() => getAutoplayStreak() >= UP_NEXT_STREAK_LIMIT);
+
+  /** Someone is there: the run of unattended plays starts over. */
+  const noteInteraction = () => {
+    resetAutoplayStreak();
+    if (needsStillWatching) setNeedsStillWatching(false);
+  };
+
+  const autoplayUpNext = useCallback(() => {
+    if (!upNext) return;
+    bumpAutoplayStreak();
+    goToNext(upNext.fileId);
+  }, [upNext, goToNext]);
+
+  const playChosen = (item: UpNextItem) => {
+    resetAutoplayStreak();
+    goToNext(item.fileId);
+  };
+
+  const changeAutoplay = (on: boolean) => {
+    setAutoplay(on);
+    saveAutoplay(on);
+  };
+
+  // What `ended` does, read through a ref so the media-event effect below needn't re-subscribe
+  // whenever any of this changes.
+  const onEndedRef = useRef<() => void>(() => {});
+  onEndedRef.current = () => {
+    if (!upNextEnabled) {
+      goToNext();
+      return;
+    }
+    if (!upNextDismissed && autoplay && !needsStillWatching) {
+      autoplayUpNext();
+      return;
+    }
+    setEndScreen(true);
+  };
 
   // Static, fully-loaded VTT text (not seek-position-dependent like the restart-mode subtitle
   // fetch) — build blob URLs once per subtitles prop change. Only relevant for native mode
@@ -496,7 +561,7 @@ export default function VideoPlayer({
       setDisplaySeconds(absolute);
       throttledSave(absolute);
       setShowSkipIntro(introStart != null && introEnd != null && absolute >= introStart && absolute < introEnd);
-      setShowNextEpisode(outroStart != null && absolute >= outroStart && nextFileId != null);
+      setShowNextEpisode(!upNextEnabled && outroStart != null && absolute >= outroStart && nextFileId != null);
     };
 
     const handlePlay = () => {
@@ -514,7 +579,7 @@ export default function VideoPlayer({
       }
     };
 
-    const handleEnded = () => goToNext();
+    const handleEnded = () => onEndedRef.current();
 
     const handlePageHide = () => {
       apiPostKeepalive("/api/progress", {
@@ -601,6 +666,7 @@ export default function VideoPlayer({
     introEnd,
     outroStart,
     emitWatchPartyState,
+    upNextEnabled,
   ]);
 
   // Browsers reset playbackRate to 1 whenever `src` changes, not just when the user picks a new
@@ -688,6 +754,7 @@ export default function VideoPlayer({
   }, []);
 
   const showControls = () => {
+    noteInteraction();
     setControlsVisible(true);
     const video = videoRef.current;
     if (video && !video.paused && !settingsOpen && !episodesOpen) scheduleHide();
@@ -726,6 +793,7 @@ export default function VideoPlayer({
   };
 
   const togglePlay = () => {
+    noteInteraction();
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) video.play();
@@ -1001,6 +1069,57 @@ export default function VideoPlayer({
     emitWatchPartyState({ playbackRate: nextSpeed });
   };
 
+  const upNextStart = upNextEnabled ? upNextAt(outroStart, effectiveDuration ?? null) : null;
+  const inUpNextZone = upNextStart != null && displaySeconds >= upNextStart;
+  const upNextCardVisible = upNextEnabled && inUpNextZone && !upNextDismissed && !endScreen && !locked;
+  const countingDown = upNextCardVisible && autoplay && !needsStillWatching;
+
+  // Seeking back out of the ending puts the end screen away again.
+  useEffect(() => {
+    if (endScreen && upNextStart != null && effectiveDuration != null && displaySeconds < effectiveDuration - 2) {
+      setEndScreen(false);
+    }
+  }, [endScreen, upNextStart, effectiveDuration, displaySeconds]);
+
+  // Through a ref: a new goToNext (say, after a subtitle change) mustn't restart the countdown.
+  const autoplayUpNextRef = useRef(autoplayUpNext);
+  useEffect(() => {
+    autoplayUpNextRef.current = autoplayUpNext;
+  }, [autoplayUpNext]);
+
+  useEffect(() => {
+    if (!countingDown || !upNext) {
+      setUpNextLeft(null);
+      return;
+    }
+    const tickMs = 100;
+    let left = upNext.kind === "episode" ? 10 : 15;
+    setUpNextLeft(left);
+    const id = window.setInterval(() => {
+      const video = videoRef.current;
+      // Paused means "wait": it only counts down while playing, or once the title has ended.
+      if (video && video.paused && !video.ended) return;
+      left -= tickMs / 1000;
+      if (left <= 0) {
+        window.clearInterval(id);
+        autoplayUpNextRef.current();
+        return;
+      }
+      setUpNextLeft(left);
+    }, tickMs);
+    return () => window.clearInterval(id);
+  }, [countingDown, upNext]);
+
+  const watchAgain = () => {
+    setEndScreen(false);
+    setUpNextDismissed(false);
+    const video = videoRef.current;
+    if (!video) return;
+    if (streamIsSeekable) video.currentTime = 0;
+    else setBaseOffsetSeconds(0);
+    video.play();
+  };
+
   const shownSeconds = scrubValue ?? displaySeconds;
   const remainingSeconds =
     effectiveDuration != null ? Math.max(0, effectiveDuration - shownSeconds) : null;
@@ -1091,10 +1210,35 @@ export default function VideoPlayer({
         </button>
       )}
 
+      {upNextCardVisible && upNext && (
+        <div className="absolute bottom-24 right-4 z-10">
+          <UpNextCard
+            item={upNext}
+            secondsLeft={upNextLeft}
+            askStillWatching={needsStillWatching}
+            autoplay={autoplay}
+            onAutoplayChange={changeAutoplay}
+            onPlay={() => playChosen(upNext)}
+            onDismiss={() => setUpNextDismissed(true)}
+          />
+        </div>
+      )}
+
+      {endScreen && upNextEnabled && (
+        <UpNextEndScreen
+          upNext={upNext}
+          suggestions={suggestions}
+          askStillWatching={needsStillWatching && !upNextDismissed}
+          onPlay={playChosen}
+          onReplay={watchAgain}
+          onBack={() => navigate(backHref)}
+        />
+      )}
+
       {showNextEpisode && (
         <button
           type="button"
-          onClick={goToNext}
+          onClick={() => goToNext()}
           className="absolute bottom-24 right-4 rounded-md border border-white/20 bg-black/70 px-4 py-2 text-sm font-semibold text-white backdrop-blur transition hover:bg-black/90"
         >
           Next Episode ›
