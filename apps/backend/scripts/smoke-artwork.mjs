@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MongoClient } from "mongodb";
 import { cleanedTitle, parseReleaseName, pickMatch } from "../src/lib/artwork.ts";
-import { guessSeasonNumber } from "../src/lib/episodeArtwork.ts";
+import { guessSeasonNumber, parseEpisodeNumber } from "../src/lib/episodeArtwork.ts";
 
 let pass = 0;
 const failures = [];
@@ -91,6 +91,47 @@ for (const [name, expected] of seasonNames) {
   check(`"${name}" → ${expected === null ? "unknown" : expected}`, got === expected, JSON.stringify(got));
 }
 check("the Drive name is used when the title has lost the hint", guessSeasonNumber("India's Got Latent", "India's got Latent s2") === 2);
+
+console.log("\nEpisode numbers in filenames");
+const episodeNames = [
+  // The shapes that turn up in a real library.
+  ["HOTD S01E01.mkv", 1, 1],
+  ["S1E1 The Heirs of the Dragon.mkv", 1, 1],
+  ["S01E01: VisionQuest.mkv", 1, 1],
+  ["Show.Name.S02E10.1080p.WEB-DL.x264.mkv", 2, 10],
+  ["show_s03e07_720p.mkv", 3, 7],
+  ["Show S01 E04.mkv", 1, 4],
+  ["Show S01 - E04.mkv", 1, 4],
+  ["Breaking Bad 2x05.mkv", 2, 5],
+  // The anime convention, as this library's Attack on Titan is named.
+  ["AOT S1 - 01 [1080p] [Dual] @infinite_anime.mkv", 1, 1],
+  ["AOT S4 - 30 [1080p] [Dual].mkv", 4, 30],
+  // A long release name whose only episode marker is buried among audio specs.
+  ["Game of Thrones (2011) S05E05 1080p 10bit BluRay x265 HEVC [DDP 2.0 - 192Kbps] ESub - site.mkv", 5, 5],
+  ["Season 1 Episode 3.mp4", 1, 3],
+  ["Episode 7.mkv", null, 7],
+  ["AOT E05.mkv", null, 5],
+];
+for (const [raw, season, episode] of episodeNames) {
+  const got = parseEpisodeNumber(raw);
+  check(`"${raw}" → ${season === null ? "" : `season ${season} `}episode ${episode}`, got?.season === season && got?.episode === episode, JSON.stringify(got));
+}
+const unreadable = [
+  // A part of a season: TMDb numbers the season straight through, and part 1's length isn't here.
+  "S4P1E1 Attack on Titan.mkv",
+  // A DOS short name — the real name is gone.
+  "GA4CB6~1.MKV",
+  // Release noise that looks numeric but isn't an episode.
+  "Movie.2019.1080p.x264.mkv",
+  "Show 1920x1080.mkv",
+  "Weapons (2025) Hindi DD5.1-224Kbps HQ English.mkv",
+  // A pilot or extra numbered 0, and a number spelled out.
+  "Pilot E00.mkv",
+  "Episode One.mkv",
+];
+for (const raw of unreadable) {
+  check(`"${raw}" → says nothing usable`, parseEpisodeNumber(raw) === null, JSON.stringify(parseEpisodeNumber(raw)));
+}
 
 console.log("\nMatch picking");
 const weapons = { id: 1, title: "Weapons", release_date: "2025-08-06", popularity: 80 };
@@ -207,6 +248,18 @@ const seasons = {
     { episode_number: 3, name: "Second of His Name", overview: "A war in the Stepstones.", still_path: "/hotdS1E3.jpg", air_date: "2022-09-04", runtime: 63 },
     { episode_number: 4, name: "King of the Narrow Sea", overview: "Rhaenyra sees the city.", still_path: "/hotdS1E4.jpg", air_date: "2022-09-11", runtime: 64 },
   ],
+  "94997/2": [
+    { episode_number: 1, name: "A Son for a Son", overview: "Blood and cheese.", still_path: "/hotdS2E1.jpg" },
+    { episode_number: 2, name: "Rhaenyra the Cruel", overview: "Aftermath.", still_path: "/hotdS2E2.jpg" },
+    { episode_number: 3, name: "The Burning Mill", overview: "A feud.", still_path: "/hotdS2E3.jpg" },
+    { episode_number: 4, name: "The Red Dragon and the Gold", overview: "Rook's Rest.", still_path: "/hotdS2E4.jpg" },
+  ],
+  "94997/3": [
+    { episode_number: 1, name: "Third Season One", overview: "x", still_path: "/hotdS3E1.jpg" },
+    { episode_number: 2, name: "Third Season Two", overview: "x", still_path: "/hotdS3E2.jpg" },
+    { episode_number: 3, name: "Third Season Three", overview: "x", still_path: "/hotdS3E3.jpg" },
+    { episode_number: 4, name: "Third Season Four", overview: "x", still_path: "/hotdS3E4.jpg" },
+  ],
   "101/2": [
     { episode_number: 1, name: "Episode One", overview: "The judges arrive.", still_path: "/latentS2E1.jpg", air_date: "2025-01-05", runtime: 80 },
   ],
@@ -277,6 +330,14 @@ await db.collection("catalogFolders").insertMany([
   folder("f-unknown", ROOT, "Zzqx Unheard Of Show"),
   folder("f-hotd-s1", "f-hotd", "Season 1"),
   folder("f-hotd-extras", "f-hotd", "Behind The Scenes"),
+  // Episode 3 was never uploaded. By position the third file would become episode 3; its name
+  // says it is episode 4.
+  folder("f-hotd-s2", "f-hotd", "Season 2"),
+  // A folder whose name says nothing, but whose file names its own season.
+  folder("f-hotd-lost", "f-hotd", "Lost Episode"),
+  // One readable name and one DOS short name: all-or-nothing, so this folder goes by position.
+  folder("f-hotd-s3", "f-hotd", "Season 3"),
+  folder("f-hotd-nofit", "f-hotd", "Season 3 Extras"),
 ]);
 const weaponsName = "Weapons (2025) (Hindi DD5.1-224Kbps HQ   English DD5.1-192Kbps) Dual Audio Hollywood Movie HD 1080p ESub.mkv";
 await db.collection("catalogVideos").insertMany([
@@ -289,6 +350,19 @@ await db.collection("catalogVideos").insertMany([
   video("v-ep2", "f-hotd-s1", "HOTD S01E02.mkv", "Episode 2", { titleOverridden: false, episodeOrder: 2 }),
   video("v-ep3", "f-hotd-s1", "HOTD S01E03.mkv", "Renamed by hand", { titleOverridden: true, episodeOrder: 3 }),
   video("v-ep-pending", "f-hotd-s1", "HOTD S01E04.mkv", null, { titleOverridden: false, episodeOrder: 4, status: "pending" }),
+  // A file in "Behind The Scenes" that names no episode, so the folder stays unplaced.
+  video("v-making-of", "f-hotd-extras", "HOTD Making Of.mkv", "Making Of", { titleOverridden: false }),
+  video("v-s2e1", "f-hotd-s2", "HOTD S02E01.mkv", "Episode 1", { titleOverridden: false }),
+  video("v-s2e2", "f-hotd-s2", "HOTD S02E02.mkv", "Episode 2", { titleOverridden: false }),
+  video("v-s2e4", "f-hotd-s2", "HOTD S02E04.mkv", "Episode 3", { titleOverridden: false }),
+  video("v-lost", "f-hotd-lost", "HOTD S02E03.mkv", "The lost one", { titleOverridden: false }),
+  video("v-s3e3", "f-hotd-s3", "HOTD S03E03.mkv", null, { status: "pending", titleOverridden: false }),
+  video("v-s3e4", "f-hotd-s3", "HOTD S03E04.mkv", null, { status: "pending", titleOverridden: false }),
+  video("v-s3-short1", "f-hotd-s3", "HOTDS3~1.MKV", null, { status: "pending", titleOverridden: false }),
+  video("v-s3-short2", "f-hotd-s3", "HOTDS3~2.MKV", null, { status: "pending", titleOverridden: false }),
+  // Too many gaps to fill: one readable episode 4 and a single short name could be any of 1–3.
+  video("v-nofit-e4", "f-hotd-nofit", "HOTD S03E04.mkv", "Episode A", { titleOverridden: false }),
+  video("v-nofit-short", "f-hotd-nofit", "HOTDX~1.MKV", "Episode B", { titleOverridden: false }),
   // A flat series: episodes straight inside the series folder, whose own name says "s2".
   video("v-latent-e1", "f-latent", "Latent S02E01.mkv", "Episode 1", { titleOverridden: false, episodeOrder: 1 }),
 ]);
@@ -459,6 +533,17 @@ try {
   check("a film has no episode block", movieFacts?.episode === null);
   const pending = await doc("video", "v-ep-pending");
   check("a never-curated episode gets the data but not a title", pending?.episodeArtwork?.episode === 4 && pending?.title === null && pending?.status === "pending", JSON.stringify({ t: pending?.title, s: pending?.status }));
+  // Filenames, not positions.
+  check("a missing episode doesn't shift the rest: the third file is episode 4", (await doc("video", "v-s2e4"))?.episodeArtwork?.episode === 4 && (await doc("video", "v-s2e4"))?.title === "The Red Dragon and the Gold", JSON.stringify((await doc("video", "v-s2e4"))?.episodeArtwork));
+  check("…and the files before it are unaffected", (await doc("video", "v-s2e2"))?.title === "Rhaenyra the Cruel");
+  check("a folder whose name says nothing is placed by its files' own season", (await doc("video", "v-lost"))?.episodeArtwork?.season === 2 && (await doc("video", "v-lost"))?.episodeArtwork?.episode === 3, JSON.stringify((await doc("video", "v-lost"))?.episodeArtwork));
+  const epOf = async (id) => (await doc("video", id))?.episodeArtwork?.episode;
+  check("readable names keep their numbers beside unreadable ones", (await epOf("v-s3e3")) === 3 && (await epOf("v-s3e4")) === 4, JSON.stringify([await epOf("v-s3e3"), await epOf("v-s3e4")]));
+  check("unreadable short names fill the leftover numbers, in name order", (await epOf("v-s3-short1")) === 1 && (await epOf("v-s3-short2")) === 2, JSON.stringify([await epOf("v-s3-short1"), await epOf("v-s3-short2")]));
+  check("more gaps than files to fill them: back to position, not a guess", (await epOf("v-nofit-e4")) === 1 && (await epOf("v-nofit-short")) === 2, JSON.stringify([await epOf("v-nofit-e4"), await epOf("v-nofit-short")]));
+  check("an episode's existing order is left where an admin put it", (await doc("video", "v-ep3"))?.episodeOrder === 3);
+  check("an unordered episode is given its number as its order", (await doc("video", "v-s2e4"))?.episodeOrder === 4);
+  check("a folder with nothing to go on stays unmatched", !(await doc("video", "v-making-of"))?.episodeArtwork);
   const latentEp = await doc("video", "v-latent-e1");
   check("a flat series takes its season from its own name", latentEp?.episodeArtwork?.season === 2 && latentEp?.title === "Episode One", JSON.stringify(latentEp?.episodeArtwork));
 
