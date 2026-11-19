@@ -61,6 +61,10 @@ class PlayerChrome extends StatelessWidget {
   final ValueChanged<double>? onVolume;
   final VoidCallback? onToggleMute;
 
+  /// The frame at a given second, floated above the scrub bar while dragging it (and while a mouse
+  /// hovers it). Null when the video has no previews: the bar shows the bare time instead.
+  final Widget Function(double seconds)? scrubPreview;
+
   final VoidCallback onBack;
   final VoidCallback onTogglePlay;
   final VoidCallback onSkipBack;
@@ -104,6 +108,7 @@ class PlayerChrome extends StatelessWidget {
     this.muted = false,
     this.onVolume,
     this.onToggleMute,
+    this.scrubPreview,
     required this.onBack,
     required this.onTogglePlay,
     required this.onSkipBack,
@@ -211,6 +216,7 @@ class PlayerChrome extends StatelessWidget {
                       onChangeEnd: onScrubEnd,
                       onCancel: onScrubCancel,
                       onLockedTap: onLockedTap,
+                      preview: scrubPreview,
                     ),
                     Row(
                       children: [
@@ -549,7 +555,7 @@ class _LabelButton extends StatelessWidget {
 
 /// The accent scrub bar: buffered range behind the played range, ticks at intro/outro marks, a
 /// floating time while dragging. A locked bar explains itself when touched.
-class _ScrubBar extends StatelessWidget {
+class _ScrubBar extends StatefulWidget {
   final Duration position;
   final Duration buffered;
   final Duration duration;
@@ -561,6 +567,7 @@ class _ScrubBar extends StatelessWidget {
   final ValueChanged<double> onChangeEnd;
   final VoidCallback onCancel;
   final VoidCallback onLockedTap;
+  final Widget Function(double seconds)? preview;
 
   const _ScrubBar({
     required this.position,
@@ -574,10 +581,31 @@ class _ScrubBar extends StatelessWidget {
     required this.onChangeEnd,
     required this.onCancel,
     required this.onLockedTap,
+    this.preview,
   });
 
   @override
+  State<_ScrubBar> createState() => _ScrubBarState();
+}
+
+class _ScrubBarState extends State<_ScrubBar> {
+  /// Where a mouse is resting over the bar, if one is; a touch screen never sets it.
+  double? _hoverDx;
+
+  Duration get position => widget.position;
+  Duration get duration => widget.duration;
+  bool get enabled => widget.enabled;
+  bool get dragging => widget.dragging;
+
+  @override
   Widget build(BuildContext context) {
+    final buffered = widget.buffered;
+    final ticks = widget.ticks;
+    final onChangeStart = widget.onChangeStart;
+    final onChanged = widget.onChanged;
+    final onChangeEnd = widget.onChangeEnd;
+    final onCancel = widget.onCancel;
+    final onLockedTap = widget.onLockedTap;
     final total = duration.inMilliseconds / 1000;
     double frac(double seconds) => total <= 0 ? 0 : (seconds / total).clamp(0.0, 1.0);
     final played = frac(position.inMilliseconds / 1000);
@@ -588,11 +616,22 @@ class _ScrubBar extends StatelessWidget {
         final width = constraints.maxWidth;
         double secondsAt(double dx) => (dx / width).clamp(0.0, 1.0) * total;
 
+        // What floats above the bar: the frame (or just the time) where a drag is, or else where
+        // the mouse is.
+        final hoverDx = _hoverDx;
+        final floatAt = dragging ? played * width : (enabled && hoverDx != null && total > 0 ? hoverDx : null);
+        final floatSeconds = floatAt == null ? null : (dragging ? position.inMilliseconds / 1000 : secondsAt(floatAt));
+        final previewBuilder = widget.preview;
+        const previewWidth = 180.0; // TrickplayPreview's 176 plus its border
+
         return Semantics(
           slider: true,
           label: 'Seek',
           value: '${formatPlayerTime(position)} of ${formatPlayerTime(duration)}',
-          child: GestureDetector(
+          child: MouseRegion(
+            onHover: (e) => setState(() => _hoverDx = e.localPosition.dx.clamp(0.0, width)),
+            onExit: (_) => setState(() => _hoverDx = null),
+            child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapDown: (d) {
               if (!enabled) {
@@ -637,24 +676,34 @@ class _ScrubBar extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (dragging)
+                  if (floatAt != null && floatSeconds != null && previewBuilder != null)
                     Positioned(
-                      left: (played * width - 26).clamp(0.0, (width - 52).clamp(0.0, double.infinity)),
+                      left: (floatAt - previewWidth / 2).clamp(0.0, (width - previewWidth).clamp(0.0, double.infinity)),
                       bottom: 26,
-                      child: Container(
-                        width: 52,
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(6)),
-                        child: Text(
-                          formatPlayerTime(position),
-                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                      child: IgnorePointer(child: previewBuilder(floatSeconds)),
+                    )
+                  else if (floatAt != null && floatSeconds != null)
+                    Positioned(
+                      left: (floatAt - 26).clamp(0.0, (width - 52).clamp(0.0, double.infinity)),
+                      bottom: 26,
+                      child: IgnorePointer(
+                        child: Container(
+                          width: 52,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          alignment: Alignment.center,
+                          decoration:
+                              BoxDecoration(color: Colors.black.withValues(alpha: 0.9), borderRadius: BorderRadius.circular(6)),
+                          child: Text(
+                            formatPlayerTime(Duration(milliseconds: (floatSeconds * 1000).round())),
+                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                          ),
                         ),
                       ),
                     ),
                 ],
               ),
             ),
+          ),
           ),
         );
       },

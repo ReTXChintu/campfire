@@ -24,6 +24,7 @@ import '../utils/media_meta.dart';
 import 'episodes_panel.dart';
 import 'player_chrome.dart';
 import 'tv_focusable.dart';
+import 'trickplay_preview.dart';
 import 'up_next.dart';
 
 // TEMP diagnostic logging — remove once the Android resume/subtitle investigation is done.
@@ -154,6 +155,12 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   Timer? _upNextTimer;
   bool _endScreen = false;
 
+  // Seek-bar previews: none until the backend has made them (the first play asks it to).
+  TrickplayManifest? _trickplay;
+  Map<String, String> _trickplayHeaders = const {};
+  Timer? _trickplayRetry;
+  int _trickplayTries = 0;
+
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration _buffered = Duration.zero;
@@ -219,6 +226,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     _configureOrientation();
     if (isAndroidTv) _controlsVisible = false;
     if (_isDesktop) _initDesktopVolume();
+    _loadTrickplay();
     SharedPreferences.getInstance().then((prefs) {
       final saved = prefs.getBool(upNextAutoplayPrefKey);
       if (saved != null && mounted) setState(() => _autoplay = saved);
@@ -384,6 +392,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     _volumeSaveTimer?.cancel();
     _seekHudTimer?.cancel();
     _upNextTimer?.cancel();
+    _trickplayRetry?.cancel();
     _hintTimer?.cancel();
     _overlayHideTimer?.cancel();
     _partyTimer?.cancel();
@@ -710,6 +719,25 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     if (_position >= duration - const Duration(milliseconds: 300) && !_playing) {
       _endedHandled = true;
       _onEnded();
+    }
+  }
+
+  /// Asks for the previews, and while they're being made asks again now and then — a film's set
+  /// is usually ready a few minutes into its first play.
+  Future<void> _loadTrickplay() async {
+    final result = await fetchTrickplay(video.fileId);
+    if (!mounted) return;
+    if (result.manifest != null) {
+      final headers = await trickplayHeaders();
+      if (!mounted) return;
+      setState(() {
+        _trickplay = result.manifest;
+        _trickplayHeaders = headers;
+      });
+      return;
+    }
+    if (result.pending && ++_trickplayTries < 8) {
+      _trickplayRetry = Timer(const Duration(seconds: 90), _loadTrickplay);
     }
   }
 
@@ -1691,6 +1719,14 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       duration: _effectiveDuration,
       scrubSeconds: _scrubSeconds,
       ticks: [?video.introStart, ?video.introEnd, ?video.outroStart],
+      scrubPreview: _trickplay == null
+          ? null
+          : (seconds) => TrickplayPreview(
+                fileId: video.fileId,
+                manifest: _trickplay!,
+                seconds: seconds,
+                headers: _trickplayHeaders,
+              ),
       subtitleLabel: hasSubtitles ? _subtitleLabel() : null,
       audioLabel: realAudio > 1 ? _audioLabel() : null,
       speedLabel: '${_speed == _speed.roundToDouble() ? _speed.toStringAsFixed(0) : _speed}×',

@@ -4,6 +4,7 @@ import 'package:campfire_mobile/models/catalog.dart';
 import 'package:campfire_mobile/theme/app_theme.dart';
 import 'package:campfire_mobile/widgets/episodes_panel.dart';
 import 'package:campfire_mobile/widgets/player_chrome.dart';
+import 'package:campfire_mobile/widgets/trickplay_preview.dart';
 import 'package:campfire_mobile/widgets/up_next.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -77,11 +78,14 @@ PlayerChrome _chrome({
   int members = 3,
   int unread = 2,
   double? volume,
+  double? scrubSeconds,
+  Widget Function(double seconds)? scrubPreview,
 }) {
   void noop() {}
   void noopD(double _) {}
   return PlayerChrome(
     volume: volume,
+    scrubPreview: scrubPreview,
     onVolume: volume == null ? null : noopD,
     onToggleMute: volume == null ? null : noop,
     visible: true,
@@ -93,7 +97,7 @@ PlayerChrome _chrome({
     position: const Duration(minutes: 41, seconds: 12),
     buffered: const Duration(minutes: 46),
     duration: const Duration(hours: 2, minutes: 8, seconds: 29),
-    scrubSeconds: null,
+    scrubSeconds: scrubSeconds,
     ticks: const [95, 180, 7400],
     subtitleLabel: 'English',
     audioLabel: 'Hindi',
@@ -293,5 +297,45 @@ void main() {
       expect(find.text('The Kingsroad'), findsOneWidget);
       expect(find.text('Watch again'), findsOneWidget);
     }
+  });
+
+  const manifest = TrickplayManifest(
+    interval: 10,
+    tileWidth: 192,
+    tileHeight: 108,
+    columns: 10,
+    rows: 10,
+    count: 771,
+    sheets: 8,
+  );
+
+  test('a second maps to the frame at or before it, across sheets', () {
+    expect(manifest.tileAt(0), (sheet: 0, column: 0, row: 0));
+    expect(manifest.tileAt(9.9), (sheet: 0, column: 0, row: 0));
+    expect(manifest.tileAt(10), (sheet: 0, column: 1, row: 0));
+    expect(manifest.tileAt(125), (sheet: 0, column: 2, row: 1));
+    expect(manifest.tileAt(1000), (sheet: 1, column: 0, row: 0));
+    // Past the end (a duration that ran long): the last frame, never a missing one.
+    expect(manifest.tileAt(99999), (sheet: 7, column: 0, row: 7));
+    expect(TrickplayManifest.tryParse({'interval': 10}), isNull);
+  });
+
+  testWidgets('dragging the scrub bar floats the frame above it', (tester) async {
+    await _shot(
+      tester,
+      'player_scrub_preview',
+      const Size(1280, 720),
+      _chrome(
+        landscape: true,
+        volume: 100,
+        scrubSeconds: 2470,
+        scrubPreview: (seconds) => TrickplayPreview(fileId: 'v-1', manifest: manifest, seconds: seconds, headers: const {}),
+      ),
+      settle: false,
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.byType(TrickplayPreview), findsOneWidget);
+    // The time sits under the frame (as well as in the bar's own clock).
+    expect(find.text('41:10'), findsNWidgets(2));
   });
 }
