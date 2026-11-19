@@ -1,0 +1,68 @@
+name: CI
+
+# Checks every pull request — Dependabot's included — and every push to main, with the same
+# type-check, lint, build and tests that are otherwise run by hand before a release. Without this a
+# dependency-update PR arrives with nothing having checked it.
+#
+# Not here: the backend smoke tests (scripts/smoke-*.mjs). They need a MongoDB and the backend's
+# .env, so they stay a local step before releasing.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keep in step with release-deploy.yml, so CI checks with the toolchain that ships.
+  FLUTTER_VERSION: "3.47.2"
+
+jobs:
+  web-and-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Backend — type-check
+        run: npx tsc -p apps/backend --noEmit
+      - name: Backend — lint (src and scripts)
+        run: npm run lint -w @campfire/backend
+
+      - name: Web — build (type-checks too)
+        run: npm run build -w @campfire/frontend
+      - name: Web — lint
+        run: npm run lint -w @campfire/frontend
+
+      # Fails on a high or critical advisory in what actually ships. The moderate ones left today
+      # are in code that's installed but never run (see the deps commit), so they don't block.
+      - name: Security — production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  mobile:
+    # Linux, though the apps ship for Android and Windows: the tests are pure Dart (the player is
+    # simulated, nothing loads libmpv), and Linux runners are the cheap ones.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test

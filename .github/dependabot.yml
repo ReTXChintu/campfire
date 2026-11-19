@@ -1,0 +1,49 @@
+# Weekly dependency-update pull requests, each checked by CI (.github/workflows/ci.yml) before
+# anyone merges it. This is the routine upgrade pass, done in small reviewable pieces instead of
+# one big jump — the Windows app's location bug came from a plugin nobody had updated.
+#
+# How updates are grouped is the point of this file:
+#  - minor and patch updates of ordinary packages arrive together, one PR per ecosystem;
+#  - major versions arrive one per PR, since they're the ones that break things;
+#  - the packages behind playback and watch parties (media_kit, LiveKit, WebRTC) always get their
+#    own PR, because CI can't play a video or hold a call — those need trying on a real device
+#    before merging. (livekit_client 2.14, for one, adds a new native library.)
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/" # the root lockfile covers both workspaces
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+        exclude-patterns: ["googleapis", "livekit-server-sdk"]
+      # Drive access and the watch-party server SDK: everything depends on these two.
+      npm-core-services:
+        patterns: ["googleapis", "livekit-server-sdk"]
+
+  - package-ecosystem: pub
+    directory: "/apps/mobile"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      watch-party:
+        patterns: ["livekit_client", "livekit_*", "flutter_webrtc", "dart_webrtc"]
+      playback:
+        patterns: ["media_kit", "media_kit_*"]
+      pub-minor-and-patch:
+        update-types: [minor, patch]
+        exclude-patterns:
+          ["livekit_client", "livekit_*", "flutter_webrtc", "dart_webrtc", "media_kit", "media_kit_*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
