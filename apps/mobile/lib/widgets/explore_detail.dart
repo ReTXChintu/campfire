@@ -360,41 +360,46 @@ class _ExploreDetailViewState extends State<ExploreDetailView> {
       children: [
         const Text('CAST', style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
         const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 0.48,
-          children: [
-            for (final person in d.cast)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AspectRatio(
-                    aspectRatio: 2 / 3,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                      child: person.profileUrl == null
-                          ? const ColoredBox(color: AppColors.surface)
-                          : Image.network(person.profileUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) => const ColoredBox(color: AppColors.surface)),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(person.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.foreground, fontSize: 13, fontWeight: FontWeight.w600, height: 1.2)),
-                  if (person.character != null)
-                    Text(person.character!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.textTertiary, fontSize: 12, height: 1.2)),
-                ],
-              ),
-          ],
+        // Rows of three that grow with their text (a fixed-ratio grid cut long names off with a
+        // large font).
+        for (var i = 0; i < d.cast.length; i += 3) ...[
+          if (i > 0) const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var j = i; j < i + 3; j++) ...[
+                if (j > i) const SizedBox(width: 12),
+                Expanded(child: j < d.cast.length ? _person(d.cast[j]) : const SizedBox()),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+  Widget _person(ExploreCastMember person) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AspectRatio(
+          aspectRatio: 2 / 3,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            child: person.profileUrl == null
+                ? const ColoredBox(color: AppColors.surface)
+                : Image.network(person.profileUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) => const ColoredBox(color: AppColors.surface)),
+          ),
         ),
+        const SizedBox(height: 6),
+        Text(person.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: AppColors.foreground, fontSize: 13, fontWeight: FontWeight.w600, height: 1.2)),
+        if (person.character != null)
+          Text(person.character!,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.textTertiary, fontSize: 12, height: 1.2)),
       ],
     );
   }

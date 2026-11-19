@@ -161,17 +161,26 @@ void main() {
   });
 
   group('where to watch', () {
-    for (final (name, size) in [('explore_detail_phone', const Size(390, 844)), ('explore_detail_panel', const Size(460, 900))]) {
+    // 1.4× text too: text measures wider on some machines (CI's Linux runner) and with a large
+    // phone font, and the panel has to grow rather than overflow.
+    for (final (name, size, scale) in [
+      ('explore_detail_phone', const Size(390, 844), 1.0),
+      ('explore_detail_panel', const Size(460, 900), 1.0),
+      ('explore_detail_large_text', const Size(360, 780), 1.4),
+    ]) {
       testWidgets('$name: no overflow, offers and a vote', (tester) async {
         await _shot(
           tester,
           name,
           size,
-          ExploreDetailView(
-            tmdbType: 'tv',
-            tmdbId: '1399',
-            initial: ExploreDetail.fromJson(Map<String, dynamic>.from(_detailJson)),
-            titleStyle: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.foreground),
+          MediaQuery(
+            data: MediaQueryData(size: size, textScaler: TextScaler.linear(scale)),
+            child: ExploreDetailView(
+              tmdbType: 'tv',
+              tmdbId: '1399',
+              initial: ExploreDetail.fromJson(Map<String, dynamic>.from(_detailJson)),
+              titleStyle: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.foreground),
+            ),
           ),
         );
         expect(tester.takeException(), isNull);
