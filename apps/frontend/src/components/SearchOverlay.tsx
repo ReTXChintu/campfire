@@ -6,17 +6,39 @@ import Poster from "./Poster";
 import RequestModal from "./requests/RequestModal";
 import { CardSkeletonRail, ErrorCard } from "./ui/States";
 import { formatLabel, playsInBrowser } from "../lib/mediaFormat";
+import { matchItem, reasonLabel, sortItems, type MatchReason } from "../lib/discovery";
 
 /**
  * Instant search over the catalog the app already holds. There is no search endpoint on the
  * backend, so this filters `GET /api/library`'s own folders and videos client-side — which is also
- * why it is instant. A query that matches nothing offers the request form instead of a dead end.
+ * why it is instant. It matches titles, genres and lead actors (lib/discovery.ts), and says which
+ * when it isn't the title. A query that matches nothing offers the request form instead.
  */
-function matches(item: CatalogListItem, needle: string): boolean {
-  return item.name.toLowerCase().includes(needle);
+type Result = { item: CatalogListItem; reason: MatchReason };
+
+function search(items: CatalogListItem[], query: string): Result[] {
+  const found: Result[] = [];
+  for (const item of items) {
+    const reason = matchItem(item, query);
+    if (reason) found.push({ item, reason });
+  }
+  // A title match is what was most likely meant, so those lead; within each group, best rated.
+  const byTitle = sortItems(found.filter((r) => r.reason.kind === "title").map((r) => r.item), "rating");
+  const byOther = sortItems(found.filter((r) => r.reason.kind !== "title").map((r) => r.item), "rating");
+  const reasonOf = new Map(found.map((r) => [r.item.id, r.reason]));
+  return [...byTitle, ...byOther].map((item) => ({ item, reason: reasonOf.get(item.id)! }));
 }
 
-function ResultRow({ item, onNavigate }: { item: CatalogListItem; onNavigate: () => void }) {
+function ResultRow({
+  item,
+  reason,
+  onNavigate,
+}: {
+  item: CatalogListItem;
+  reason: MatchReason;
+  onNavigate: () => void;
+}) {
+  const why = reasonLabel(reason);
   const isFolder = item.kind === "folder";
   const path = isFolder
     ? item.thumbnailFileId
@@ -33,12 +55,14 @@ function ResultRow({ item, onNavigate }: { item: CatalogListItem; onNavigate: ()
       <Poster path={path} title={item.name} id={item.id} />
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-white">{item.name}</p>
-        <p className="text-xs text-text-tertiary">
+        <p className="truncate text-xs text-text-tertiary">
+          {why && <span className="text-amber">{why} · </span>}
           {isFolder
             ? "Series"
             : playsInBrowser(item.mimeType)
               ? `Film · ${formatLabel(item.mimeType)}`
               : `Film · ${formatLabel(item.mimeType)} · needs the app`}
+          {item.year ? ` · ${item.year}` : ""}
         </p>
       </div>
       <span aria-hidden="true" className="px-2 text-text-tertiary">
@@ -74,13 +98,10 @@ export default function SearchOverlay({ open, onClose }: { open: boolean; onClos
     }
   }, [open]);
 
-  const needle = query.trim().toLowerCase();
+  const needle = query.trim();
   const { series, films } = useMemo(() => {
     if (!data || needle.length === 0) return { series: [], films: [] };
-    return {
-      series: data.folders.filter((item) => matches(item, needle)),
-      films: data.videos.filter((item) => matches(item, needle)),
-    };
+    return { series: search(data.folders, needle), films: search(data.videos, needle) };
   }, [data, needle]);
 
   if (!open) return null;
@@ -118,7 +139,7 @@ export default function SearchOverlay({ open, onClose }: { open: boolean; onClos
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             autoComplete="off"
-            placeholder="Search films and series in your library"
+            placeholder="Search by title, genre or actor"
             className="min-w-0 flex-1 bg-transparent text-base text-white outline-none placeholder:text-text-tertiary"
           />
           <button
@@ -176,8 +197,8 @@ export default function SearchOverlay({ open, onClose }: { open: boolean; onClos
                     Series ({series.length})
                   </h2>
                   <div className="grid gap-1">
-                    {series.map((item) => (
-                      <ResultRow key={item.id} item={item} onNavigate={onClose} />
+                    {series.map(({ item, reason }) => (
+                      <ResultRow key={item.id} item={item} reason={reason} onNavigate={onClose} />
                     ))}
                   </div>
                 </section>
@@ -188,8 +209,8 @@ export default function SearchOverlay({ open, onClose }: { open: boolean; onClos
                     Films ({films.length})
                   </h2>
                   <div className="grid gap-1">
-                    {films.map((item) => (
-                      <ResultRow key={item.id} item={item} onNavigate={onClose} />
+                    {films.map(({ item, reason }) => (
+                      <ResultRow key={item.id} item={item} reason={reason} onNavigate={onClose} />
                     ))}
                   </div>
                 </section>

@@ -8,13 +8,20 @@ import { CardSkeletonGrid, EmptyState, ErrorCard } from "../components/ui/States
 import { playsInBrowser } from "../lib/mediaFormat";
 import { PAGE_X } from "../lib/layout";
 import { libraryProgressMap } from "../lib/progress";
+import { allGenres, matchItem, sortItems, type SortKey } from "../lib/discovery";
 
 type Kind = "all" | "series" | "movies";
-type Sort = "az" | "za";
 
-/** Status chips — only the ones the data can actually answer. The library now carries finished
+const SORTS: { value: SortKey; label: string }[] = [
+  { value: "az", label: "A to Z" },
+  { value: "za", label: "Z to A" },
+  { value: "rating", label: "Highest rated" },
+  { value: "newest", label: "Newest" },
+];
+
+/** Status chips — only the ones the data can actually answer. The library carries finished
  * progress for its own videos, so "Watched" is real for films; a series is "in progress" when any
- * of its episodes is. There are no genres or years in the catalog, so no chips pretend there are. */
+ * of its episodes is. Genres come from TMDb, so they get their own row of chips below. */
 type Filter = "all" | "in-progress" | "watched" | "needs-app";
 
 const KINDS: { value: Kind; label: string }[] = [
@@ -61,13 +68,25 @@ export default function BrowsePage() {
   const { data, isLoading, error, refetch, isFetching } = useLibrary();
   const [searchParams, setSearchParams] = useSearchParams();
   const kind = parseKind(searchParams.get("type"));
+  // The genre lives in the URL like the type does, so a genre row's "See all" on Home lands here
+  // with its chip already picked.
+  const genre = searchParams.get("genre");
   const [filter, setFilter] = useState<Filter>("all");
-  const [sort, setSort] = useState<Sort>("az");
+  const [sort, setSort] = useState<SortKey>("az");
   const [query, setQuery] = useState("");
   const [requestOpen, setRequestOpen] = useState(false);
 
+  const setParams = (next: { type?: Kind; genre?: string | null }) => {
+    const type = next.type ?? kind;
+    const g = next.genre === undefined ? genre : next.genre;
+    const params: Record<string, string> = {};
+    if (type !== "all") params.type = type;
+    if (g) params.genre = g;
+    setSearchParams(params, { replace: true });
+  };
+
   const setKind = (next: Kind) => {
-    setSearchParams(next === "all" ? {} : { type: next }, { replace: true });
+    setParams({ type: next });
     if (!FILTERS[next].some((f) => f.value === filter)) setFilter("all");
   };
 
@@ -86,10 +105,13 @@ export default function BrowsePage() {
     return [...data.folders, ...data.videos];
   }, [data, kind]);
 
+  const genres = useMemo(() => allGenres(source), [source]);
+
   const items = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     const filtered = source.filter((item) => {
-      if (needle && !item.name.toLowerCase().includes(needle)) return false;
+      // Title, genre or an actor's name — the same matching search uses (lib/discovery.ts).
+      if (query.trim() && !matchItem(item, query)) return false;
+      if (genre && !(item.genres ?? []).includes(genre)) return false;
       const progress = item.kind === "video" ? progressByFileId.get(item.id) : undefined;
       if (filter === "in-progress") {
         return item.kind === "folder" ? seriesInProgress.has(item.id) : !!progress && !progress.completed;
@@ -98,8 +120,10 @@ export default function BrowsePage() {
       if (filter === "needs-app") return item.kind === "video" && !playsInBrowser(item.mimeType);
       return true;
     });
-    return [...filtered].sort((a, b) => (sort === "az" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)));
-  }, [source, filter, sort, query, progressByFileId, seriesInProgress]);
+    return sortItems(filtered, sort);
+  }, [source, filter, sort, query, genre, progressByFileId, seriesInProgress]);
+
+  const anyFilter = !!query || filter !== "all" || !!genre;
 
   return (
     <main className={`w-full flex-1 ${PAGE_X} py-8`}>
@@ -114,15 +138,15 @@ export default function BrowsePage() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label htmlFor="browse-filter" className="sr-only">
-            Filter by name
+            Filter by name, genre or cast
           </label>
           <input
             id="browse-filter"
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Filter by name"
-            className="min-h-10 w-48 rounded-lg border border-divider-strong bg-[var(--bg-elevated)] px-3 py-2 text-sm text-white outline-none transition focus:border-accent"
+            placeholder="Name, genre or cast"
+            className="min-h-10 w-56 rounded-lg border border-divider-strong bg-[var(--bg-elevated)] px-3 py-2 text-sm text-white outline-none transition focus:border-accent"
           />
           <div className="flex items-center gap-2">
             <label htmlFor="browse-sort" className="text-xs font-semibold text-text-secondary">
@@ -131,11 +155,14 @@ export default function BrowsePage() {
             <select
               id="browse-sort"
               value={sort}
-              onChange={(event) => setSort(event.target.value as Sort)}
+              onChange={(event) => setSort(event.target.value as SortKey)}
               className="min-h-10 rounded-lg border border-divider-strong bg-[var(--bg-elevated)] px-2.5 py-2 text-sm text-white outline-none focus:border-accent"
             >
-              <option value="az">A to Z</option>
-              <option value="za">Z to A</option>
+              {SORTS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -175,25 +202,46 @@ export default function BrowsePage() {
         </div>
       </div>
 
+      {genres.length > 0 && (
+        <div role="group" aria-label="Genre" className="-mt-3 mb-6 flex flex-wrap gap-2">
+          {genres.map((g) => (
+            <button
+              key={g}
+              type="button"
+              aria-pressed={genre === g}
+              onClick={() => setParams({ genre: genre === g ? null : g })}
+              className={`min-h-8 rounded-full border px-3 py-1 text-xs transition ${
+                genre === g
+                  ? "border-white bg-white text-black"
+                  : "border-divider text-text-tertiary hover:border-text-tertiary hover:text-white"
+              }`}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
+      )}
+
       {error ? (
         <ErrorCard title="The library did not load" message={error.message} onRetry={() => refetch()} retrying={isFetching} />
       ) : isLoading ? (
         <CardSkeletonGrid count={14} label="Loading the library" />
       ) : items.length === 0 ? (
         <EmptyState
-          title={query || filter !== "all" ? "Nothing matches that" : "Nothing here yet"}
+          title={anyFilter ? "Nothing matches that" : "Nothing here yet"}
           message={
-            query || filter !== "all"
+            anyFilter
               ? "Clear the filter to see everything in your library."
               : "Nothing has been published here yet. You can ask for something instead."
           }
           action={
-            query || filter !== "all" ? (
+            anyFilter ? (
               <button
                 type="button"
                 onClick={() => {
                   setQuery("");
                   setFilter("all");
+                  setParams({ genre: null });
                 }}
                 className="min-h-10 rounded-lg border border-divider-strong px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-surface-hover"
               >

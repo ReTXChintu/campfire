@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useLibrary } from "../hooks/useCatalog";
 import SpotlightCarousel from "../components/SpotlightCarousel";
 import Rail, { RailItem } from "../components/Rail";
+import { genreShelves } from "../lib/discovery";
 import VideoCard from "../components/VideoCard";
 import FolderCard from "../components/FolderCard";
 import RequestModal from "../components/requests/RequestModal";
@@ -67,6 +68,9 @@ export default function LibraryPage() {
 
   const { spotlight, continueWatching, folders, videos } = data;
   const progress = libraryProgressMap(data);
+  // A row per well-stocked genre, series and films together, best rated first — the way a
+  // streaming front page is browsed, rather than only by format.
+  const shelves = genreShelves([...folders, ...videos]);
 
   return (
     <main className="w-full flex-1 pb-16">
@@ -109,6 +113,27 @@ export default function LibraryPage() {
           </Rail>
         </>
       )}
+
+      {shelves.map((shelf) => (
+        <div key={shelf.genre}>
+          <div className="filmstrip" />
+          <Rail
+            title={shelf.genre}
+            eyebrow={`${shelf.items.length} in your library`}
+            seeAllHref={`/discover?genre=${encodeURIComponent(shelf.genre)}`}
+          >
+            {shelf.items.slice(0, RAIL_LIMIT).map((item) => (
+              <RailItem key={item.id}>
+                {item.kind === "folder" ? (
+                  <FolderCard item={item} />
+                ) : (
+                  <VideoCard item={item} progress={progress.get(item.id)} />
+                )}
+              </RailItem>
+            ))}
+          </Rail>
+        </div>
+      ))}
 
       <section className={`${PAGE_X} mt-6`}>
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-divider bg-surface p-5">

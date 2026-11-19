@@ -86,10 +86,21 @@ async function toSlideTargets(
   };
 }
 
-/** The TMDb facts small enough to fit on a card: a year and a score. Absent on anything
- * unmatched, and ignored by clients that predate them. */
+/** How many billed names a list item carries — enough to find a title by its leads, small
+ * enough that the library payload stays a list rather than a cast database. */
+const LIST_CAST_NAMES = 6;
+
+/** The TMDb facts a list item carries: a year and a score for the card, and the genres and lead
+ * actors that Home's genre rows, browse's genre chips and search all work from — search runs on
+ * the client over this listing, there being no search endpoint. Empty on anything unmatched, and
+ * ignored by clients that predate them. */
 function cardFacts(doc: { artwork?: CatalogArtwork | null }) {
-  return { year: doc.artwork?.year ?? null, rating: doc.artwork?.rating ?? null };
+  return {
+    year: doc.artwork?.year ?? null,
+    rating: doc.artwork?.rating ?? null,
+    genres: doc.artwork?.genres ?? [],
+    castNames: (doc.artwork?.cast ?? []).slice(0, LIST_CAST_NAMES).map((member) => member.name),
+  };
 }
 
 /** An episode row: the library's own ordering fields plus whatever TMDb knows about it. `name`

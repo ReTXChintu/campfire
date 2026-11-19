@@ -500,7 +500,11 @@ try {
   check("a raw filename is replaced by TMDb's title", (await doc("video", "v-gargi"))?.title === "Gargi", JSON.stringify((await doc("video", "v-gargi"))?.title));
   check("a title an admin typed is left alone", (await doc("video", "v-weapons"))?.title === weaponsName);
   check("a folder's capitalisation is corrected to TMDb's", (await doc("folder", "f-hotd"))?.title === "House of the Dragon", JSON.stringify((await doc("folder", "f-hotd"))?.title));
-  check("cards carry the year and score", (await api("/api/library", { token: viewer })).json?.videos?.find((v) => v.id === "v-weapons")?.rating?.average === 7.4);
+  const weaponsCard = (await api("/api/library", { token: viewer })).json?.videos?.find((v) => v.id === "v-weapons");
+  check("cards carry the year and score", weaponsCard?.rating?.average === 7.4 && weaponsCard?.year === 2025);
+  check("…and the genres and lead actors search and genre rows work from", JSON.stringify(weaponsCard?.genres) === JSON.stringify(["Horror", "Mystery", "Thriller"]) && weaponsCard?.castNames?.[0] === "Julia Garner", JSON.stringify({ g: weaponsCard?.genres, c: weaponsCard?.castNames }));
+  const unknownCard = (await api("/api/library", { token: viewer })).json?.folders?.find((f) => f.id === "f-unknown");
+  check("an unmatched title lists empty genres and cast, not missing fields", Array.isArray(unknownCard?.genres) && unknownCard.genres.length === 0 && unknownCard.castNames.length === 0, JSON.stringify(unknownCard));
 
   console.log("\nUsing TMDb's titles on purpose");
   // v-weapons has a hand-typed title, so the automatic pass left it alone (checked above). Asking

@@ -176,10 +176,14 @@ try {
       ws.send(JSON.stringify({ id, method, params }));
     });
 
-  async function shot(name, width, height, { path = "/", scrollY = 0, settle = 9000 } = {}) {
+  async function shot(name, width, height, { path = "/", scrollY = 0, settle = 9000, then = null } = {}) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 600 });
     await send("Page.navigate", { url: `http://127.0.0.1:${WEB_PORT}${path}` });
     await sleep(settle); // data + first image downloads from TMDb
+    if (then) {
+      await send("Runtime.evaluate", { expression: then });
+      await sleep(2500);
+    }
     if (scrollY) {
       await send("Runtime.evaluate", { expression: `window.scrollTo(0, ${scrollY})` });
       await sleep(1500);
@@ -197,6 +201,23 @@ try {
   await shot("home-desktop-rails", 1440, 900, { scrollY: 700 });
   await shot("home-phone-top", 390, 844);
   await shot("home-phone-rails", 390, 844, { scrollY: 560 });
+
+  // Discovery: Home's genre rows, browse filtered to a genre, and a search that only an actor's
+  // name can satisfy.
+  await shot("home-desktop-genres", 1440, 900, { scrollY: 1250 });
+  await shot("discover-genre", 1440, 900, { path: "/discover?genre=Drama" });
+  // Opens search the way a person would ("/"), then types into React's controlled input — which
+  // only notices a value set through the native setter followed by an input event.
+  const typeSearch = (text) => `(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true }));
+    setTimeout(() => {
+      const input = document.getElementById("library-search");
+      if (!input) return;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, ${JSON.stringify(text)});
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }, 400);
+  })()`;
+  await shot("search-actor", 1440, 900, { then: typeSearch("matt smith") });
 
   // A series and a film, which is where the facts line, the cast row and the episode synopses are.
   // Picked from what production actually has, so this keeps working as the library changes.
