@@ -77,7 +77,10 @@ export type EpisodeMeta = {
 export function episodeMeta(episode: CatalogEpisodeArtwork | null | undefined): EpisodeMeta | null {
   if (!episode) return null;
   return {
-    number: episode.episode || null,
+    // A special's number is its place in TMDb's running list of every special the show ever had
+    // (India's Got Latent's season-2 bonuses are specials 11–16), which means nothing on screen —
+    // so it's left out, and the row falls back to the episode's own order (bonus 1, 2, 3…).
+    number: episode.season === 0 ? null : episode.episode || null,
     season: episode.season,
     overview: episode.overview,
     airDate: episode.airDate,

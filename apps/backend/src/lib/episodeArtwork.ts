@@ -71,6 +71,9 @@ const VIDEO_EXT_RE = /\.(mkv|mp4|m4v|avi|mov|webm|ts|wmv|flv|mpg|mpeg)$/i;
  */
 export function parseEpisodeNumber(name: string): { season: number | null; episode: number } | null {
   const s = name.replace(VIDEO_EXT_RE, "").replace(/[._]+/g, " ");
+  // A bonus episode is numbered among the bonus episodes, not the season: "S02.Bonus.E03" is the
+  // third bonus, which TMDb files under Specials — never regular episode 3. See parseBonusNumber.
+  if (BONUS_RE.test(s)) return null;
   if (/\bS\d{1,2}\s*P\d{1,2}\s*E\d{1,3}\b/i.test(s)) return null;
 
   const patterns: [RegExp, (m: RegExpMatchArray) => { season: number | null; episode: number }][] = [
@@ -89,6 +92,45 @@ export function parseEpisodeNumber(name: string): { season: number | null; episo
     return parsed.episode >= 1 ? parsed : null;
   }
   return null;
+}
+
+const BONUS_RE = /\bbonus\b/i;
+// "Bonus E03", "Bonus Ep 02", "Bonus EP1", "Bonus EP 3" — the number shortly after the word.
+const BONUS_NUMBER_RE = /\bbonus\b\D{0,12}?(\d{1,3})\b/i;
+const SEASON_IN_NAME_RE = /\bS(?:eason)?\s*(\d{1,2})\b/i;
+
+/**
+ * A bonus episode's season and number, from its filename ("INDIAS.GOT.LATENT.S02.Bonus.E03" →
+ * season 2, bonus 3), or null when the file isn't a bonus episode. `bonus` is null for one that
+ * says it's a bonus but not which ("Bonus Clip"), which can't be matched.
+ */
+export function parseBonusNumber(name: string): { season: number | null; bonus: number | null } | null {
+  const s = name.replace(VIDEO_EXT_RE, "").replace(/[._]+/g, " ");
+  if (!BONUS_RE.test(s)) return null;
+  const number = s.match(BONUS_NUMBER_RE);
+  const season = s.match(SEASON_IN_NAME_RE);
+  return { season: season ? +season[1] : null, bonus: number ? +number[1] : null };
+}
+
+/**
+ * The one TMDb special a bonus file is, or null. TMDb numbers specials in one running list across
+ * every season ("Bonus EP 3" from season 1 and "S2 Bonus EP3" from season 2 are specials 4 and
+ * 15), so they're matched by *name*: same bonus number, same season — where a special with no
+ * season in its name counts as season 1, which is how shows name their first season's bonuses.
+ * Anything short of exactly one candidate is no match.
+ */
+export function matchSpecial(
+  specials: { episode_number?: number; name?: string | null }[],
+  bonus: { season: number; bonus: number },
+): number | null {
+  const candidates = specials.filter((special) => {
+    const name = (special.name ?? "").replace(/[._]+/g, " ");
+    const number = name.match(BONUS_NUMBER_RE);
+    if (!number || +number[1] !== bonus.bonus) return false;
+    const season = name.match(SEASON_IN_NAME_RE);
+    return (season ? +season[1] : 1) === bonus.season;
+  });
+  return candidates.length === 1 ? (candidates[0].episode_number ?? null) : null;
 }
 
 type TmdbEpisode = {
@@ -146,12 +188,14 @@ export type EpisodeMatchResult = {
   matched: number;
   /** Episodes renamed to their TMDb name. */
   renamed: number;
+  /** Episodes whose earlier TMDb data turned out to be wrong, and was removed. */
+  cleared: number;
   /** Folders that look like episodes of a matched series but whose season couldn't be worked out
    * from the name — an admin sets it on the series' admin page. */
   unresolved: { folderId: string; name: string }[];
 };
 
-const empty = (): EpisodeMatchResult => ({ matched: 0, renamed: 0, unresolved: [] });
+const empty = (): EpisodeMatchResult => ({ matched: 0, renamed: 0, cleared: 0, unresolved: [] });
 
 /** Matches every episode under one folder against `plan`'s season. Positional, in the order the
  * library itself shows them. */
@@ -181,7 +225,7 @@ export type MatchMethod = "filename" | "filename+gaps" | "position";
 function assignEpisodes(
   videos: CatalogVideo[],
   plan: SeasonPlan,
-): { assignments: Assignment[]; method: MatchMethod } | null {
+): { assignments: Assignment[]; method: MatchMethod; freezeOrder?: boolean } | null {
   const parsed = videos.map((video) => ({ video, name: parseEpisodeNumber(video.driveName) }));
   const readable = parsed.filter((p) => p.name);
   const unreadable = parsed.filter((p) => !p.name).map((p) => p.video);
@@ -222,21 +266,37 @@ function assignEpisodes(
   const inOrder = orderEpisodes(
     videos.map((v) => ({ id: v._id, name: v.title ?? v.driveName, episodeOrder: v.episodeOrder })),
   );
-  // Every video carrying its own episodeOrder means the admin (or a publish-rule apply) has
-  // already said which episode each file is — trust that over position in the list.
+  // Numbered by place in that order — never by the stored episodeOrder value itself. The order
+  // is a *sort position* (an admin's drag, a publish-rule apply), and reading it as an episode
+  // number goes wrong as soon as the values aren't exactly 1..n: an episode dragged to 7 in a
+  // five-file folder isn't episode 7.
+  //
+  // When only some files have an order, the whole order is frozen as it stands (freezeOrder), so
+  // the next run sorts the same way — otherwise giving the unordered files numbers, or renaming
+  // them (natural sort runs on the title), reshuffles the season and remaps it on every pass.
+  // An order every file already has is the admin's, and is left alone.
   const everyOrdered = inOrder.every((v) => v.episodeOrder != null);
   return {
     assignments: inOrder.map((item, i) => ({
       video: videos.find((v) => v._id === item.id)!,
       season,
-      number: everyOrdered ? item.episodeOrder! : i + 1,
+      number: i + 1,
     })),
     method: "position",
+    freezeOrder: !everyOrdered,
   };
 }
 
 /** Matches every episode in one folder. False when the folder's season couldn't be worked out,
- * so the caller can list it for an admin. */
+ * so the caller can list it for an admin.
+ *
+ * Regular episodes and bonus episodes are matched separately: a bonus file never takes a regular
+ * episode's number (by name or by position), and is looked for among TMDb's specials instead.
+ *
+ * A file this run can positively say has no match — its season's listing came back and the
+ * number isn't in it, or it's a bonus with no special to match — loses any TMDb data it had. An
+ * earlier, cruder pass may have given it the wrong episode, and wrong data is worse than none. A
+ * file whose listing didn't come back (TMDb down) keeps what it had. */
 async function matchFolder(
   folderId: string,
   plan: SeasonPlan,
@@ -245,32 +305,85 @@ async function matchFolder(
 ): Promise<boolean> {
   const videos = await listVideosByParent(folderId);
   if (videos.length === 0) return true;
-  const assigned = assignEpisodes(videos, plan);
-  if (!assigned) return false;
-  const { assignments } = assigned;
+  const regular = videos.filter((v) => !parseBonusNumber(v.driveName));
+  const bonuses = videos
+    .map((video) => ({ video, parsed: parseBonusNumber(video.driveName) }))
+    .filter((b): b is { video: CatalogVideo; parsed: { season: number | null; bonus: number | null } } => !!b.parsed);
 
-  // Usually one season per folder, but a flat folder named by its files can hold several.
-  const seasons = new Map<number, Map<number, TmdbEpisode> | null>();
-  for (const season of new Set(assignments.map((a) => a.season))) {
-    const episodes = await fetchSeason(plan.seriesTmdbId, season);
-    seasons.set(
+  const assigned = regular.length > 0 ? assignEpisodes(regular, plan) : { assignments: [], method: "filename" as const };
+  if (!assigned && bonuses.length === 0) return false;
+  const assignments = assigned?.assignments ?? [];
+  // When the files name their own episodes, they're also the authority on order; a position-
+  // matched folder with only some orders set gets its whole order frozen (see assignEpisodes).
+  const ordersFromNames =
+    assigned?.method === "filename" || assigned?.method === "filename+gaps" || assigned?.freezeOrder === true;
+
+  const listings = new Map<number, Map<number, TmdbEpisode> | null>();
+  const listing = async (season: number) => {
+    if (!listings.has(season)) {
+      const episodes = await fetchSeason(plan.seriesTmdbId, season);
+      listings.set(
+        season,
+        episodes ? new Map(episodes.filter((e) => e.episode_number != null).map((e) => [e.episode_number!, e])) : null,
+      );
+    }
+    return listings.get(season)!;
+  };
+
+  type Decision = { video: CatalogVideo; season: number; episode: TmdbEpisode | null; known: boolean; order: number | null; authoritative: boolean };
+  const decisions: Decision[] = [];
+  for (const { video, season, number } of assignments) {
+    const episodes = await listing(season);
+    decisions.push({
+      video,
       season,
-      episodes ? new Map(episodes.filter((e) => e.episode_number != null).map((e) => [e.episode_number!, e])) : null,
-    );
+      episode: episodes?.get(number) ?? null,
+      known: episodes != null,
+      order: number,
+      authoritative: ordersFromNames,
+    });
+  }
+
+  if (bonuses.length > 0) {
+    const specials = await listing(SPECIALS_SEASON);
+    const regularTop = Math.max(0, ...assignments.map((a) => a.number));
+    for (const { video, parsed } of bonuses) {
+      const season = plan.season ?? parsed.season ?? plan.fallbackSeason;
+      const number =
+        specials && season != null && parsed.bonus != null
+          ? matchSpecial([...specials.values()], { season, bonus: parsed.bonus })
+          : null;
+      decisions.push({
+        video,
+        season: SPECIALS_SEASON,
+        episode: number != null ? (specials!.get(number) ?? null) : null,
+        known: specials != null,
+        // Bonuses sort after the regular episodes, in their own order.
+        order: parsed.bonus != null ? regularTop + parsed.bonus : null,
+        authoritative: parsed.bonus != null,
+      });
+    }
   }
 
   const col = await videoCollection();
-  for (const { video, season, number } of assignments) {
-    const episode = seasons.get(season)?.get(number);
-    if (!episode) continue;
+  for (const { video, season, episode, known, order, authoritative } of decisions) {
+    if (!episode) {
+      if (known && video.episodeArtwork) {
+        await col.updateOne({ _id: video._id }, { $unset: { episodeArtwork: "" }, $set: { updatedAt: new Date() } });
+        result.cleared++;
+      }
+      continue;
+    }
 
     const artwork = toEpisodeArtwork(episode, plan.seriesTmdbId, season);
     const set: Record<string, unknown> = { episodeArtwork: artwork, updatedAt: new Date() };
-    // Give an unordered episode its number as its episodeOrder, which is what the library sorts
-    // by. Without it, such an episode was held in place only by its own name sorting ("S1E1…",
-    // "S1E2…") — and renaming it to "The Rogue Prince" would scatter the season alphabetically.
-    // An order that's already set is left alone: an admin may have dragged it there on purpose.
-    if (video.episodeOrder == null) set.episodeOrder = number;
+    // episodeOrder is what the library sorts by. A file that names its own episode decides its
+    // place outright — which also repairs an order a positional pass got wrong. Otherwise an
+    // unordered episode gets its number (so renaming it can't scatter a season alphabetically),
+    // and an order that's already set is left where an admin may have dragged it.
+    if (order != null && (authoritative || video.episodeOrder == null) && video.episodeOrder !== order) {
+      set.episodeOrder = order;
+    }
     // The real name replaces "Episode 4" unless an admin typed this episode's title by hand —
     // `force` is an admin saying to do it anyway, and then the name stops counting as hand-typed
     // so later passes can keep it current.

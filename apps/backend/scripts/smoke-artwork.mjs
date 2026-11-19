@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MongoClient } from "mongodb";
 import { cleanedTitle, parseReleaseName, pickMatch } from "../src/lib/artwork.ts";
-import { guessSeasonNumber, parseEpisodeNumber } from "../src/lib/episodeArtwork.ts";
+import { guessSeasonNumber, matchSpecial, parseBonusNumber, parseEpisodeNumber } from "../src/lib/episodeArtwork.ts";
 
 let pass = 0;
 const failures = [];
@@ -132,6 +132,37 @@ const unreadable = [
 for (const raw of unreadable) {
   check(`"${raw}" → says nothing usable`, parseEpisodeNumber(raw) === null, JSON.stringify(parseEpisodeNumber(raw)));
 }
+
+console.log("\nBonus episodes");
+// India's Got Latent's season-2 bonus files, as they are in production.
+const bonusNames = [
+  ["INDIAS.GOT.LATENT.S02.Bonus.E03.2026.1080p.YT.WEB-DL.Hindi.AAC2.0.H.264.mkv", 2, 3],
+  ["Indias.Got.Latent.S02.Bonus.Ep.02.1080p.Hindi.WEB-DL.2.0.x264.mkv", 2, 2],
+  ["INDIAS.GOT.LATENT.S2.Bonus.EP1.1080p.YT.WEBRip.Hindi.AAC2.0.H.264.mkv", 2, 1],
+  ["INDIAS.GOT.LATENT.S02.Bonus.E04.2026.720p.YT.WEB-DL.Hindi.AAC2.0.H.264.mkv", 2, 4],
+];
+for (const [raw, season, bonus] of bonusNames) {
+  const got = parseBonusNumber(raw);
+  check(`"${raw.slice(0, 44)}…" → season ${season} bonus ${bonus}`, got?.season === season && got?.bonus === bonus, JSON.stringify(got));
+  check(`…and is never read as regular episode ${bonus}`, parseEpisodeNumber(raw) === null, JSON.stringify(parseEpisodeNumber(raw)));
+}
+check("a bonus with no number is still a bonus, just unmatchable", parseBonusNumber("Show Bonus Clip.mkv")?.bonus === null);
+check("a regular episode isn't a bonus", parseBonusNumber("HOTD S01E01.mkv") === null);
+// TMDb's actual India's Got Latent specials, abridged: one running list across both seasons.
+const latentSpecials = [
+  { episode_number: 2, name: "Bonus EP 1" },
+  { episode_number: 3, name: "Bonus EP 2" },
+  { episode_number: 4, name: "Bonus EP 3" },
+  { episode_number: 11, name: "S2 Bonus EP1 ft. Raghav Juyal, Munawar, Niharika NM, Rohan Joshi" },
+  { episode_number: 12, name: "Bonus Clip ft. Karan Aujla, Tanmay Bhat, Gurleen Pannu, Rahul Dua" },
+  { episode_number: 13, name: "S2 Bonus EP2 ft. Badshah, Sourav Joshi, Harssh Limbachiyaa, Rajat Sood" },
+  { episode_number: 15, name: "S2 Bonus EP3 ft. Deepak Kalal, Ravi Gupta and Agu Stanley" },
+  { episode_number: 16, name: "S2 Bonus EP4 ft. Ayushmann Khurrana, Suhani Shah, Kullu, Rajat Sood" },
+];
+check("season 2 bonuses find their specials (11, 13, 15, 16)", [1, 2, 3, 4].map((b) => matchSpecial(latentSpecials, { season: 2, bonus: b })).join() === "11,13,15,16");
+check("a season-1 bonus finds the special with no season in its name", matchSpecial(latentSpecials, { season: 1, bonus: 3 }) === 4);
+check("no candidate → no match", matchSpecial(latentSpecials, { season: 3, bonus: 1 }) === null);
+check("two candidates → no guess", matchSpecial([{ episode_number: 1, name: "Bonus 1" }, { episode_number: 2, name: "Bonus EP 1" }], { season: 1, bonus: 1 }) === null);
 
 console.log("\nMatch picking");
 const weapons = { id: 1, title: "Weapons", release_date: "2025-08-06", popularity: 80 };
@@ -256,9 +287,15 @@ const seasons = {
   ],
   "94997/3": [
     { episode_number: 1, name: "Third Season One", overview: "x", still_path: "/hotdS3E1.jpg" },
-    { episode_number: 2, name: "Third Season Two", overview: "x", still_path: "/hotdS3E2.jpg" },
+    // Sorts *before* episode 1's name, so renaming a position-matched folder would reshuffle it
+    // if its order weren't frozen.
+    { episode_number: 2, name: "Another Third Two", overview: "x", still_path: "/hotdS3E2.jpg" },
     { episode_number: 3, name: "Third Season Three", overview: "x", still_path: "/hotdS3E3.jpg" },
     { episode_number: 4, name: "Third Season Four", overview: "x", still_path: "/hotdS3E4.jpg" },
+  ],
+  "101/0": [
+    { episode_number: 3, name: "Bonus EP 2", overview: "Season one's.", still_path: "/latentB1.jpg" },
+    { episode_number: 13, name: "S2 Bonus EP2 ft. Badshah", overview: "The real bonus two.", still_path: "/latentS2B2.jpg" },
   ],
   "101/2": [
     { episode_number: 1, name: "Episode One", overview: "The judges arrive.", still_path: "/latentS2E1.jpg", air_date: "2025-01-05", runtime: 80 },
@@ -338,6 +375,7 @@ await db.collection("catalogFolders").insertMany([
   // One readable name and one DOS short name: all-or-nothing, so this folder goes by position.
   { ...folder("f-hotd-s3", "f-hotd", "Season 3"), status: "pending", title: null },
   folder("f-hotd-nofit", "f-hotd", "Season 3 Extras"),
+  folder("f-hotd-frozen", "f-hotd", "Season 3 Again"),
   // Curated but unpublished: an admin is holding this season back on purpose.
   { ...folder("f-hotd-held", "f-hotd", "Season 1 Directors Cut"), status: "curated" },
 ]);
@@ -356,19 +394,34 @@ await db.collection("catalogVideos").insertMany([
   video("v-making-of", "f-hotd-extras", "HOTD Making Of.mkv", null, { status: "pending", titleOverridden: false }),
   video("v-s2e1", "f-hotd-s2", "HOTD S02E01.mkv", "Episode 1", { titleOverridden: false }),
   video("v-s2e2", "f-hotd-s2", "HOTD S02E02.mkv", "Episode 2", { titleOverridden: false }),
-  video("v-s2e4", "f-hotd-s2", "HOTD S02E04.mkv", "Episode 3", { titleOverridden: false }),
+  video("v-s2e4", "f-hotd-s2", "HOTD S02E04.mkv", "Episode 3", { titleOverridden: false, episodeOrder: 3 }),
   video("v-lost", "f-hotd-lost", "HOTD S02E03.mkv", "The lost one", { titleOverridden: false }),
   video("v-s3e3", "f-hotd-s3", "HOTD S03E03.mkv", null, { status: "pending", titleOverridden: false }),
   video("v-s3e4", "f-hotd-s3", "HOTD S03E04.mkv", null, { status: "pending", titleOverridden: false }),
   video("v-s3-short1", "f-hotd-s3", "HOTDS3~1.MKV", null, { status: "pending", titleOverridden: false }),
   video("v-s3-short2", "f-hotd-s3", "HOTDS3~2.MKV", null, { status: "pending", titleOverridden: false }),
   // Too many gaps to fill: one readable episode 4 and a single short name could be any of 1–3.
-  video("v-nofit-e4", "f-hotd-nofit", "HOTD S03E04.mkv", null, { status: "pending", titleOverridden: false }),
-  video("v-nofit-short", "f-hotd-nofit", "HOTDX~1.MKV", null, { status: "pending", titleOverridden: false }),
+  // An admin ordered this folder by hand — the short-name file first — which name sorting would
+  // reverse. (An admin's order is always complete: drag-reorder and publish-rule apply set every
+  // file at once.)
+  video("v-nofit-e4", "f-hotd-nofit", "HOTD S03E04.mkv", null, { status: "pending", titleOverridden: false, episodeOrder: 2 }),
+  video("v-nofit-short", "f-hotd-nofit", "HOTDX~1.MKV", null, { status: "pending", titleOverridden: false, episodeOrder: 1 }),
+  // Season 3's position-matched twin with no order at all: it should be frozen after one pass.
+  video("v-frozen-a", "f-hotd-frozen", "HOTDF~1.MKV", "Zebra", { titleOverridden: false }),
+  video("v-frozen-b", "f-hotd-frozen", "HOTDF~2.MKV", "Aardvark", { titleOverridden: false }),
   // Curated, not published: held back for a subtitle check.
   video("v-held", "f-hotd-s1", "HOTD S01E05.mkv", "Held for subtitles", { status: "curated", titleOverridden: true }),
   // Never curated, but inside the held-back folder.
   video("v-in-held", "f-hotd-held", "HOTD S01E01 DC.mkv", null, { status: "pending", titleOverridden: false }),
+  video("v-bonus2", "f-latent", "LATENT.S02.Bonus.Ep.02.mkv", "Wrongly named", {
+    titleOverridden: false,
+    episodeOrder: 1,
+    episodeArtwork: { seriesTmdbId: "101", season: 2, episode: 1, name: "Episode One", overview: "wrong", stillPath: "/latentS2E1.jpg", airDate: null, runtimeMinutes: null, rating: null, matchedAt: new Date() },
+  }),
+  video("v-bonus-clip", "f-latent", "LATENT.S02.Bonus.Clip.mkv", "A clip", {
+    titleOverridden: true,
+    episodeArtwork: { seriesTmdbId: "101", season: 2, episode: 1, name: "Episode One", overview: "wrong", stillPath: null, airDate: null, runtimeMinutes: null, rating: null, matchedAt: new Date() },
+  }),
   // A flat series: episodes straight inside the series folder, whose own name says "s2".
   video("v-latent-e1", "f-latent", "Latent S02E01.mkv", "Episode 1", { titleOverridden: false, episodeOrder: 1 }),
 ]);
@@ -401,7 +454,9 @@ async function cleanup() {
 }
 
 try {
-  for (let i = 0; i < 180 && !serverLog.includes("listening") && server.exitCode === null; i++) await sleep(500);
+  // Up to three minutes: on a loaded machine, or against a freshly created Atlas database still
+  // building its indexes, the backend can take well over a minute to start listening.
+  for (let i = 0; i < 360 && !serverLog.includes("listening") && server.exitCode === null; i++) await sleep(500);
   if (!serverLog.includes("listening")) throw new Error(`backend didn't start:\n${serverLog}`);
 
   async function api(path, { token, method = "GET", body } = {}) {
@@ -550,10 +605,27 @@ try {
   const epOf = async (id) => (await doc("video", id))?.episodeArtwork?.episode;
   check("readable names keep their numbers beside unreadable ones", (await epOf("v-s3e3")) === 3 && (await epOf("v-s3e4")) === 4, JSON.stringify([await epOf("v-s3e3"), await epOf("v-s3e4")]));
   check("unreadable short names fill the leftover numbers, in name order", (await epOf("v-s3-short1")) === 1 && (await epOf("v-s3-short2")) === 2, JSON.stringify([await epOf("v-s3-short1"), await epOf("v-s3-short2")]));
-  check("more gaps than files to fill them: back to position, not a guess", (await epOf("v-nofit-e4")) === 1 && (await epOf("v-nofit-short")) === 2, JSON.stringify([await epOf("v-nofit-e4"), await epOf("v-nofit-short")]));
-  check("an episode's existing order is left where an admin put it", (await doc("video", "v-ep3"))?.episodeOrder === 3);
-  check("an unordered episode is given its number as its order", (await doc("video", "v-s2e4"))?.episodeOrder === 4);
+  check("more gaps than files to fill them: back to the library's own order, not a guess", (await epOf("v-nofit-short")) === 1 && (await epOf("v-nofit-e4")) === 2, JSON.stringify([await epOf("v-nofit-short"), await epOf("v-nofit-e4")]));
+  check("a file that names its episode repairs a wrong stored order", (await doc("video", "v-s2e4"))?.episodeOrder === 4, String((await doc("video", "v-s2e4"))?.episodeOrder));
+  check("in a folder matched by position, an admin's order is left alone", (await doc("video", "v-nofit-e4"))?.episodeOrder === 2 && (await doc("video", "v-nofit-short"))?.episodeOrder === 1, String((await doc("video", "v-nofit-e4"))?.episodeOrder));
+  // Unordered and position-matched: "Aardvark" sorts first, so it's episode 1 — and renaming both
+  // to their TMDb names must not reshuffle them on the next pass.
+  check("an unordered position-matched folder is frozen in the order it was matched", (await doc("video", "v-frozen-b"))?.episodeOrder === 1 && (await doc("video", "v-frozen-a"))?.episodeOrder === 2, JSON.stringify([(await doc("video", "v-frozen-b"))?.episodeOrder, (await doc("video", "v-frozen-a"))?.episodeOrder]));
+  await api("/api/admin/catalog/artwork/folder/f-hotd/episodes", { token: admin, method: "POST", body: {} });
+  await api("/api/admin/catalog/artwork/folder/f-hotd/episodes", { token: admin, method: "POST", body: {} });
+  check("…and stays matched the same way, run after run", (await epOf("v-frozen-b")) === 1 && (await epOf("v-frozen-a")) === 2 && (await epOf("v-nofit-short")) === 1 && (await epOf("v-nofit-e4")) === 2, JSON.stringify([await epOf("v-frozen-b"), await epOf("v-frozen-a"), await epOf("v-nofit-short"), await epOf("v-nofit-e4")]));
+  check("an unordered episode is given its number as its order", (await doc("video", "v-s3e3"))?.episodeOrder === 3);
   check("a folder with nothing to go on stays unmatched", !(await doc("video", "v-making-of"))?.episodeArtwork);
+  const bonus2 = await doc("video", "v-bonus2");
+  check("a bonus file is matched to its TMDb special by name, not to a regular episode", bonus2?.episodeArtwork?.season === 0 && bonus2?.episodeArtwork?.episode === 13 && bonus2?.episodeArtwork?.overview === "The real bonus two.", JSON.stringify(bonus2?.episodeArtwork));
+  check("…its wrong name is replaced with the special's", bonus2?.title === "S2 Bonus EP2 ft. Badshah", JSON.stringify(bonus2?.title));
+  check("…and it sorts after the regular episodes, in bonus order", bonus2?.episodeOrder === 3, String(bonus2?.episodeOrder));
+  const clip = await doc("video", "v-bonus-clip");
+  check("a bonus nobody can match loses the wrong data it had", !clip?.episodeArtwork && clip?.title === "A clip", JSON.stringify(clip?.episodeArtwork));
+  const latentRows = (await api("/api/folder/f-latent", { token: viewer })).json?.items ?? [];
+  const bonusRow = latentRows.find((r) => r.id === "v-bonus2");
+  check("a bonus row is labelled by its own order, not TMDb's special number", bonusRow?.episodeNumber === 3 && bonusRow?.overview === "The real bonus two.", JSON.stringify(bonusRow));
+  check("the player doesn't call a special \"E13\"", (await api("/api/video/v-bonus2", { token: viewer })).json?.episode?.number === null);
   const latentEp = await doc("video", "v-latent-e1");
   check("a flat series takes its season from its own name", latentEp?.episodeArtwork?.season === 2 && latentEp?.title === "Episode One", JSON.stringify(latentEp?.episodeArtwork));
 
