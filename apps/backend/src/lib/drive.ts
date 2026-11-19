@@ -416,6 +416,11 @@ const probeCache = new Map<string, ProbeResult>();
 // once) in a single place, and leaves room for a non-Drive source when storage changes.
 type MediaSource = { type: "drive"; fileId: string };
 
+/** ffmpeg input arguments that read a Drive file straight from Drive (lib/trickplay.ts). */
+export function driveInputArgs(fileId: string): Promise<string[]> {
+  return sourceInputArgs({ type: "drive", fileId });
+}
+
 async function sourceInputArgs(source: MediaSource): Promise<string[]> {
   const accessToken = await getDriveAccessToken();
   const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(source.fileId)}?alt=media`;

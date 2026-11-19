@@ -76,6 +76,15 @@ export const env = {
   get artworkDir() {
     return resolve(process.env.ARTWORK_DIR || join(__dirname, "..", "..", "artwork"));
   },
+  // Seek-bar preview frames (see lib/trickplay.ts): sprite sheets made once per video on its first
+  // play. A cache like artworkDir — delete it and they're made again. TRICKPLAY=off stops new ones
+  // being made (each costs one full read of the file from Drive).
+  get trickplayDir() {
+    return resolve(process.env.TRICKPLAY_DIR || join(__dirname, "..", "..", "trickplay"));
+  },
+  get trickplayEnabled() {
+    return !/^(0|off|false|no)$/i.test(process.env.TRICKPLAY ?? "");
+  },
   // Optional. With it, a pasted IMDb/TMDb link on a request is resolved to a real title, year,
   // type and poster; without it the link is simply stored and the admin opens it themselves.
   // Nothing fails when it's missing — see lib/referenceLink.ts.
