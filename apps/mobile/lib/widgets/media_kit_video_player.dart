@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:window_manager/window_manager.dart';
 import '../config.dart';
@@ -22,6 +24,7 @@ import '../utils/media_meta.dart';
 import 'episodes_panel.dart';
 import 'player_chrome.dart';
 import 'tv_focusable.dart';
+import 'up_next.dart';
 
 // TEMP diagnostic logging — remove once the Android resume/subtitle investigation is done.
 void _dbg(String msg) => debugPrint('[MKV ${DateTime.now().toIso8601String().substring(11, 23)}] $msg');
@@ -30,6 +33,12 @@ const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
 const _hideControlsDelay = Duration(seconds: 3);
 const _saveInterval = Duration(seconds: 10);
 const _skipSeconds = 10;
+
+/// Desktop: the player's own volume is remembered between sessions, like any desktop player's.
+const _volumePrefKey = 'player_volume';
+
+/// Two clicks this close together (and close on screen) are a double-click.
+const _doubleClickWindow = Duration(milliseconds: 300);
 
 /// How often a follower re-checks its drift, and the leader's heartbeat cadence (every 6th tick).
 const _partyTick = Duration(milliseconds: 500);
@@ -122,6 +131,29 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
 
   bool _lastPipEligible = false;
 
+  // Desktop (Windows): mouse, wheel and the player's own volume. A phone keeps its touch
+  // gestures and hardware volume buttons; none of this applies there.
+  bool get _isDesktop => Platform.isWindows;
+  double _volume = 100; // 0–200; past 100 is a boost
+  bool _muted = false;
+  double? _volumeHud; // shown for a moment while the wheel or a key changes it
+  Timer? _volumeHudTimer;
+  Timer? _volumeSaveTimer;
+  DateTime? _lastClickAt;
+  Offset? _lastClickPos;
+  int _clickChain = 0;
+  ({bool forward, int seconds})? _seekHud; // "+20 s" after a double-click seek
+  Timer? _seekHudTimer;
+  Offset? _lastHoverPos;
+
+  // Up next (see widgets/up_next.dart): the card near the end, its countdown, and the end screen.
+  bool _autoplay = true;
+  bool _upNextShown = false;
+  bool _upNextDismissed = false;
+  double? _upNextLeft; // seconds of countdown left; null when not counting
+  Timer? _upNextTimer;
+  bool _endScreen = false;
+
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration _buffered = Duration.zero;
@@ -186,6 +218,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     WidgetsBinding.instance.addObserver(this);
     _configureOrientation();
     if (isAndroidTv) _controlsVisible = false;
+    if (_isDesktop) _initDesktopVolume();
+    SharedPreferences.getInstance().then((prefs) {
+      final saved = prefs.getBool(upNextAutoplayPrefKey);
+      if (saved != null && mounted) setState(() => _autoplay = saved);
+    }).catchError((_) {});
 
     _subtitlePreferenceSource = video.initialSubtitleSource == 'off' || video.initialSubtitleSource == 'external'
         ? video.initialSubtitleSource
@@ -227,6 +264,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         setState(() => _position = p);
         _maybeSave();
         _maybeAutoAdvance();
+        _updateUpNext();
         MediaSessionService.updateState(playing: _playing, position: p, speed: _speed);
       }),
       _player.stream.duration.listen((d) {
@@ -264,7 +302,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         if (mounted) setState(() => _track = t);
       }),
       _player.stream.completed.listen((completed) {
-        if (completed) _goToNext(auto: true);
+        if (completed && !_endedHandled) {
+          _endedHandled = true;
+          _onEnded();
+        }
       }),
       _player.stream.error.listen((message) {
         _dbg('player ERROR: $message');
@@ -339,6 +380,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
+    _volumeHudTimer?.cancel();
+    _volumeSaveTimer?.cancel();
+    _seekHudTimer?.cancel();
+    _upNextTimer?.cancel();
     _hintTimer?.cancel();
     _overlayHideTimer?.cancel();
     _partyTimer?.cancel();
@@ -664,7 +709,147 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     if (duration <= Duration.zero) return;
     if (_position >= duration - const Duration(milliseconds: 300) && !_playing) {
       _endedHandled = true;
+      _onEnded();
+    }
+  }
+
+  // ===============================================================================================
+  // Up next
+
+  /// After [upNextStreakLimit] titles started on their own, the next waits for the viewer. Not in
+  /// a watch party: there the room is plainly still watching, and the host moves everyone on.
+  bool get _needsStillWatching => !_syncEnabled && upNextAutoplayStreak >= upNextStreakLimit;
+
+  /// Where the card appears: the credits, when they're known, else 25 seconds from the end.
+  double? get _upNextAt {
+    if (video.upNext == null) return null;
+    final total = _effectiveDuration.inMilliseconds / 1000;
+    final outro = video.outroStart;
+    if (outro != null && (total <= 0 || outro < total)) return outro;
+    if (total < 90) return null; // a clip too short to have an ending worth skipping
+    return total - 25;
+  }
+
+  void _updateUpNext() {
+    final at = _upNextAt;
+    if (at == null) return;
+    final pos = _positionSeconds;
+    final total = _effectiveDuration.inMilliseconds / 1000;
+    // Seeking back out of the ending puts everything back as it was.
+    if (pos < at - 2) {
+      if (_upNextShown || _endScreen || _endedHandled) {
+        _upNextTimer?.cancel();
+        setState(() {
+          _upNextShown = false;
+          _upNextLeft = null;
+          _endScreen = false;
+        });
+        _endedHandled = false;
+      }
+      return;
+    }
+    if (_endScreen && total > 0 && pos < total - 2) {
+      setState(() => _endScreen = false);
+      _endedHandled = false;
+    }
+    if (_upNextShown || _upNextDismissed || _locked || pos < at) return;
+    setState(() => _upNextShown = true);
+    _startUpNextCountdown();
+  }
+
+  void _startUpNextCountdown() {
+    final item = video.upNext;
+    _upNextTimer?.cancel();
+    if (item == null || !_autoplay || _needsStillWatching || _locked) {
+      if (_upNextLeft != null) setState(() => _upNextLeft = null);
+      return;
+    }
+    setState(() => _upNextLeft = upNextCountdownSeconds(item).toDouble());
+    const tick = Duration(milliseconds: 100);
+    _upNextTimer = Timer.periodic(tick, (_) {
+      if (!mounted) return;
+      // Paused means "wait": the countdown only runs while it plays, or once it has ended.
+      if (!_playing && !_endedHandled) return;
+      final left = (_upNextLeft ?? 0) - tick.inMilliseconds / 1000;
+      if (left <= 0) {
+        _upNextTimer?.cancel();
+        _autoplayUpNext();
+        return;
+      }
+      setState(() => _upNextLeft = left);
+    });
+  }
+
+  void _setAutoplay(bool on) {
+    setState(() => _autoplay = on);
+    SharedPreferences.getInstance().then((prefs) => prefs.setBool(upNextAutoplayPrefKey, on)).catchError((_) => false);
+    if (_upNextShown) _startUpNextCountdown();
+  }
+
+  void _dismissUpNext() {
+    _upNextTimer?.cancel();
+    setState(() {
+      _upNextDismissed = true;
+      _upNextShown = false;
+      _upNextLeft = null;
+    });
+  }
+
+  /// The title finished. Move on by itself when it may; otherwise show what could come next.
+  void _onEnded() {
+    final next = video.upNext;
+    if (next == null) {
+      // An older backend: no card, the plain next-episode hop it always did.
       _goToNext(auto: true);
+      return;
+    }
+    if (_locked) return; // the host moves the party on
+    if (!_upNextDismissed && _autoplay && !_needsStillWatching) {
+      _autoplayUpNext();
+      return;
+    }
+    _upNextTimer?.cancel();
+    setState(() {
+      _endScreen = true;
+      _upNextShown = false;
+      _upNextLeft = null;
+      _controlsVisible = false;
+    });
+  }
+
+  void _autoplayUpNext() {
+    final next = video.upNext;
+    if (next == null || !mounted) return;
+    upNextAutoplayStreak++;
+    _navigateToEpisode(next.fileId);
+  }
+
+  /// The viewer chose it: the streak of unattended plays starts over.
+  void _playChosen(UpNextItem item) {
+    upNextAutoplayStreak = 0;
+    _upNextTimer?.cancel();
+    _navigateToEpisode(item.fileId);
+  }
+
+  void _watchAgain() {
+    _endedHandled = false;
+    setState(() {
+      _endScreen = false;
+      _upNextShown = false;
+      _upNextDismissed = false;
+      _upNextLeft = null;
+    });
+    _userSeekTo(0);
+    _player.play();
+    _announce(PartyStateKind.action, playing: true, positionSeconds: 0);
+  }
+
+  /// Leaves the player outright — unlike [_back], which first leaves a forced full screen.
+  void _leavePlayer() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(video.backHref);
     }
   }
 
@@ -709,6 +894,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   void _showControls() {
+    upNextAutoplayStreak = 0;
     setState(() => _controlsVisible = true);
     _scheduleHide();
   }
@@ -738,6 +924,130 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       _skip(_skipSeconds);
     } else {
       _togglePlay();
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Desktop: mouse, wheel and volume
+
+  Future<void> _initDesktopVolume() async {
+    // mpv allows 130% by default; the boost goes to 200%, as in VLC.
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      await platform.setProperty('volume-max', PlayerVolumeControl.max.round().toString());
+    }
+    var saved = 100.0;
+    try {
+      saved = (await SharedPreferences.getInstance()).getDouble(_volumePrefKey) ?? 100;
+    } catch (_) {
+      // No stored preference (or storage unavailable): start at the file's own level.
+    }
+    if (!mounted) return;
+    setState(() => _volume = saved.clamp(0, PlayerVolumeControl.max).toDouble());
+    await _player.setVolume(_volume);
+  }
+
+  void _flashVolumeHud(double value) {
+    setState(() => _volumeHud = value);
+    _volumeHudTimer?.cancel();
+    _volumeHudTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _volumeHud = null);
+    });
+  }
+
+  void _setVolume(double next, {bool showHud = true}) {
+    final value = next.clamp(0, PlayerVolumeControl.max).toDouble();
+    setState(() {
+      _volume = value;
+      _muted = false;
+    });
+    _player.setVolume(value);
+    if (showHud) _flashVolumeHud(value);
+    if (_controlsVisible) _scheduleHide(); // keep the controls up while it's being adjusted
+    _volumeSaveTimer?.cancel();
+    _volumeSaveTimer = Timer(const Duration(milliseconds: 600), () async {
+      try {
+        await (await SharedPreferences.getInstance()).setDouble(_volumePrefKey, value);
+      } catch (_) {
+        // Not remembered this time; nothing else depends on it.
+      }
+    });
+  }
+
+  /// One wheel notch or arrow press: 5%. Muted, it unmutes back to where it was, then steps.
+  void _nudgeVolume(int steps) => _setVolume(_volume + steps * 5);
+
+  void _toggleMute() {
+    final muted = !_muted;
+    setState(() => _muted = muted);
+    _player.setVolume(muted ? 0 : _volume);
+    _flashVolumeHud(muted ? 0 : _volume);
+  }
+
+  void _onDesktopHover(PointerHoverEvent event) {
+    // A resting trackpad can report tiny moves; those shouldn't hold the controls up forever.
+    final last = _lastHoverPos;
+    _lastHoverPos = event.localPosition;
+    if (last != null && (event.localPosition - last).distance < 3) return;
+    if (_controlsVisible) {
+      _scheduleHide();
+    } else {
+      _showControls();
+    }
+  }
+
+  void _onDesktopScroll(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    // Registered with the resolver so that anything under the pointer that scrolls itself — an
+    // open menu, the episode list — gets the wheel first, and the volume only otherwise.
+    GestureBinding.instance.pointerSignalResolver.register(event, (resolved) {
+      final dy = (resolved as PointerScrollEvent).scrollDelta.dy;
+      if (dy != 0) _nudgeVolume(dy < 0 ? 1 : -1);
+    });
+  }
+
+  /// Desktop clicks on the video itself (a click on a control never gets here — the control wins
+  /// it). One click brings the controls up and never pauses: on a desktop that's what Space and the
+  /// play button are for, and pausing by accident on the way to the controls is what this
+  /// replaced. Double-click the left or right third to jump 10 s — each further quick click adds
+  /// 10 s more, as on YouTube — or the middle to toggle full screen.
+  ///
+  /// Done by hand from tap-ups rather than with a double-tap recognizer, which would hold every
+  /// single click back ~300 ms to see whether a second one follows.
+  void _onDesktopClick(Offset localPosition) {
+    final now = DateTime.now();
+    final last = _lastClickAt;
+    final lastPos = _lastClickPos;
+    final chained = last != null &&
+        now.difference(last) <= _doubleClickWindow &&
+        lastPos != null &&
+        (localPosition - lastPos).distance < 40;
+    _lastClickAt = now;
+    _lastClickPos = localPosition;
+
+    if (!chained) {
+      _clickChain = 1;
+      if (_menu != _Menu.none) {
+        _closeMenus();
+      } else {
+        _showControls();
+      }
+      return;
+    }
+
+    _clickChain++;
+    final width = context.size?.width ?? MediaQuery.sizeOf(context).width;
+    final x = localPosition.dx;
+    if (x < width / 3 || x > width * 2 / 3) {
+      final forward = x > width * 2 / 3;
+      _skip(forward ? _skipSeconds : -_skipSeconds);
+      setState(() => _seekHud = (forward: forward, seconds: (_clickChain - 1) * _skipSeconds));
+      _seekHudTimer?.cancel();
+      _seekHudTimer = Timer(const Duration(milliseconds: 700), () {
+        if (mounted) setState(() => _seekHud = null);
+      });
+    } else if (_clickChain == 2) {
+      _toggleFullscreen();
     }
   }
 
@@ -1015,7 +1325,26 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         focusNode: _sync?.tvChromeFocusNode,
         autofocus: true,
         onKeyEvent: (node, event) {
+          // Holding ↑/↓ keeps stepping the volume, as holding a key does in any desktop player.
+          if (_isDesktop && _menu == _Menu.none && (event is KeyDownEvent || event is KeyRepeatEvent)) {
+            if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+              _nudgeVolume(1);
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+              _nudgeVolume(-1);
+              return KeyEventResult.handled;
+            }
+          }
           if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          if (_isDesktop && event.logicalKey == LogicalKeyboardKey.keyM) {
+            _toggleMute();
+            return KeyEventResult.handled;
+          }
+          if (_isDesktop && event.logicalKey == LogicalKeyboardKey.keyF) {
+            _toggleFullscreen();
+            return KeyEventResult.handled;
+          }
           if (isAndroidTv && !_controlsVisible) {
             _showControls();
             return KeyEventResult.handled;
@@ -1142,21 +1471,29 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         video.introEnd != null &&
         position.inSeconds >= video.introStart! &&
         position.inSeconds < video.introEnd!;
-    final showNext = video.outroStart != null && position.inSeconds >= video.outroStart! && video.nextFileId != null;
+    // An older backend sends no up-next: its credits still get the plain "Next episode" pill.
+    final showNext = video.upNext == null &&
+        video.outroStart != null &&
+        position.inSeconds >= video.outroStart! &&
+        video.nextFileId != null;
+    final upNext = video.upNext;
 
-    return GestureDetector(
+    final gestures = GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () {
-        if (_menu != _Menu.none) {
-          _closeMenus();
-        } else if (_controlsVisible && _playing) {
-          setState(() => _controlsVisible = false);
-        } else {
-          _showControls();
-        }
-      },
-      onDoubleTapDown: (details) => _doubleTapLocalPosition = details.localPosition,
-      onDoubleTap: _handleDoubleTap,
+      onTap: _isDesktop
+          ? null
+          : () {
+              if (_menu != _Menu.none) {
+                _closeMenus();
+              } else if (_controlsVisible && _playing) {
+                setState(() => _controlsVisible = false);
+              } else {
+                _showControls();
+              }
+            },
+      onTapUp: _isDesktop ? (details) => _onDesktopClick(details.localPosition) : null,
+      onDoubleTapDown: _isDesktop ? null : (details) => _doubleTapLocalPosition = details.localPosition,
+      onDoubleTap: _isDesktop ? null : _handleDoubleTap,
       onVerticalDragStart: _isPhone && landscape ? _handleVerticalDragStart : null,
       onVerticalDragUpdate: _isPhone && landscape ? _handleVerticalDragUpdate : null,
       onVerticalDragEnd: _isPhone && landscape ? _handleVerticalDragEnd : null,
@@ -1185,6 +1522,19 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
 
           if (_brightnessOverlay != null) Center(child: _gestureHud(Icons.brightness_6, _brightnessOverlay!)),
 
+          if (_volumeHud != null)
+            Positioned(top: landscape ? 72 : 52, left: 0, right: 0, child: Center(child: _volumeBadge(_volumeHud!))),
+
+          if (_seekHud != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Align(
+                  alignment: _seekHud!.forward ? const Alignment(0.7, 0) : const Alignment(-0.7, 0),
+                  child: _seekBadge(_seekHud!.forward, _seekHud!.seconds),
+                ),
+              ),
+            ),
+
           if (_errorMessage != null)
             Positioned(
               left: 16,
@@ -1209,6 +1559,37 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
 
           _chrome(landscape: landscape),
 
+          // Above the chrome, so its buttons win over the scrubber's hit area.
+          if (upNext != null && _upNextShown && !_endScreen)
+            Positioned(
+              right: 16,
+              bottom: landscape ? 128 : 64,
+              child: UpNextCard(
+                item: upNext,
+                secondsLeft: _upNextLeft,
+                totalSeconds: upNextCountdownSeconds(upNext),
+                askStillWatching: _needsStillWatching,
+                autoplay: _autoplay,
+                onAutoplayChanged: _setAutoplay,
+                onPlay: () => _playChosen(upNext),
+                onDismiss: _dismissUpNext,
+                compact: !landscape,
+              ),
+            ),
+
+          if (_endScreen)
+            Positioned.fill(
+              child: UpNextEndScreen(
+                upNext: upNext,
+                suggestions: video.suggestions,
+                askStillWatching: _needsStillWatching && !_upNextDismissed,
+                onPlay: _playChosen,
+                onReplay: _watchAgain,
+                onBack: _leavePlayer,
+                compact: !landscape,
+              ),
+            ),
+
           // Buffering sits above the chrome's play button so it reads as "loading", not a dead button.
           if (_isBuffering) const Center(child: _Spinner()),
 
@@ -1222,6 +1603,72 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                     onClose: _closeMenus,
                   )
                 : _sidePanel(_menuTitle(_menu), _menuRows(_menu, onDone: _closeMenus)),
+        ],
+      ),
+    );
+
+    if (!_isDesktop) return gestures;
+    // Desktop: moving the mouse brings the controls up, the cursor hides along with them once
+    // they fade (as in any desktop player), and the wheel is the volume.
+    return MouseRegion(
+      cursor: _controlsVisible || !_playing || _menu != _Menu.none ? MouseCursor.defer : SystemMouseCursors.none,
+      onHover: _onDesktopHover,
+      child: Listener(onPointerSignal: _onDesktopScroll, child: gestures),
+    );
+  }
+
+  Widget _volumeBadge(double value) {
+    final boosted = value > 100;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.75), borderRadius: BorderRadius.circular(10)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(value == 0 ? Icons.volume_off : Icons.volume_up, color: boosted ? AppColors.amber : Colors.white, size: 20),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 110,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: value / PlayerVolumeControl.max,
+                minHeight: 4,
+                backgroundColor: Colors.white24,
+                valueColor: AlwaysStoppedAnimation(boosted ? AppColors.amber : Colors.white),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            boosted ? '${value.round()}% boost' : '${value.round()}%',
+            style: TextStyle(
+              color: boosted ? AppColors.amber : Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _seekBadge(bool forward, int seconds) {
+    return Container(
+      width: 92,
+      height: 92,
+      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(forward ? Icons.fast_forward_rounded : Icons.fast_rewind_rounded, color: Colors.white, size: 28),
+          const SizedBox(height: 2),
+          Text(
+            '${forward ? '+' : '−'}$seconds s',
+            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+          ),
         ],
       ),
     );
@@ -1286,6 +1733,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       onNext: () => _goToNext(),
       onPip: PipService.enterNow,
       onFullscreen: _toggleFullscreen,
+      volume: _isDesktop ? _volume : null,
+      muted: _muted,
+      onVolume: _isDesktop ? (v) => _setVolume(v, showHud: false) : null,
+      onToggleMute: _isDesktop ? _toggleMute : null,
     );
   }
 

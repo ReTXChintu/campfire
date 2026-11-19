@@ -54,6 +54,13 @@ class PlayerChrome extends StatelessWidget {
   final bool fullscreenActive;
   final PlayerPartyChip? party;
 
+  /// Desktop only: the player's own volume, 0–200 (above 100 is a boost, as in VLC). Null hides
+  /// the control — a phone has its hardware buttons and system volume.
+  final double? volume;
+  final bool muted;
+  final ValueChanged<double>? onVolume;
+  final VoidCallback? onToggleMute;
+
   final VoidCallback onBack;
   final VoidCallback onTogglePlay;
   final VoidCallback onSkipBack;
@@ -93,6 +100,10 @@ class PlayerChrome extends StatelessWidget {
     required this.showFullscreen,
     required this.fullscreenActive,
     required this.party,
+    this.volume,
+    this.muted = false,
+    this.onVolume,
+    this.onToggleMute,
     required this.onBack,
     required this.onTogglePlay,
     required this.onSkipBack,
@@ -222,6 +233,8 @@ class PlayerChrome extends StatelessWidget {
   Widget _trailing() => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (volume != null && onVolume != null && onToggleMute != null)
+            PlayerVolumeControl(volume: volume!, muted: muted, onChanged: onVolume!, onToggleMute: onToggleMute!),
           if (hasNext) PlayerIconButton(icon: Icons.skip_next, tooltip: 'Next episode', onTap: onNext),
           if (showPip) PlayerIconButton(icon: Icons.picture_in_picture_alt_outlined, tooltip: 'Picture in picture', onTap: onPip),
           if (showFullscreen)
@@ -279,6 +292,82 @@ class PlayerChrome extends StatelessWidget {
   }
 
   Widget _portraitRow() => Row(children: [const Spacer(), _trailing()]);
+}
+
+/// Mute button plus a 0–200% slider. The stretch past 100% is drawn in amber and labelled
+/// "boost": it amplifies past the file's own level (as VLC does), which a small laptop speaker
+/// often needs, and can clip on an already loud mix — so it's visibly a different zone, not just
+/// more of the same slider.
+class PlayerVolumeControl extends StatelessWidget {
+  final double volume;
+  final bool muted;
+  final ValueChanged<double> onChanged;
+  final VoidCallback onToggleMute;
+
+  const PlayerVolumeControl({
+    super.key,
+    required this.volume,
+    required this.muted,
+    required this.onChanged,
+    required this.onToggleMute,
+  });
+
+  static const double max = 200;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = muted ? 0.0 : volume.clamp(0, max).toDouble();
+    final icon = shown == 0
+        ? Icons.volume_off
+        : shown < 50
+            ? Icons.volume_down
+            : Icons.volume_up;
+    final boosting = shown > 100;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PlayerIconButton(icon: icon, tooltip: muted ? 'Unmute (M)' : 'Mute (M)', onTap: onToggleMute),
+        SizedBox(
+          width: 120,
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              activeTrackColor: boosting ? AppColors.amber : Colors.white,
+              inactiveTrackColor: Colors.white24,
+              thumbColor: boosting ? AppColors.amber : Colors.white,
+            ),
+            child: Semantics(
+              label: 'Volume',
+              value: '${shown.round()} percent${boosting ? ', boosted' : ''}',
+              child: Slider(
+                value: shown,
+                min: 0,
+                max: max,
+                // 5% steps from the keyboard, the same as the scroll wheel and arrow keys.
+                divisions: 40,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 52,
+          child: Text(
+            boosting ? '${shown.round()}%\nboost' : '${shown.round()}%',
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              color: boosting ? AppColors.amber : Colors.white70,
+              fontSize: 11,
+              height: 1.1,
+              fontWeight: boosting ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 class PlayerIconButton extends StatelessWidget {

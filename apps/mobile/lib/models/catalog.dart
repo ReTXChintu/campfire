@@ -436,6 +436,55 @@ class EpisodeProgress {
   }
 }
 
+/// One "Up next" choice — see apps/backend/src/lib/upNext.ts.
+class UpNextItem {
+  /// "episode" (the next one in this series) or "suggestion" (another title).
+  final String kind;
+
+  /// The video to play — for a suggested series, its first episode.
+  final String fileId;
+  final String title;
+
+  /// "S2 E1 · House of the Dragon", or a suggestion's reason ("With Matt Smith").
+  final String? subtitle;
+
+  /// Backend path of its image (an episode still, or the title's artwork).
+  final String imagePath;
+  final String? overview;
+
+  /// A suggested series' own page (`/folder/<id>`); null for an episode or a film.
+  final String? infoHref;
+
+  const UpNextItem({
+    required this.kind,
+    required this.fileId,
+    required this.title,
+    this.subtitle,
+    required this.imagePath,
+    this.overview,
+    this.infoHref,
+  });
+
+  bool get isEpisode => kind == 'episode';
+
+  static UpNextItem? tryParse(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final fileId = json['fileId'];
+    final title = json['title'];
+    final imagePath = json['imagePath'];
+    if (fileId is! String || title is! String || imagePath is! String) return null;
+    return UpNextItem(
+      kind: (json['kind'] as String?) ?? 'suggestion',
+      fileId: fileId,
+      title: title,
+      subtitle: json['subtitle'] as String?,
+      imagePath: imagePath,
+      overview: json['overview'] as String?,
+      infoHref: json['infoHref'] as String?,
+    );
+  }
+}
+
 class VideoResponse {
   final String fileId;
   final String title;
@@ -477,6 +526,13 @@ class VideoResponse {
   /// Which episode this is, when it belongs to a matched series. Null for a film.
   final EpisodeMeta? episode;
 
+  /// What the "Up next" card offers near the end: the next episode (crossing into the next
+  /// season), or after a film or a finale the library's best match. Null from an older backend.
+  final UpNextItem? upNext;
+
+  /// A short "more like this" list for the end screen. Empty from an older backend.
+  final List<UpNextItem> suggestions;
+
   const VideoResponse({
     required this.fileId,
     required this.title,
@@ -502,6 +558,8 @@ class VideoResponse {
     this.initialAudioTitle,
     this.meta = const TitleMeta(),
     this.episode,
+    this.upNext,
+    this.suggestions = const [],
   });
 
   bool get isNative => seekMode == 'native';
@@ -512,6 +570,11 @@ class VideoResponse {
     title: (json['title'] as String?) ?? '',
     meta: TitleMeta.fromJson(json),
     episode: EpisodeMeta.tryParse(json['episode']),
+    upNext: UpNextItem.tryParse(json['upNext']),
+    suggestions: [
+      for (final e in (json['suggestions'] as List?) ?? const [])
+        ?UpNextItem.tryParse(e),
+    ],
     backHref: json['backHref'] as String,
     parentFolderId: json['parentFolderId'] as String,
     nextFileId: json['nextFileId'] as String?,

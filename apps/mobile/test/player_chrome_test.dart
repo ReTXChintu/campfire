@@ -4,6 +4,7 @@ import 'package:campfire_mobile/models/catalog.dart';
 import 'package:campfire_mobile/theme/app_theme.dart';
 import 'package:campfire_mobile/widgets/episodes_panel.dart';
 import 'package:campfire_mobile/widgets/player_chrome.dart';
+import 'package:campfire_mobile/widgets/up_next.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,10 +71,19 @@ Widget _frame({required Size size, required Widget child}) {
   );
 }
 
-PlayerChrome _chrome({required bool landscape, bool locked = false, int members = 3, int unread = 2}) {
+PlayerChrome _chrome({
+  required bool landscape,
+  bool locked = false,
+  int members = 3,
+  int unread = 2,
+  double? volume,
+}) {
   void noop() {}
   void noopD(double _) {}
   return PlayerChrome(
+    volume: volume,
+    onVolume: volume == null ? null : noopD,
+    onToggleMute: volume == null ? null : noop,
     visible: true,
     landscape: landscape,
     title: 'Weapons',
@@ -113,12 +123,18 @@ PlayerChrome _chrome({required bool landscape, bool locked = false, int members 
   );
 }
 
-Future<void> _shot(WidgetTester tester, String name, Size size, Widget child) async {
+/// [settle] false for anything showing backend artwork: with no signed-in token store in a test
+/// the image keeps its loading spinner, which never settles.
+Future<void> _shot(WidgetTester tester, String name, Size size, Widget child, {bool settle = true}) async {
   tester.view.physicalSize = size * 2;
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(_frame(size: size, child: child));
-  await tester.pumpAndSettle();
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    await tester.pump(const Duration(milliseconds: 300));
+  }
   if (Platform.environment['SCREENSHOTS'] == '1') {
     Directory('build/screens').createSync(recursive: true);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('../build/screens/$name.png'));
@@ -182,5 +198,100 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Watched'), findsNWidgets(3));
     expect(find.text('Now playing'), findsOneWidget);
+  });
+
+  testWidgets('desktop chrome with the volume boosted past 100%', (tester) async {
+    await _shot(tester, 'player_desktop_boost', const Size(1280, 720), _chrome(landscape: true, volume: 150));
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('150%'), findsOneWidget);
+    expect(find.textContaining('boost'), findsOneWidget);
+  });
+
+  const nextEpisode = UpNextItem(
+    kind: 'episode',
+    fileId: 'v-2',
+    title: 'The Kingsroad',
+    subtitle: 'S1 E2 · Game of Thrones',
+    imagePath: '/api/thumbnail/v-2',
+    overview: 'Bran’s fate remains in doubt. Having agreed to become the King’s Hand, Ned leaves Winterfell.',
+  );
+  const suggestion = UpNextItem(
+    kind: 'suggestion',
+    fileId: 'v-9',
+    title: 'House of the Dragon',
+    subtitle: 'With Matt Smith',
+    imagePath: '/api/thumbnail-folder/f-hotd',
+    infoHref: '/folder/f-hotd',
+  );
+
+  Widget card({double? left, bool still = false, bool compact = false, UpNextItem item = nextEpisode}) => Stack(
+        children: [
+          Positioned(
+            right: 16,
+            bottom: compact ? 64 : 128,
+            child: UpNextCard(
+              item: item,
+              secondsLeft: left,
+              totalSeconds: upNextCountdownSeconds(item),
+              askStillWatching: still,
+              autoplay: true,
+              onAutoplayChanged: (_) {},
+              onPlay: () {},
+              onDismiss: () {},
+              compact: compact,
+            ),
+          ),
+        ],
+      );
+
+  testWidgets('up next card counts down to the next episode', (tester) async {
+    await _shot(tester, 'player_up_next', const Size(1280, 720), card(left: 6.2), settle: false);
+    expect(tester.takeException(), isNull);
+    expect(find.text('UP NEXT · IN 7S'), findsOneWidget);
+    expect(find.text('Play next'), findsOneWidget);
+  });
+
+  testWidgets('a suggestion after a film gets a longer countdown and says why', (tester) async {
+    expect(upNextCountdownSeconds(suggestion), greaterThan(upNextCountdownSeconds(nextEpisode)));
+    await _shot(tester, 'player_up_next_compact', const Size(844, 390), card(left: 12, item: suggestion, compact: true), settle: false);
+    expect(tester.takeException(), isNull);
+    expect(find.text('With Matt Smith'), findsOneWidget);
+    expect(find.text('Play now'), findsOneWidget);
+  });
+
+  testWidgets('after two autoplays the card waits instead of counting down', (tester) async {
+    await _shot(tester, 'player_still_watching', const Size(1280, 720), card(still: true), settle: false);
+    expect(tester.takeException(), isNull);
+    expect(find.text('STILL WATCHING?'), findsOneWidget);
+    expect(find.text('Keep watching'), findsOneWidget);
+  });
+
+  testWidgets('end screen: up next, more like this, watch again', (tester) async {
+    for (final (name, size, compact) in [
+      ('player_end_screen', const Size(1280, 720), false),
+      ('player_end_screen_phone', const Size(844, 390), true),
+    ]) {
+      await _shot(
+        tester,
+        name,
+        size,
+        UpNextEndScreen(
+          upNext: nextEpisode,
+          suggestions: const [nextEpisode, suggestion, suggestion],
+          askStillWatching: false,
+          onPlay: (_) {},
+          onReplay: () {},
+          onBack: () {},
+          compact: compact,
+          headingStyle: const TextStyle(fontSize: 30, fontWeight: FontWeight.w700, color: Colors.white),
+        ),
+        settle: false,
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text('UP NEXT'), findsOneWidget);
+      // The up-next item isn't repeated in the row below it.
+      expect(find.text('The Kingsroad'), findsOneWidget);
+      expect(find.text('Watch again'), findsOneWidget);
+    }
   });
 }
