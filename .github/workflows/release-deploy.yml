@@ -194,7 +194,15 @@ jobs:
             # (app-release.apk / CampfireSetup.exe) — remove the stale copies so an old download
             # link never keeps serving an outdated build.
             rm -f apps/frontend/public/app-release.apk apps/frontend/public/CampfireSetup.exe
-            git pull
-            npm install
+            # The server is a mirror of the repo, never a place to edit tracked files: move it to
+            # exactly the commit this run is for (the release's tag, or the branch picked by hand)
+            # instead of `git pull`, which stops the whole deploy on any local change. Untracked and
+            # ignored files (.env, certs/, the APK/EXE above) are left alone.
+            git fetch --prune --tags origin
+            git reset --hard ${{ github.sha }}
+            # `npm ci`, not `npm install`: it installs exactly what package-lock.json says and never
+            # rewrites it. `npm install` under the server's newer npm reformatted the lock file on
+            # every deploy, and that local edit is what made the next deploy's `git pull` fail.
+            npm ci --no-audit --no-fund
             npm run build
             npm run deploy:restart

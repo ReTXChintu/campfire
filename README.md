@@ -96,6 +96,8 @@ FRONTEND_PORT=50000
 2. Build both apps: `npm run build`.
 3. `npm run deploy:start` (wraps `pm2 start ecosystem.config.js`) — starts `campfire-backend` serving the API and `campfire-frontend` serving the static build, both over plain HTTP, on the ports from `.env`. `npm run deploy:stop` / `deploy:restart` / `deploy:logs` manage them the same way; `pm2 save && pm2 startup` (run manually, not wrapped) makes them survive a reboot.
 
+After that, publishing a GitHub Release redeploys automatically (`.github/workflows/release-deploy.yml`). It resets the server's checkout to the release commit (`git reset --hard`, so never hand-edit tracked files there; untracked ones like `.env` are kept), runs `npm ci`, builds and restarts pm2. It uses `npm ci` because `npm install` under a different npm version rewrites `package-lock.json`, and that local edit used to make the next deploy's `git pull` fail.
+
 Both apps only ever serve plain HTTP — put a reverse proxy (nginx, Caddy, a load balancer) in front if you need TLS, same as Option A's backend.
 
 ### Mobile / Desktop
