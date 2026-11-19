@@ -270,6 +270,24 @@ void main() {
     expect(find.text('Keep watching'), findsOneWidget);
   });
 
+  // Text measures wider on some machines (CI's Linux runner) and with a large accessibility font:
+  // the card's row has to give, not overflow.
+  testWidgets('up next card fits with large text', (tester) async {
+    for (final (compact, still) in [(true, false), (true, true), (false, true), (false, false)]) {
+      await _shot(
+        tester,
+        'player_up_next_large_text',
+        const Size(1280, 720),
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
+          child: card(left: still ? null : 8, still: still, compact: compact, item: suggestion),
+        ),
+        settle: false,
+      );
+      expect(tester.takeException(), isNull, reason: 'compact: $compact, still watching: $still');
+    }
+  });
+
   testWidgets('end screen: up next, more like this, watch again', (tester) async {
     for (final (name, size, compact) in [
       ('player_end_screen', const Size(1280, 720), false),

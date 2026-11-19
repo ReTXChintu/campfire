@@ -190,13 +190,25 @@ class UpNextCard extends StatelessWidget {
                     widthFactor: filled,
                     child: Container(color: AppColors.accent),
                   ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
-                    const SizedBox(width: 6),
-                    Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
-                  ],
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
+                      const SizedBox(width: 6),
+                      // Shrinks (with an ellipsis) rather than overflowing, with large text or
+                      // a wide font.
+                      Flexible(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -215,13 +227,17 @@ class UpNextCard extends StatelessWidget {
         children: [
           const Text('Autoplay', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
           const SizedBox(width: 4),
-          Transform.scale(
-            scale: 0.8,
-            child: Switch(
-              value: autoplay,
-              onChanged: onAutoplayChanged,
-              activeThumbColor: Colors.white,
-              activeTrackColor: AppColors.accent,
+          // Sized down for real (Transform.scale only drew it smaller and kept its full width).
+          SizedBox(
+            height: 28,
+            child: FittedBox(
+              child: Switch(
+                value: autoplay,
+                onChanged: onAutoplayChanged,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                activeThumbColor: Colors.white,
+                activeTrackColor: AppColors.accent,
+              ),
             ),
           ),
         ],
