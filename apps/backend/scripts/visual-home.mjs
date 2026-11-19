@@ -10,6 +10,8 @@
 // buttons on the *local copy*, so the screenshots show what those do to a library full of raw
 // filenames. Production is never written to either way.
 //
+// --explore takes only the Explore page's shots (rows, filters, a title's where-to-watch panel).
+//
 // Needs the backend .env (MONGODB_URI, admin login that also works on production, and
 // TMDB_API_KEY if the new metadata is to be fetched for real) and Chrome.
 import { spawn, execFileSync } from "node:child_process";
@@ -24,6 +26,7 @@ const WebSocket = require("ws");
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const RENAME = process.argv.includes("--rename");
+const EXPLORE_ONLY = process.argv.includes("--explore");
 const OUT = args[0] || "visual-out";
 const PROD = args[1] || "http://187.127.179.114:50001";
 const backendDir = join(import.meta.dirname, "..");
@@ -149,7 +152,7 @@ try {
   // 4. Headless Chrome over the DevTools protocol.
   start("C:/Program Files/Google/Chrome/Application/chrome.exe", [
     "--headless=new", `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${chromeProfile}`,
-    "--hide-scrollbars", "--no-first-run", "--disable-gpu", "about:blank",
+    "--hide-scrollbars", "--no-first-run", "--ignore-gpu-blocklist", "about:blank",
   ], {}, "chrome");
   let target;
   for (let i = 0; i < 40 && !target; i++) {
@@ -176,10 +179,12 @@ try {
       ws.send(JSON.stringify({ id, method, params }));
     });
 
-  async function shot(name, width, height, { path = "/", scrollY = 0, settle = 9000, then = null } = {}) {
+  const mouse = (type, x, y, extra = {}) => send("Input.dispatchMouseEvent", { type, x, y, button: "none", ...extra });
+  async function shot(name, width, height, { path = "/", scrollY = 0, settle = 9000, then = null, act = null } = {}) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: width < 600 });
     await send("Page.navigate", { url: `http://127.0.0.1:${WEB_PORT}${path}` });
     await sleep(settle); // data + first image downloads from TMDb
+    if (act) await act();
     if (then) {
       await send("Runtime.evaluate", { expression: then });
       await sleep(2500);
@@ -197,6 +202,55 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${WEB_PORT}/login` });
   await sleep(2000);
   await send("Runtime.evaluate", { expression: `localStorage.setItem("campfire_token", ${JSON.stringify(token)})` });
+  // Explore: all of TMDb, with Game of Thrones' panel open (it streams on JioHotstar in India).
+  // The fisheye wall: as it opens, after a drag (then hovering a poster), zoomed out, with one
+  // clicked open, on a phone, and with "In Campfire" on.
+  await shot("explore-wall-desktop", 1440, 900, { path: "/explore", settle: 16000 });
+  await shot("explore-wall-dragged", 1440, 900, {
+    path: "/explore",
+    settle: 14000,
+    act: async () => {
+      await mouse("mousePressed", 900, 520, { button: "left", clickCount: 1 });
+      for (let k = 1; k <= 12; k++) {
+        await mouse("mouseMoved", 900 - k * 25, 520 - k * 8, { button: "left" });
+        await sleep(30);
+      }
+      await mouse("mouseReleased", 600, 424, { button: "left", clickCount: 1 });
+      await sleep(2500);
+      await mouse("mouseMoved", 980, 300);
+      await sleep(800);
+    },
+  });
+  await shot("explore-wall-zoomed", 1440, 900, {
+    path: "/explore",
+    settle: 14000,
+    act: async () => {
+      await send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 720, y: 450, deltaX: 0, deltaY: 500 });
+      await sleep(1800);
+    },
+  });
+  await shot("explore-wall-open", 1440, 900, {
+    path: "/explore",
+    settle: 14000,
+    act: async () => {
+      await mouse("mouseMoved", 1010, 470);
+      await mouse("mousePressed", 1010, 470, { button: "left", clickCount: 1 });
+      await mouse("mouseReleased", 1010, 470, { button: "left", clickCount: 1 });
+      await sleep(4000);
+    },
+  });
+  await shot("explore-wall-phone", 390, 844, { path: "/explore", settle: 14000 });
+  await shot("explore-wall-lib", 1440, 900, { path: "/explore?lib=1", settle: 14000 });
+
+  await shot("explore-desktop-top", 1440, 900, { path: "/explore?view=rows" });
+  await shot("explore-desktop-rows", 1440, 900, { path: "/explore?view=rows", scrollY: 900 });
+  await shot("explore-desktop-filtered", 1440, 900, { path: "/explore?view=rows&kind=movie&services=8,2336", scrollY: 420 });
+  await shot("explore-desktop-title", 1440, 900, { path: "/explore?title=tv-1399" });
+  await shot("explore-desktop-request", 1440, 900, { path: "/explore?title=movie-129" });
+  await shot("explore-phone-top", 390, 844, { path: "/explore?view=rows" });
+  await shot("explore-phone-title", 390, 844, { path: "/explore?title=tv-1399" });
+  if (EXPLORE_ONLY) throw Object.assign(new Error("explore only"), { done: true });
+
   await shot("home-desktop-top", 1440, 900);
   await shot("home-desktop-rails", 1440, 900, { scrollY: 700 });
   await shot("home-phone-top", 390, 844);
@@ -240,9 +294,11 @@ try {
   }
   ws.close();
 } catch (error) {
-  console.error(error);
-  for (const p of procs) if (p.log) console.error(`--- ${p.label}\n${p.log.slice(-2000)}`);
-  process.exitCode = 1;
+  if (!error?.done) {
+    console.error(error);
+    for (const p of procs) if (p.log) console.error(`--- ${p.label}\n${p.log.slice(-2000)}`);
+    process.exitCode = 1;
+  }
 } finally {
   for (const p of procs) p.kill();
   await db.dropDatabase().catch(() => {});

@@ -21,6 +21,7 @@ import healthRoutes from "./routes/health";
 import appVersionRoutes from "./routes/appVersion";
 import watchPartyRoutes from "./routes/watchParties";
 import requestRoutes, { requestImageRouter } from "./routes/requests";
+import exploreRoutes from "./routes/explore";
 
 import adminScanRoutes from "./routes/admin/scan";
 import adminOverviewRoutes from "./routes/admin/overview";
@@ -54,6 +55,7 @@ app.use("/api/app-version", appVersionRoutes);
 app.use("/api/watch-parties", watchPartyRoutes);
 app.use("/api/requests", requestRoutes);
 app.use("/api/request-image", requestImageRouter);
+app.use("/api/explore", exploreRoutes);
 
 app.use("/api/admin/scan", adminScanRoutes);
 app.use("/api/admin/catalog/overview", adminOverviewRoutes);

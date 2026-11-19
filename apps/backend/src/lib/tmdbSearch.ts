@@ -61,7 +61,7 @@ const keyOf = (tmdbType: "movie" | "tv", tmdbId: string) => `${tmdbType}:${tmdbI
 
 /** Published catalog items matched to any of these titles. Only published ones: "Already in
  * Campfire" has to be something the requester can actually open. */
-async function libraryMatches(keys: { tmdbType: "movie" | "tv"; tmdbId: string }[]) {
+export async function libraryMatches(keys: { tmdbType: "movie" | "tv"; tmdbId: string }[]) {
   const ids = [...new Set(keys.map((k) => k.tmdbId))];
   const found = new Map<string, { kind: "folder" | "video"; id: string }>();
   if (!ids.length) return found;
@@ -97,7 +97,7 @@ function requestKey(doc: MediaRequest): string | null {
   return null;
 }
 
-async function requestMatches(ids: string[], viewerId: string) {
+export async function requestMatches(ids: string[], viewerId: string) {
   const found = new Map<string, NonNullable<TmdbSearchResult["existingRequest"]>>();
   for (const doc of await findOpenRequestsByTmdbIds(ids)) {
     const key = requestKey(doc);
