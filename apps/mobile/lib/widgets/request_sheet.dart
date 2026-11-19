@@ -75,10 +75,30 @@ enum _LinkState { empty, checking, bad, resolved }
 class _RequestFormState extends State<RequestForm> {
   final _titleController = TextEditingController();
   final _linkController = TextEditingController();
+  final _searchController = TextEditingController();
   final _scrollController = ScrollController();
+  final _titleFocus = FocusNode();
+  final _searchFocus = FocusNode();
 
   Timer? _matchDebounce;
   _RefTab _tab = _RefTab.link;
+
+  // --- TMDb title search ---------------------------------------------------------------------
+  // The form leads with this when the backend has a TMDB key: picking a result fills in the title
+  // and its exact TMDb link at once, which is what people kept getting wrong by hand. The title +
+  // link/image form below is the fallback, and the whole form when search is off.
+  Timer? _searchDebounce;
+  /// Null until the server has answered once. Only an explicit `false` hides search — a failed
+  /// call gets its own message instead, with the fallback right underneath.
+  bool? _searchAvailable;
+  bool _searching = false;
+  String? _searchError;
+  List<TmdbSearchResult> _results = const [];
+  /// The query [_results] belong to, so a slow answer to an older query can't overwrite a newer one.
+  String _resultsFor = '';
+  int _searchSeq = 0;
+  TmdbSearchResult? _picked;
+  bool _manualOpen = false;
 
   // --- dedupe / library hints ----------------------------------------------------------------
   MediaRequest? _duplicate;
@@ -110,18 +130,142 @@ class _RequestFormState extends State<RequestForm> {
   void initState() {
     super.initState();
     _titleController.text = widget.initialTitle ?? '';
+    _searchController.text = widget.initialTitle ?? '';
     if (_titleController.text.isNotEmpty) {
       _recheckTitle(immediate: true);
     }
+    // Runs even for an empty box: that answer is how the form finds out whether search is on.
+    _runSearch(immediate: true);
   }
 
   @override
   void dispose() {
     _matchDebounce?.cancel();
+    _searchDebounce?.cancel();
     _titleController.dispose();
     _linkController.dispose();
+    _searchController.dispose();
     _scrollController.dispose();
+    _titleFocus.dispose();
+    _searchFocus.dispose();
     super.dispose();
+  }
+
+  bool get _searchOn => _searchAvailable != false;
+  bool get _manualShown => !_searchOn || (_manualOpen && _picked == null);
+  bool get _canSubmit => !_searchOn || _picked != null || _manualShown;
+
+  // ---------------------------------------------------------------------------------------------
+  // Title search
+  // ---------------------------------------------------------------------------------------------
+
+  void _runSearch({bool immediate = false}) {
+    _searchDebounce?.cancel();
+    final query = _searchController.text.trim();
+
+    Future<void> run() async {
+      final seq = ++_searchSeq;
+      setState(() {
+        _searching = query.length >= 2;
+        _searchError = null;
+      });
+      try {
+        final response = await RequestsService.searchTmdb(query);
+        if (!mounted || seq != _searchSeq) return;
+        final wasOff = _searchAvailable == false;
+        setState(() {
+          _searchAvailable = response.available;
+          _results = response.results;
+          _resultsFor = query;
+          _searching = false;
+        });
+        // The search box had the keyboard; with search off, the title field takes over.
+        if (!response.available && !wasOff) _focusSoon(_titleFocus);
+      } on ApiException catch (error) {
+        if (!mounted || seq != _searchSeq) return;
+        setState(() {
+          _searching = false;
+          _results = const [];
+          _resultsFor = query;
+          _searchError = error.message;
+        });
+      } catch (_) {
+        if (!mounted || seq != _searchSeq) return;
+        setState(() {
+          _searching = false;
+          _results = const [];
+          _resultsFor = query;
+          _searchError = "Couldn't reach the server — paste a link or add an image instead.";
+        });
+      }
+    }
+
+    if (immediate) {
+      run();
+    } else {
+      // The old list stays up (dimmed) while the next one loads, so it doesn't blink per keystroke.
+      setState(() => _searching = query.length >= 2);
+      _searchDebounce = Timer(const Duration(milliseconds: 300), run);
+    }
+  }
+
+  void _pick(TmdbSearchResult result) {
+    setState(() {
+      _picked = result;
+      _titleError = null;
+      _referenceError = null;
+      _formError = null;
+    });
+  }
+
+  void _unpick() {
+    setState(() {
+      _picked = null;
+      _titleError = null;
+      _referenceError = null;
+    });
+    _focusSoon(_searchFocus);
+  }
+
+  void _openManual() {
+    setState(() {
+      _manualOpen = true;
+      // Whatever they searched for is the best first guess at the title.
+      if (_titleController.text.trim().isEmpty && _searchController.text.trim().isNotEmpty) {
+        _titleController.text = _searchController.text.trim();
+      }
+    });
+    _recheckTitle(immediate: true);
+    _focusSoon(_titleFocus);
+  }
+
+  /// After the next frame: the field the node belongs to is only being built by this setState.
+  void _focusSoon(FocusNode node) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) node.requestFocus();
+    });
+  }
+
+  /// The same "add my vote instead" the title dedupe hint offers, so the sheet resolves the same
+  /// way: with the request that was upvoted.
+  Future<void> _voteFor(TmdbExistingRequest existing) async {
+    setState(() => _submitting = true);
+    try {
+      final updated = await RequestsService.upvote(existing.id, wantsIt: true);
+      if (!mounted) return;
+      Navigator.of(context).pop(updated);
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _formError = error.message;
+      });
+    }
+  }
+
+  void _openInLibrary(String route) {
+    Navigator.of(context).pop();
+    context.push(route);
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -331,11 +475,14 @@ class _RequestFormState extends State<RequestForm> {
       _formError = null;
     });
 
+    // A pick is the same request a pasted TMDb link makes — title plus that one link — so the
+    // server validates and resolves it exactly as it would a link typed by hand.
+    final picked = _searchOn ? _picked : null;
     try {
       final created = await RequestsService.create(
-        title: _titleController.text.trim(),
-        refLink: _effectiveLink,
-        refImageId: _effectiveImageId,
+        title: picked?.title ?? _titleController.text.trim(),
+        refLink: picked?.link ?? _effectiveLink,
+        refImageId: picked == null ? _effectiveImageId : null,
       );
       if (!mounted) return;
       setState(() {
@@ -391,6 +538,7 @@ class _RequestFormState extends State<RequestForm> {
         ),
         _Footer(
           busy: _submitting || _uploading,
+          primaryEnabled: created != null || _canSubmit,
           primaryLabel: created == null ? 'Submit request' : 'See my requests',
           onCancel: () => Navigator.of(context).pop(created),
           cancelLabel: created == null ? 'Cancel' : 'Done',
@@ -409,18 +557,122 @@ class _RequestFormState extends State<RequestForm> {
           _ErrorBanner(_formError!),
           const SizedBox(height: 14),
         ],
-        Text('Title', style: _labelStyle),
+        if (_searchOn) ...[
+          if (_picked != null) _pickedCard(_picked!) else _searchSection(),
+          if (_picked == null) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Semantics(
+                expanded: _manualOpen,
+                child: TextButton.icon(
+                  onPressed: () => _manualOpen ? setState(() => _manualOpen = false) : _openManual(),
+                  icon: Icon(_manualOpen ? Icons.expand_less : Icons.expand_more, size: 18),
+                  label: const Text("Can't find it? Paste a link or add an image"),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 14),
+        ],
+        if (_manualShown) ..._manualForm(),
+        if (!_canSubmit)
+          const Text(
+            'Pick a title above, or paste a link or add an image.',
+            style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5, height: 1.45),
+          ),
+        const SizedBox(height: 16),
+        const Text(
+          'Submitted requests are visible to everyone on this server, with your name.',
+          style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5, height: 1.45),
+        ),
+      ],
+    );
+  }
+
+  /// The title + one reference form — the whole form without search, the fallback with it.
+  List<Widget> _manualForm() {
+    return [
+      Text('Title', style: _labelStyle),
+      const SizedBox(height: 7),
+      TextField(
+        controller: _titleController,
+        focusNode: _titleFocus,
+        // With search on, the search box has the keyboard; opening the fallback moves it here.
+        autofocus: !_searchOn,
+        textInputAction: TextInputAction.next,
+        onChanged: _onTitleChanged,
+        decoration: InputDecoration(
+          hintText: 'e.g. The Salt Road',
+          hintStyle: const TextStyle(color: AppColors.textTertiary),
+          errorText: _titleError,
+          suffixIcon: _matching
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textTertiary),
+                  ),
+                )
+              : null,
+        ),
+      ),
+      if (_alreadyInLibrary != null) _libraryWarning(_alreadyInLibrary!),
+      if (_alreadyInLibrary == null && _duplicate != null) _duplicateHint(_duplicate!),
+      const SizedBox(height: 6),
+      const Text(
+        "We check your library as you type, so you don't ask for something you already have.",
+        style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5, height: 1.45),
+      ),
+      const SizedBox(height: 20),
+      _referenceGroup(),
+    ];
+  }
+
+  Widget _searchSection() {
+    final query = _searchController.text.trim();
+    final tooShort = query.length < 2;
+    final settled = !_searching && _resultsFor == query;
+    final shown = tooShort ? const <TmdbSearchResult>[] : _results;
+    final failed = _searchError != null && settled;
+
+    var status = '';
+    if (!tooShort) {
+      if (failed) {
+        status = _searchError!;
+      } else if (!settled) {
+        status = 'Searching…';
+      } else if (_results.isEmpty) {
+        status = 'Nothing on TMDb matches “$query”. Try another spelling, or paste a link or add an '
+            'image below.';
+      } else {
+        status = '${_results.length} ${_results.length == 1 ? "result" : "results"}';
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Find the film or series', style: _labelStyle),
         const SizedBox(height: 7),
         TextField(
-          controller: _titleController,
+          controller: _searchController,
+          focusNode: _searchFocus,
           autofocus: true,
-          textInputAction: TextInputAction.next,
-          onChanged: _onTitleChanged,
+          textInputAction: TextInputAction.search,
+          onChanged: (_) => _runSearch(),
+          onSubmitted: (_) => _runSearch(immediate: true),
           decoration: InputDecoration(
-            hintText: 'e.g. The Salt Road',
+            hintText: 'Type a name — e.g. The Salt Road',
             hintStyle: const TextStyle(color: AppColors.textTertiary),
-            errorText: _titleError,
-            suffixIcon: _matching
+            prefixIcon: const Icon(Icons.search, color: AppColors.textTertiary),
+            suffixIcon: _searching
                 ? const Padding(
                     padding: EdgeInsets.all(14),
                     child: SizedBox(
@@ -429,23 +681,208 @@ class _RequestFormState extends State<RequestForm> {
                       child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textTertiary),
                     ),
                   )
-                : null,
+                : (_searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear the search',
+                        icon: const Icon(Icons.close, size: 18, color: AppColors.textTertiary),
+                        onPressed: () {
+                          _searchController.clear();
+                          _runSearch(immediate: true);
+                          _searchFocus.requestFocus();
+                        },
+                      )),
           ),
         ),
-        if (_alreadyInLibrary != null) _libraryWarning(_alreadyInLibrary!),
-        if (_alreadyInLibrary == null && _duplicate != null) _duplicateHint(_duplicate!),
-        const SizedBox(height: 6),
-        const Text(
-          "We check your library as you type, so you don't ask for something you already have.",
-          style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5, height: 1.45),
+        // A live region, so a screen reader hears the count without focus leaving the box.
+        Semantics(
+          liveRegion: true,
+          child: status.isEmpty
+              ? const SizedBox(height: 6)
+              : Padding(
+                  padding: const EdgeInsets.only(top: 7),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color: failed ? AppColors.danger : AppColors.textTertiary,
+                      fontSize: 11.5,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
         ),
-        const SizedBox(height: 20),
-        _referenceGroup(),
-        const SizedBox(height: 16),
-        const Text(
-          'Submitted requests are visible to everyone on this server, with your name.',
-          style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5, height: 1.45),
+        if (shown.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Opacity(
+            opacity: settled ? 1 : 0.6,
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                border: Border.all(color: AppColors.divider),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                children: [
+                  for (var i = 0; i < shown.length; i++) ...[
+                    if (i > 0) const Divider(height: 1, color: AppColors.divider),
+                    _resultTile(shown[i]),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _resultTile(TmdbSearchResult result) {
+    final route = result.libraryRoute;
+    final existing = result.existingRequest;
+    final yearText = result.year != null ? ' (${result.year})' : '';
+
+    final Widget action;
+    if (route != null) {
+      action = Wrap(
+        spacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text(
+            'Already in Campfire',
+            style: TextStyle(color: AppColors.live, fontSize: 11.5, fontWeight: FontWeight.w700),
+          ),
+          Semantics(
+            label: 'Open ${result.title} in Campfire',
+            button: true,
+            excludeSemantics: true,
+            child: TextButton(
+              onPressed: () => _openInLibrary(route),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.foreground,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 36),
+              ),
+              child: const Text('Open it'),
+            ),
+          ),
+        ],
+      );
+    } else if (existing != null) {
+      final n = existing.wantCount;
+      action = Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            '$n ${n == 1 ? "person wants" : "people want"} this · ${existing.status.label.toLowerCase()}',
+            style: const TextStyle(color: AppColors.amber, fontSize: 11.5, fontWeight: FontWeight.w600),
+          ),
+          if (existing.iWantIt)
+            const Text(
+              '✓ You want it too',
+              style: TextStyle(color: AppColors.live, fontSize: 11.5, fontWeight: FontWeight.w700),
+            )
+          else
+            Semantics(
+              label: 'Add your vote for ${result.title}',
+              button: true,
+              excludeSemantics: true,
+              child: OutlinedButton(
+                onPressed: _submitting ? null : () => _voteFor(existing),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.amber,
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                child: const Text('Add your vote'),
+              ),
+            ),
+        ],
+      );
+    } else {
+      action = Semantics(
+        label: 'Request ${result.title}$yearText, ${result.kindLabel.toLowerCase()}',
+        button: true,
+        excludeSemantics: true,
+        child: ElevatedButton(
+          onPressed: () => _pick(result),
+          style: ElevatedButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+          ),
+          child: const Text('Request this'),
         ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          RequestPoster(title: result.title, posterUrl: result.posterUrl, width: 44),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: result.title),
+                      if (yearText.isNotEmpty)
+                        TextSpan(
+                          text: yearText,
+                          style: const TextStyle(fontWeight: FontWeight.w400, color: AppColors.textSecondary),
+                        ),
+                    ],
+                  ),
+                  style: const TextStyle(color: AppColors.foreground, fontSize: 13.5, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  result.kindLabel.toUpperCase(),
+                  style: const TextStyle(
+                    color: AppColors.textTertiary,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                if (result.overview != null && result.overview!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    result.overview!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5, height: 1.4),
+                  ),
+                ],
+                const SizedBox(height: 7),
+                action,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pickedCard(TmdbSearchResult result) {
+    final error = _titleError ?? _referenceError;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text("You're requesting", style: _labelStyle),
+        const SizedBox(height: 7),
+        // The pasted-link preview card, already confirmed: a pick and a resolved link are the same
+        // reference, so they look the same. Its "Change" goes back to the results.
+        _LinkPreview(meta: result.toRefMeta(), confirmed: true, onConfirm: () {}, onReject: _unpick),
+        if (error != null) ...[
+          const SizedBox(height: 8),
+          _FieldError(error),
+        ],
       ],
     );
   }
@@ -813,6 +1250,7 @@ class _Header extends StatelessWidget {
 
 class _Footer extends StatelessWidget {
   final bool busy;
+  final bool primaryEnabled;
   final String primaryLabel;
   final String cancelLabel;
   final VoidCallback onCancel;
@@ -820,6 +1258,7 @@ class _Footer extends StatelessWidget {
 
   const _Footer({
     required this.busy,
+    this.primaryEnabled = true,
     required this.primaryLabel,
     required this.cancelLabel,
     required this.onCancel,
@@ -844,7 +1283,7 @@ class _Footer extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: ElevatedButton(
-              onPressed: busy ? null : onPrimary,
+              onPressed: busy || !primaryEnabled ? null : onPrimary,
               child: busy
                   ? const SizedBox(
                       width: 16,

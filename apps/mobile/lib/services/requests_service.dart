@@ -29,6 +29,17 @@ class RequestsService {
     return match == null ? null : MediaRequest.fromJson(match as Map<String, dynamic>);
   }
 
+  /// The form's TMDb title search. Called with short and empty queries too, deliberately: the
+  /// server answers those without asking TMDb, and its `available` is how the form learns whether
+  /// search exists on this server at all (no TMDB key → hide it, show the link/image form).
+  /// Throws [ApiException] (502) when TMDb itself didn't answer.
+  static Future<TmdbSearchResponse> searchTmdb(String query) async {
+    final data =
+        await ApiClient.get('/api/requests/tmdb-search?q=${Uri.encodeQueryComponent(query.trim())}')
+            as Map<String, dynamic>;
+    return TmdbSearchResponse.fromJson(data);
+  }
+
   /// Validates a pasted link. Throws [ApiException] (status 400, `code: "unsupported_link"`) when
   /// it isn't an IMDb/TMDb title link; succeeds with a null `meta` when the link is fine but the
   /// backend has no TMDB key to enrich it with.

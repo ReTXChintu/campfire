@@ -283,3 +283,112 @@ class UploadedReferenceImage {
     path: json['path'] as String,
   );
 }
+
+/// An open request a search result already matches (`existingRequest` on a
+/// `GET /api/requests/tmdb-search` row) — the form offers a vote on it instead of a duplicate.
+class TmdbExistingRequest {
+  final String id;
+  final int wantCount;
+  final RequestStatus status;
+  /// The viewer already asked for or voted for it, so there's nothing left to offer.
+  final bool iWantIt;
+
+  const TmdbExistingRequest({
+    required this.id,
+    required this.wantCount,
+    required this.status,
+    required this.iWantIt,
+  });
+
+  factory TmdbExistingRequest.fromJson(Map<String, dynamic> json) => TmdbExistingRequest(
+    id: json['id'] as String,
+    wantCount: (json['wantCount'] as num?)?.toInt() ?? 0,
+    status: RequestStatus.parse(json['status'] as String? ?? 'new'),
+    iWantIt: json['iWantIt'] as bool? ?? false,
+  );
+}
+
+/// One row of the request form's title search. `link` is the exact TMDb URL a pick submits as the
+/// request's reference, so a picked request is the same thing a pasted TMDb link makes.
+class TmdbSearchResult {
+  final String tmdbType; // "movie" | "tv"
+  final String tmdbId;
+  final String title;
+  final int? year;
+  final String? overview;
+  final String? posterUrl;
+  final String link;
+  /// Already published — the row opens it instead of offering a request.
+  final CatalogRef? inLibrary;
+  final TmdbExistingRequest? existingRequest;
+
+  const TmdbSearchResult({
+    required this.tmdbType,
+    required this.tmdbId,
+    required this.title,
+    this.year,
+    this.overview,
+    this.posterUrl,
+    required this.link,
+    this.inLibrary,
+    this.existingRequest,
+  });
+
+  bool get isSeries => tmdbType == 'tv';
+
+  /// "Film" rather than "Movie" — the same word the web form uses.
+  String get kindLabel => isSeries ? 'Series' : 'Film';
+
+  /// Where "Already in Campfire" goes; null when it isn't.
+  String? get libraryRoute {
+    final ref = inLibrary;
+    if (ref == null) return null;
+    return ref.kind == 'folder' ? '/folder/${ref.id}' : '/watch/${ref.id}';
+  }
+
+  /// The same card the pasted-link preview shows, so a pick and a resolved link look alike.
+  RequestRefMeta toRefMeta() => RequestRefMeta(
+    source: 'tmdb',
+    sourceId: tmdbId,
+    title: title,
+    year: year,
+    type: isSeries ? 'series' : 'movie',
+    posterUrl: posterUrl,
+    overview: overview,
+  );
+
+  factory TmdbSearchResult.fromJson(Map<String, dynamic> json) => TmdbSearchResult(
+    tmdbType: json['tmdbType'] as String? ?? 'movie',
+    // Always a string from this backend; tolerated as a number so a stray int can't crash a row.
+    tmdbId: '${json['tmdbId']}',
+    title: json['title'] as String? ?? '',
+    year: (json['year'] as num?)?.toInt(),
+    overview: json['overview'] as String?,
+    posterUrl: json['posterUrl'] as String?,
+    link: json['link'] as String,
+    inLibrary: json['inLibrary'] == null
+        ? null
+        : CatalogRef.fromJson(json['inLibrary'] as Map<String, dynamic>),
+    existingRequest: json['existingRequest'] == null
+        ? null
+        : TmdbExistingRequest.fromJson(json['existingRequest'] as Map<String, dynamic>),
+  );
+}
+
+/// `GET /api/requests/tmdb-search`. `available: false` means the backend has no TMDB key: the form
+/// hides search and is just the paste-a-link / upload-an-image form, as before.
+class TmdbSearchResponse {
+  final bool available;
+  final List<TmdbSearchResult> results;
+
+  const TmdbSearchResponse({required this.available, this.results = const []});
+
+  factory TmdbSearchResponse.fromJson(Map<String, dynamic> json) => TmdbSearchResponse(
+    // Absent means an older backend that predates search answered somehow — treat as off.
+    available: json['available'] as bool? ?? false,
+    results: (json['results'] as List? ?? const [])
+        .map((e) => TmdbSearchResult.fromJson(e as Map<String, dynamic>))
+        .where((r) => r.title.isNotEmpty)
+        .toList(),
+  );
+}

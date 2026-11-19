@@ -397,3 +397,22 @@ export type AdminRequest = Omit<PublicRequest, "isMine" | "iWantIt"> & {
 };
 
 export type ResolveLinkResult = { ok: true; source: string; meta: RequestRefMeta | null };
+
+/** One row of the request form's title search (`GET /api/requests/tmdb-search`). `link` is the
+ * exact TMDb URL a pick submits as the request's reference. */
+export type TmdbSearchResult = {
+  tmdbType: "movie" | "tv";
+  tmdbId: string;
+  title: string;
+  year: number | null;
+  overview: string | null;
+  posterUrl: string | null;
+  link: string;
+  /** Already published — the row links to it instead of offering a request. */
+  inLibrary: { kind: "folder" | "video"; id: string } | null;
+  /** Already asked for and still open — the row offers a vote instead of a duplicate. */
+  existingRequest: { id: string; wantCount: number; status: RequestStatus; iWantIt: boolean } | null;
+};
+
+/** `available: false` means the server has no TMDb key: hide search, show the link/image form. */
+export type TmdbSearchResponse = { available: boolean; results: TmdbSearchResult[] };

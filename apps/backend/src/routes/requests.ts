@@ -25,6 +25,7 @@ import {
   MAX_REQUEST_IMAGE_BYTES,
 } from "../lib/requestImages";
 import { isSupportedReferenceLink, resolveReferenceLink } from "../lib/referenceLink";
+import { isTmdbSearchAvailable, MIN_QUERY_LENGTH, searchTmdbTitles } from "../lib/tmdbSearch";
 
 const router = Router();
 
@@ -78,6 +79,30 @@ router.get("/match", requireAuth, async (req, res) => {
   const open = await findOpenRequestsByTitle(title);
   const best = open.sort((a, b) => b.upvotes.length - a.upvotes.length)[0];
   res.json({ match: best ? toPublicRequest(best, req.authUser!.userId) : null });
+});
+
+/** The form's title search (see lib/tmdbSearch.ts). `available: false` means there's no
+ * TMDB_API_KEY, so clients hide the search box and show the paste-a-link / image form on its own —
+ * and since that's answered before the query is looked at, an empty `?q=` is how a client asks
+ * "is search on?" when the form opens. */
+router.get("/tmdb-search", requireAuth, async (req, res) => {
+  if (!isTmdbSearchAvailable()) {
+    res.json({ available: false, results: [] });
+    return;
+  }
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (q.length < MIN_QUERY_LENGTH) {
+    res.json({ available: true, results: [] });
+    return;
+  }
+  const results = await searchTmdbTitles(q, req.authUser!.userId);
+  if (!results) {
+    // Not an empty list: "TMDb found nothing" and "TMDb didn't answer" deserve different words,
+    // and the fallback (paste a link or add an image) works either way.
+    res.status(502).json({ error: "Search isn't answering right now — paste a link or add an image instead" });
+    return;
+  }
+  res.json({ available: true, results });
 });
 
 /** Validates a pasted link and, when TMDB_API_KEY is set, hands back the preview card's contents

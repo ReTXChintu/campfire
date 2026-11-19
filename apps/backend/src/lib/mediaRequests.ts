@@ -133,6 +133,26 @@ export async function findOpenRequestsByTitle(title: string): Promise<MediaReque
   return col.find({ titleKey: titleKeyOf(title), status: { $in: ["new", "planned", "sourcing"] } }).toArray();
 }
 
+/** Open requests that point at any of these TMDb ids, for the form's search results ("N people
+ * want this — add your vote"). Two ways a request names a TMDb title: its resolved `refMeta` (an
+ * IMDb link resolves to TMDb's id too), or a themoviedb.org link pasted while no TMDB_API_KEY was
+ * set, which was never resolved — so the bare link is matched as well. The id alone is ambiguous
+ * (TMDb numbers films and series separately), so the caller still checks movie vs series. Open
+ * means the same as for the title dedupe above: declined and added ones are deliberately left out. */
+export async function findOpenRequestsByTmdbIds(tmdbIds: string[]): Promise<MediaRequest[]> {
+  // Digits only: these end up inside a regex, and every real TMDb id is numeric anyway.
+  const ids = [...new Set(tmdbIds.filter((id) => /^\d+$/.test(id)))];
+  if (!ids.length) return [];
+  const col = await collection();
+  const linkPattern = new RegExp(`themoviedb\\.org/(?:movie|tv)/(?:${ids.join("|")})(?!\\d)`, "i");
+  return col
+    .find({
+      status: { $in: ["new", "planned", "sourcing"] },
+      $or: [{ "refMeta.source": "tmdb", "refMeta.sourceId": { $in: ids } }, { refMeta: null, refLink: linkPattern }],
+    })
+    .toArray();
+}
+
 export async function listRequests(filter?: { status?: MediaRequestStatus }): Promise<MediaRequest[]> {
   const col = await collection();
   return col

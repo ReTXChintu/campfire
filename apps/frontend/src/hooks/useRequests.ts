@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPost, apiPostBinary } from "../lib/api";
-import type { PublicRequest, ResolveLinkResult } from "../lib/types";
+import type { PublicRequest, ResolveLinkResult, TmdbSearchResponse } from "../lib/types";
 
 /** Everything the requests board and the request form touch. Same shape as useCatalog.ts: one
  * useQuery per endpoint, mutations that invalidate the queries their write could have changed. */
@@ -33,6 +33,23 @@ export function useRequestMatch(title: string) {
     // A dedupe hint that's a few seconds stale is still a good hint, and the field re-queries on
     // every debounce tick as it is.
     staleTime: 30_000,
+  });
+}
+
+/** The form's TMDb title search. `query` is already debounced by the caller. It runs for short and
+ * empty queries too, on purpose: the server answers those without asking TMDb, and the answer's
+ * `available` is how the form learns whether search exists at all on this server. The previous
+ * results stay up while the next ones load, so the list doesn't blink on every keystroke. It sits
+ * under the "requests" key, so a vote or a new request refreshes its "N people want this". */
+export function useTmdbSearch(query: string, enabled: boolean) {
+  const trimmed = query.trim();
+  return useQuery({
+    queryKey: ["requests", "tmdb-search", trimmed],
+    queryFn: () => apiGet<TmdbSearchResponse>(`/api/requests/tmdb-search?q=${encodeURIComponent(trimmed)}`),
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    retry: false,
   });
 }
 
