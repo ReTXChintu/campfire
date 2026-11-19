@@ -660,6 +660,27 @@ try {
   check("viewers can see the newly published season", liveSeason?.seasons?.some((s) => s.id === "f-hotd-s3") && liveSeason?.seasonItems?.length === 4, JSON.stringify(liveSeason?.seasonItems?.map((e) => e.name)));
   check("a title that isn't a series can't publish episodes", (await api("/api/admin/catalog/artwork/folder/f-unknown/publish-episodes", { token: admin, method: "POST", body: { dryRun: true } })).json?.code === "not-found");
 
+
+  console.log("\nUp next");
+  const up = async (id) => (await api(`/api/video/${id}`, { token: viewer })).json;
+  const ep1Next = await up("v-ep1");
+  check("an episode is followed by the next one in its season", ep1Next?.upNext?.kind === "episode" && ep1Next.upNext.fileId === "v-ep2" && ep1Next.nextFileId === "v-ep2", JSON.stringify(ep1Next?.upNext));
+  const finale = await up("v-ep-pending"); // season 1's last episode, now published
+  check("a season's last episode is followed by the next season's first", finale?.upNext?.fileId === "v-s2e1" && /New season/.test(finale.upNext.subtitle ?? ""), JSON.stringify(finale?.upNext));
+  check("…and nextFileId crosses the season too, so an installed app carries on", finale?.nextFileId === "v-s2e1");
+  check("…skipping a season folder with nothing published in it", (await up("v-s2e4"))?.upNext?.fileId === "v-s3-short1", JSON.stringify((await up("v-s2e4"))?.upNext));
+  check("an up-next episode carries its still and synopsis", ep1Next?.upNext?.imagePath === "/api/thumbnail/v-ep2" && typeof ep1Next.upNext.title === "string");
+
+  // Gargi is a drama; House of the Dragon is the library's other drama.
+  const gargiNext = await up("v-gargi");
+  check("after a film, the best match from the library comes next", gargiNext?.upNext?.kind === "suggestion" && gargiNext.upNext.infoHref === "/folder/f-hotd", JSON.stringify(gargiNext?.upNext));
+  check("…and says why", /Because you watched Gargi · Drama/.test(gargiNext?.upNext?.subtitle ?? ""), gargiNext?.upNext?.subtitle);
+  check("a suggested series starts at its first episode — season 1, not an extras folder", gargiNext?.upNext?.fileId === "v-ep1", gargiNext?.upNext?.fileId);
+  check("suggestions never include the title itself", !(gargiNext?.suggestions ?? []).some((x) => x.fileId === "v-gargi"));
+  await api("/api/progress", { token: viewer, method: "POST", body: { fileId: "v-flipped", parentFolderId: ROOT, positionSeconds: 6000, durationSeconds: 6000 } });
+  check("a film the viewer has finished isn't suggested again", !((await up("v-gargi"))?.suggestions ?? []).some((x) => x.fileId === "v-flipped"));
+  check("suggestions come as a short list for an end screen", Array.isArray(gargiNext?.suggestions) && gargiNext.suggestions.length > 1 && gargiNext.suggestions.length <= 6);
+
   console.log("\nSeasons the names don't give away");
   const extras = (await api("/api/admin/catalog/folder/f-hotd-extras", { token: admin })).json;
   check("a folder whose name says no season is offered the control", extras?.episodeSeries?.title === "House of the Dragon" && extras.episodeSeries.season === null, JSON.stringify(extras?.episodeSeries));

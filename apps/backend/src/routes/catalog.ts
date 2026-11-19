@@ -23,6 +23,7 @@ import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalog
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
 import { listedThumbnailFileId } from "../lib/artwork";
 import { episodeMeta, titleMeta } from "../lib/catalogMeta";
+import { episodeItem, nextEpisode, seriesOf, suggestionsFor, type UpNextItem } from "../lib/upNext";
 import type { CatalogArtwork, CatalogEpisodeArtwork } from "../lib/artwork";
 
 const router = Router();
@@ -448,6 +449,20 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     }
   }
   const backHref = isStandalone ? "/" : `/folder/${parentFolderId}`;
+
+  // What the "Up next" card offers: the next episode — crossing into the next season, which
+  // nextFileId now does too, so an installed app that only knows nextFileId also carries on from
+  // a season finale — or, after a film or a series finale, the library's best match.
+  const suggestions = await suggestionsFor(req.authUser!.userId, video);
+  let upNext: UpNextItem | null = null;
+  if (!isStandalone) {
+    const next = await nextEpisode(video);
+    if (next) {
+      upNext = episodeItem(next.video, await seriesOf(video), next.newSeason);
+      nextFileId = next.video._id;
+    }
+  }
+  upNext ??= suggestions[0] ?? null;
   // "native": browser <video> plays it directly. "raw": MKV — not web-playable at all, only the
   // desktop/mobile app's native player handles it (see isMkv in lib/drive.ts and the `raw` query
   // param on routes/stream.ts). "restart": anything else, remuxed live on every seek.
@@ -468,6 +483,8 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     // synopsis and number come from its series' season listing instead.
     ...titleMeta(video.artwork, "video", fileId),
     episode: episodeMeta(video.episodeArtwork),
+    upNext,
+    suggestions,
     backHref,
     parentFolderId,
     nextFileId,
