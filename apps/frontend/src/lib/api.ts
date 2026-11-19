@@ -12,6 +12,26 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/** Fired when the server stops accepting the saved sign-in (expired after 30 days, or the
+ * server's secret changed). lib/auth.tsx listens and signs out, which sends every page to the
+ * login page instead of leaving it stuck on "Unauthorized". */
+export const SIGNED_OUT_EVENT = "campfire:signed-out";
+const EXPIRED_KEY = "campfire_session_expired";
+
+/** True once, right after a sign-in expired — the login page says why you're there. */
+export function takeSessionExpired(): boolean {
+  try {
+    const was = sessionStorage.getItem(EXPIRED_KEY) === "1";
+    sessionStorage.removeItem(EXPIRED_KEY);
+    return was;
+  } catch {
+    return false;
+  }
+}
+
+// The sign-in calls answer 401 for a wrong password; that's not an expired session.
+const SIGN_IN_PATHS = ["/auth/login", "/auth/signup", "/auth/reset-password"];
+
 export class ApiError extends Error {
   status: number;
   /** The form field the server blamed, when it named one (`{ error, field }`) — used by the
@@ -36,6 +56,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
+    if (res.status === 401 && token && !SIGN_IN_PATHS.some((p) => path.startsWith(p))) {
+      clearToken();
+      try {
+        sessionStorage.setItem(EXPIRED_KEY, "1");
+      } catch {
+        /* private mode: the login page just won't say why */
+      }
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+    }
     const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
     throw new ApiError(
       (typeof body?.error === "string" ? body.error : null) || res.statusText,

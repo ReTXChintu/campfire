@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { ApiError } from "../lib/api";
+import { ApiError, takeSessionExpired } from "../lib/api";
 import PasswordField from "../components/ui/PasswordField";
 
 type Mode = "signin" | "signup";
@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [expired] = useState(() => takeSessionExpired());
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -93,6 +94,12 @@ export default function LoginPage() {
               : "Welcome back."}
           </p>
         </div>
+
+        {expired && (
+          <p role="status" className="mb-4 rounded-lg border border-amber/40 bg-amber/10 px-3 py-2 text-sm text-amber">
+            You were signed out because your session expired. Sign in again to carry on.
+          </p>
+        )}
 
         <form onSubmit={onSubmit} className="grid gap-4">
           {mode === "signup" && (

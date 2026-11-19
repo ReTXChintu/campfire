@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- this is a context/hook module under
    lib/, not a component file Fast Refresh needs to isolate; AuthProvider and useAuth are meant to
    be imported together. */
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost, getToken, setToken, clearToken } from "./api";
+import { apiGet, apiPost, getToken, setToken, clearToken, SIGNED_OUT_EVENT } from "./api";
 
 type Me = { userId: string; email: string; name: string | null; avatarUrl: string | null; isAdmin: boolean };
 
@@ -26,6 +26,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [token, setTokenState] = useState<string | null>(() => getToken());
+
+  // The server rejected the saved sign-in (lib/api.ts already forgot it): drop it here too, so
+  // ProtectedRoute sends you to the login page.
+  useEffect(() => {
+    const onSignedOut = () => {
+      setTokenState(null);
+      queryClient.clear();
+    };
+    window.addEventListener(SIGNED_OUT_EVENT, onSignedOut);
+    return () => window.removeEventListener(SIGNED_OUT_EVENT, onSignedOut);
+  }, [queryClient]);
 
   const { data: user, isLoading } = useQuery({
     queryKey: ["me", token],
