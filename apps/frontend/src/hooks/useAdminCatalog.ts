@@ -299,6 +299,39 @@ export function useSetFolderSeason(folderId: string, seriesFolderId: string) {
   });
 }
 
+/** What publishing a series' TMDb-named episodes would do, or did (backend
+ * lib/episodeArtwork.ts's publishNamedEpisodes). */
+export type PublishPreview = {
+  seasons: {
+    folderId: string;
+    name: string;
+    publishesFolder: boolean;
+    /** "position" means nothing in the files confirms the names — flag it. */
+    matchedBy: "filename" | "filename+gaps" | "position" | null;
+    episodes: { id: string; episode: number | null; name: string }[];
+  }[];
+  skipped: { id: string; name: string; reason: "no-tmdb-name" | "held-back" | "folder-held-back" }[];
+  seriesHidden: boolean;
+  published: boolean;
+};
+
+/** Preview (`dryRun: true`) or publish a series' never-curated, TMDb-named episodes. */
+export function usePublishNamedEpisodes(folderId: string) {
+  const queryClient = useQueryClient();
+  const invalidateCatalog = useInvalidateCatalog();
+  return useMutation({
+    mutationFn: ({ dryRun }: { dryRun: boolean }) =>
+      apiPost<PublishPreview>(`/api/admin/catalog/artwork/folder/${folderId}/publish-episodes`, { dryRun }),
+    onSuccess: (result) => {
+      if (!result.published) return; // a preview changes nothing
+      queryClient.invalidateQueries({ queryKey: ["admin-folder"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-video"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-overview"] });
+      invalidateCatalog();
+    },
+  });
+}
+
 /** Turn TMDb episode naming on or off for one series. */
 export function useSetEpisodeNaming(folderId: string) {
   const invalidate = useInvalidateArtwork("folder", folderId);

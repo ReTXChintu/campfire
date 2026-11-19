@@ -361,6 +361,80 @@ class EpisodeMatchResult {
   );
 }
 
+/// What publishing a series' TMDb-named episodes would do, or did — mirrors the web's
+/// PublishPreview (backend lib/episodeArtwork.ts's publishNamedEpisodes).
+class PublishPreview {
+  final List<PublishSeason> seasons;
+
+  /// reason → how many were left alone for it.
+  final Map<String, int> skipped;
+  final bool seriesHidden;
+  final bool published;
+
+  const PublishPreview({
+    required this.seasons,
+    required this.skipped,
+    required this.seriesHidden,
+    required this.published,
+  });
+
+  int get total => seasons.fold(0, (n, s) => n + s.episodes.length);
+
+  factory PublishPreview.fromJson(Map<String, dynamic> json) {
+    final skipped = <String, int>{};
+    for (final item in (json['skipped'] as List? ?? const []).whereType<Map<String, dynamic>>()) {
+      final reason = item['reason'] as String? ?? 'unknown';
+      skipped[reason] = (skipped[reason] ?? 0) + 1;
+    }
+    return PublishPreview(
+      seasons:
+          (json['seasons'] as List? ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(PublishSeason.fromJson)
+              .toList(),
+      skipped: skipped,
+      seriesHidden: json['seriesHidden'] == true,
+      published: json['published'] == true,
+    );
+  }
+}
+
+class PublishSeason {
+  final String folderId;
+  final String name;
+  final bool publishesFolder;
+
+  /// "filename" | "filename+gaps" | "position" — position means nothing confirms the names.
+  final String? matchedBy;
+  final List<({String id, int? episode, String name})> episodes;
+
+  const PublishSeason({
+    required this.folderId,
+    required this.name,
+    required this.publishesFolder,
+    this.matchedBy,
+    required this.episodes,
+  });
+
+  factory PublishSeason.fromJson(Map<String, dynamic> json) => PublishSeason(
+    folderId: json['folderId'] as String,
+    name: json['name'] as String? ?? '',
+    publishesFolder: json['publishesFolder'] == true,
+    matchedBy: json['matchedBy'] as String?,
+    episodes:
+        (json['episodes'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(
+              (e) => (
+                id: e['id'] as String,
+                episode: (e['episode'] as num?)?.toInt(),
+                name: e['name'] as String? ?? '',
+              ),
+            )
+            .toList(),
+  );
+}
+
 /// A season folder inside a matched series: what the backend worked out, and whether it was a
 /// guess from the folder's name rather than something an admin set.
 class EpisodeSeries {

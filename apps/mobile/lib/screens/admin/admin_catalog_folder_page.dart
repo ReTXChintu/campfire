@@ -97,6 +97,8 @@ class _AdminCatalogFolderPageState extends State<AdminCatalogFolderPage> {
                           namingOff: data.folder.episodeArtworkOff,
                           onChanged: _reload,
                         ),
+                      if (data.folder.artwork?.tmdbType == 'tv')
+                        AdminPublishEpisodesPanel(folderId: widget.folderId, onChanged: _reload),
                     ],
                     if (data.episodeSeries != null) ...[
                       const SizedBox(height: 24),

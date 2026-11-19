@@ -157,6 +157,10 @@ const empty = (): EpisodeMatchResult => ({ matched: 0, renamed: 0, unresolved: [
  * library itself shows them. */
 type Assignment = { video: CatalogVideo; season: number; number: number };
 
+/** How a folder's episodes were matched — "position" is the one worth checking by eye, since
+ * nothing in the files themselves confirms it. */
+export type MatchMethod = "filename" | "filename+gaps" | "position";
+
 /**
  * Which TMDb episode each video in a folder is. Three ways, best first:
  *
@@ -174,7 +178,10 @@ type Assignment = { video: CatalogVideo; season: number; number: number };
  *
  * Null when the folder's season can't be worked out at all.
  */
-function assignEpisodes(videos: CatalogVideo[], plan: SeasonPlan): Assignment[] | null {
+function assignEpisodes(
+  videos: CatalogVideo[],
+  plan: SeasonPlan,
+): { assignments: Assignment[]; method: MatchMethod } | null {
   const parsed = videos.map((video) => ({ video, name: parseEpisodeNumber(video.driveName) }));
   const readable = parsed.filter((p) => p.name);
   const unreadable = parsed.filter((p) => !p.name).map((p) => p.video);
@@ -188,7 +195,7 @@ function assignEpisodes(videos: CatalogVideo[], plan: SeasonPlan): Assignment[] 
     const unique = new Set(assigned.map((a) => `${a.season}|${a.number}`)).size === assigned.length;
     if (unique && assigned.every((a) => a.season != null)) {
       const known = assigned as Assignment[];
-      if (unreadable.length === 0) return known;
+      if (unreadable.length === 0) return { assignments: known, method: "filename" };
 
       // Filling gaps only makes sense within a single season.
       const seasons = new Set(known.map((a) => a.season));
@@ -201,7 +208,10 @@ function assignEpisodes(videos: CatalogVideo[], plan: SeasonPlan): Assignment[] 
         // An exact fit or nothing: with more gaps than files there's no telling which are missing.
         if (gaps.length === unreadable.length) {
           const inNameOrder = naturalSort(unreadable.map((video) => ({ name: video.driveName, video })));
-          return [...known, ...inNameOrder.map(({ video }, i) => ({ video, season, number: gaps[i] }))];
+          return {
+            assignments: [...known, ...inNameOrder.map(({ video }, i) => ({ video, season, number: gaps[i] }))],
+            method: "filename+gaps",
+          };
         }
       }
     }
@@ -215,11 +225,14 @@ function assignEpisodes(videos: CatalogVideo[], plan: SeasonPlan): Assignment[] 
   // Every video carrying its own episodeOrder means the admin (or a publish-rule apply) has
   // already said which episode each file is — trust that over position in the list.
   const everyOrdered = inOrder.every((v) => v.episodeOrder != null);
-  return inOrder.map((item, i) => ({
-    video: videos.find((v) => v._id === item.id)!,
-    season,
-    number: everyOrdered ? item.episodeOrder! : i + 1,
-  }));
+  return {
+    assignments: inOrder.map((item, i) => ({
+      video: videos.find((v) => v._id === item.id)!,
+      season,
+      number: everyOrdered ? item.episodeOrder! : i + 1,
+    })),
+    method: "position",
+  };
 }
 
 /** Matches every episode in one folder. False when the folder's season couldn't be worked out,
@@ -232,8 +245,9 @@ async function matchFolder(
 ): Promise<boolean> {
   const videos = await listVideosByParent(folderId);
   if (videos.length === 0) return true;
-  const assignments = assignEpisodes(videos, plan);
-  if (!assignments) return false;
+  const assigned = assignEpisodes(videos, plan);
+  if (!assigned) return false;
+  const { assignments } = assigned;
 
   // Usually one season per folder, but a flat folder named by its files can hold several.
   const seasons = new Map<number, Map<number, TmdbEpisode> | null>();
@@ -353,6 +367,149 @@ export async function matchEpisodesForSeries(
   const result = empty();
   await matchSeries(folder, result, options.force ?? false);
   return result;
+}
+
+/** One season's part of a publish preview. */
+export type PublishSeason = {
+  folderId: string;
+  name: string;
+  /** The season folder itself isn't published yet, so publishing its episodes publishes it too —
+   * an unpublished folder hides everything in it. */
+  publishesFolder: boolean;
+  /** How these episodes were matched. "position" means nothing in the files confirms the names,
+   * so they're worth a look before viewers see them. */
+  matchedBy: MatchMethod | null;
+  episodes: { id: string; episode: number | null; name: string }[];
+};
+
+export type PublishResult = {
+  seasons: PublishSeason[];
+  /** Episodes this leaves alone, and why — so the admin knows what still needs them. */
+  skipped: { id: string; name: string; reason: "no-tmdb-name" | "held-back" | "folder-held-back" }[];
+  /** The series folder itself isn't published, so none of this is visible yet whatever happens. */
+  seriesHidden: boolean;
+  published: boolean;
+};
+
+/**
+ * Publishes the episodes of one series that nobody ever curated but TMDb has since named — the
+ * pile a library accumulates when a season is uploaded and never gone through by hand.
+ *
+ * Deliberately narrow:
+ *  - Only *pending* episodes (never touched). One that's curated but unpublished was held back on
+ *    purpose — "curated" is how an admin checks subtitles and timing first — so it stays put. The
+ *    same goes for a season folder that's curated but unpublished.
+ *  - Only episodes TMDb actually named. The rest are reported, not guessed at.
+ *  - With `dryRun`, nothing is written: the preview is how an admin catches a season matched by
+ *    position (which nothing in the files confirms) before its names go out to every viewer.
+ */
+export async function publishNamedEpisodes(
+  seriesFolderId: string,
+  options: { dryRun: boolean; curatedBy: string },
+): Promise<PublishResult> {
+  const series = await getCatalogFolder(seriesFolderId);
+  if (!series) throw new ArtworkLookupError("missing", "Not found");
+  if (series.artwork?.tmdbType !== "tv") {
+    throw new ArtworkLookupError("not-found", "Match this series to TMDb first, then its episodes can be named.");
+  }
+
+  const result: PublishResult = {
+    seasons: [],
+    skipped: [],
+    seriesHidden: series.status !== "published",
+    published: false,
+  };
+  const folders = [series, ...(await listChildFolders(series._id))];
+  const writes: { videoIds: string[]; folder: CatalogFolder | null; titles: Map<string, string> }[] = [];
+
+  for (const folder of folders) {
+    const videos = await listVideosByParent(folder._id);
+    const pending = videos.filter((v) => v.status === "pending");
+    if (pending.length === 0) continue;
+
+    // A held-back season folder holds back everything in it.
+    const isSeries = folder._id === series._id;
+    if (!isSeries && folder.status === "curated") {
+      for (const v of pending) result.skipped.push({ id: v._id, name: v.driveName, reason: "folder-held-back" });
+      continue;
+    }
+
+    const named = pending.filter((v) => v.episodeArtwork?.name);
+    for (const v of pending) if (!v.episodeArtwork?.name) result.skipped.push({ id: v._id, name: v.driveName, reason: "no-tmdb-name" });
+    if (named.length === 0) continue;
+
+    const plan: SeasonPlan = {
+      seriesTmdbId: series.artwork.tmdbId,
+      season: folder.tmdbSeason ?? guessSeasonNumber(folder.title, folder.driveName),
+      fallbackSeason: isSeries ? 1 : null,
+    };
+    const method = assignEpisodes(videos, plan)?.method ?? null;
+
+    named.sort((a, b) => (a.episodeArtwork!.episode ?? 0) - (b.episodeArtwork!.episode ?? 0));
+    result.seasons.push({
+      folderId: folder._id,
+      name: folder.title ?? folder.driveName,
+      publishesFolder: !isSeries && folder.status !== "published",
+      matchedBy: method,
+      episodes: named.map((v) => ({ id: v._id, episode: v.episodeArtwork!.episode || null, name: v.episodeArtwork!.name! })),
+    });
+    writes.push({
+      videoIds: named.map((v) => v._id),
+      folder: !isSeries && folder.status !== "published" ? folder : null,
+      titles: new Map(named.map((v) => [v._id, v.episodeArtwork!.name!])),
+    });
+  }
+
+  for (const v of await videosHeldBack(folders)) result.skipped.push({ id: v._id, name: v.title ?? v.driveName, reason: "held-back" });
+  if (options.dryRun || writes.length === 0) return result;
+
+  const videoCol = await videoCollection();
+  const folderCol = await folderCollection();
+  const now = new Date();
+  for (const { videoIds, folder, titles } of writes) {
+    for (const id of videoIds) {
+      // `status: "pending"` in the filter as well: an admin may have curated it since the preview.
+      await videoCol.updateOne(
+        { _id: id, status: "pending" },
+        {
+          $set: {
+            title: titles.get(id),
+            titleOverridden: false,
+            status: "published",
+            curatedAt: now,
+            curatedBy: options.curatedBy,
+            updatedAt: now,
+          },
+        },
+      );
+    }
+    if (folder) {
+      await folderCol.updateOne(
+        { _id: folder._id, status: { $in: ["pending", "curated"] } },
+        {
+          $set: {
+            // A pending folder has no title yet; its Drive name ("Season 5") is the honest one.
+            title: folder.title ?? folder.driveName,
+            status: "published",
+            curatedAt: folder.curatedAt ?? now,
+            curatedBy: folder.curatedBy ?? options.curatedBy,
+            updatedAt: now,
+          },
+        },
+      );
+    }
+  }
+  result.published = true;
+  return result;
+}
+
+/** Curated-but-unpublished episodes, which publishing leaves alone and the preview mentions. */
+async function videosHeldBack(folders: CatalogFolder[]): Promise<CatalogVideo[]> {
+  const held: CatalogVideo[] = [];
+  for (const folder of folders) {
+    held.push(...(await listVideosByParent(folder._id)).filter((v) => v.status === "curated"));
+  }
+  return held;
 }
 
 export type CatalogMatchResult = AutoMatchResult & { episodes: EpisodeMatchResult };

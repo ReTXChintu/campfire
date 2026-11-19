@@ -196,6 +196,47 @@ void main() {
       expect(EpisodeMatchResult.fromJson(const {}).unresolved, isEmpty);
     });
 
+    test('a publish preview flags position-matched seasons and counts what it leaves alone', () {
+      final preview = PublishPreview.fromJson({
+        'seasons': [
+          {
+            'folderId': 's5',
+            'name': 'Season 5',
+            'publishesFolder': true,
+            'matchedBy': 'filename+gaps',
+            'episodes': [
+              {'id': 'a', 'episode': 1, 'name': 'The Wars to Come'},
+              {'id': 'b', 'episode': 2, 'name': 'The House of Black and White'},
+            ],
+          },
+          {
+            'folderId': 's2',
+            'name': 'Season 2',
+            'publishesFolder': false,
+            'matchedBy': 'position',
+            'episodes': [
+              {'id': 'c', 'episode': 3, 'name': 'What Is Dead May Never Die'},
+            ],
+          },
+        ],
+        'skipped': [
+          {'id': 'x', 'name': 'held', 'reason': 'held-back'},
+          {'id': 'y', 'name': 'extra', 'reason': 'no-tmdb-name'},
+          {'id': 'z', 'name': 'extra 2', 'reason': 'no-tmdb-name'},
+        ],
+        'seriesHidden': false,
+        'published': false,
+      });
+      expect(preview.total, 3);
+      expect(preview.seasons.first.publishesFolder, isTrue);
+      expect(preview.seasons.last.matchedBy, 'position');
+      expect(preview.seasons.first.episodes.last.name, 'The House of Black and White');
+      expect(preview.skipped, {'held-back': 1, 'no-tmdb-name': 2});
+      expect(preview.published, isFalse);
+      // A backend that sends nothing to publish.
+      expect(PublishPreview.fromJson(const {}).total, 0);
+    });
+
     test('isTopLevel defaults to false for an older backend', () {
       final detail = AdminFolderDetail.fromJson({
         'folder': {'_id': 'f', 'parentFolderId': 'x', 'driveName': 'S1', 'status': 'published'},

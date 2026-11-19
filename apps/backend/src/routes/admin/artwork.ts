@@ -12,6 +12,7 @@ import {
 import {
   matchCatalog,
   matchEpisodesForSeries,
+  publishNamedEpisodes,
   setEpisodeArtworkEnabled,
   setFolderSeason,
 } from "../../lib/episodeArtwork";
@@ -69,6 +70,21 @@ router.post("/:kind/:id/use-tmdb-title", requireAdmin, async (req, res) => {
 router.post("/folder/:id/episodes", requireAdmin, async (req, res) => {
   try {
     res.json(await matchEpisodesForSeries(req.params.id, { force: req.body?.force === true }));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Publish the never-curated episodes of a series that TMDb has named. Body `{ dryRun: true }`
+ * returns what would happen without writing anything — the admin screens always preview first. */
+router.post("/folder/:id/publish-episodes", requireAdmin, async (req, res) => {
+  try {
+    res.json(
+      await publishNamedEpisodes(req.params.id, {
+        dryRun: req.body?.dryRun !== false,
+        curatedBy: req.authUser!.email,
+      }),
+    );
   } catch (error) {
     sendError(res, error);
   }

@@ -4,6 +4,7 @@ import AdminShell from "../../components/admin/AdminShell";
 import FolderTitleForm from "../../components/admin/FolderTitleForm";
 import ArtworkPanel from "../../components/admin/ArtworkPanel";
 import EpisodeNamingPanel, { SeasonField } from "../../components/admin/EpisodeNamingPanel";
+import PublishEpisodesPanel from "../../components/admin/PublishEpisodesPanel";
 import FolderPublishRule from "../../components/admin/FolderPublishRule";
 import CatalogChildrenList from "../../components/admin/CatalogChildrenList";
 import NotFoundPage from "../NotFoundPage";
@@ -61,6 +62,7 @@ export default function AdminCatalogFolderPage() {
       )}
 
       {isSeries && <EpisodeNamingPanel folderId={folderId!} namingOff={folder.episodeArtworkOff} />}
+      {isSeries && <PublishEpisodesPanel folderId={folderId!} />}
 
       {episodeSeries && (
         <section className="mb-8 rounded-lg border border-divider p-4" aria-labelledby="season-heading">

@@ -61,6 +61,15 @@ class AdminCatalogService {
     return EpisodeMatchResult.fromJson(data as Map<String, dynamic>);
   }
 
+  /// Preview ([dryRun] true) or publish a series' never-curated, TMDb-named episodes.
+  static Future<PublishPreview> publishNamedEpisodes(String folderId, {required bool dryRun}) async {
+    final data = await ApiClient.post(
+      '/api/admin/catalog/artwork/folder/$folderId/publish-episodes',
+      {'dryRun': dryRun},
+    );
+    return PublishPreview.fromJson(data as Map<String, dynamic>);
+  }
+
   /// Turn TMDb episode naming on or off for one series.
   static Future<void> setEpisodeNaming(String folderId, {required bool enabled}) {
     return ApiClient.put(

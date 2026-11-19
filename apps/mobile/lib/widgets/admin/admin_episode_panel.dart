@@ -159,6 +159,147 @@ class _AdminEpisodeNamingPanelState extends State<AdminEpisodeNamingPanel> {
   }
 }
 
+/// Mirrors apps/frontend/src/components/admin/PublishEpisodesPanel.tsx: preview the series'
+/// never-curated, TMDb-named episodes, flag any season matched by position, then publish them.
+class AdminPublishEpisodesPanel extends StatefulWidget {
+  final String folderId;
+  final VoidCallback onChanged;
+
+  const AdminPublishEpisodesPanel({super.key, required this.folderId, required this.onChanged});
+
+  @override
+  State<AdminPublishEpisodesPanel> createState() => _AdminPublishEpisodesPanelState();
+}
+
+class _AdminPublishEpisodesPanelState extends State<AdminPublishEpisodesPanel> {
+  PublishPreview? _plan;
+  bool _busy = false;
+  bool _published = false;
+  String? _error;
+
+  static const _reasons = {
+    'held-back': 'curated but not published — held back, so left for you',
+    'folder-held-back': "in a season folder you're holding back",
+    'no-tmdb-name': "TMDb couldn't name",
+  };
+
+  Future<void> _run({required bool dryRun}) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+      if (dryRun) _published = false;
+    });
+    try {
+      final result = await AdminCatalogService.publishNamedEpisodes(widget.folderId, dryRun: dryRun);
+      if (!mounted) return;
+      setState(() {
+        if (dryRun) _plan = result;
+        _published = result.published;
+      });
+      if (result.published) widget.onChanged();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e is ApiException ? e.message : 'Failed — please try again.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = _plan;
+    final total = plan?.total ?? 0;
+    return _panel(
+      heading: 'Unpublished episodes',
+      children: [
+        const Text(
+          "Episodes nobody has curated yet stay hidden from viewers. Once TMDb has named them, they can go live under those names — after you've seen the list.",
+          style: _secondary,
+        ),
+        const SizedBox(height: 14),
+        OutlinedButton(
+          onPressed: _busy ? null : () => _run(dryRun: true),
+          child: Text(_busy && !_published ? 'Checking…' : (plan == null ? 'Check for unpublished episodes' : 'Check again')),
+        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(color: Color(0xFFF87171), fontSize: 13)),
+          ),
+        if (_published)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(
+              "Published $total episode${total == 1 ? '' : 's'}. They're live now.",
+              style: const TextStyle(color: AppColors.live, fontSize: 13),
+            ),
+          )
+        else if (plan != null) ...[
+          const SizedBox(height: 14),
+          if (plan.seriesHidden)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text(
+                "This series itself isn't published, so none of these will be visible until it is.",
+                style: TextStyle(color: AppColors.amber, fontSize: 13),
+              ),
+            ),
+          if (plan.seasons.isEmpty)
+            const Text('Nothing to publish — every named episode is already live.', style: _secondary),
+          for (final season in plan.seasons)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColors.divider),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${season.name} · ${season.episodes.length} episode${season.episodes.length == 1 ? '' : 's'}'
+                    '${season.publishesFolder ? ' · publishes the season too' : ''}',
+                    style: const TextStyle(color: AppColors.foreground, fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  if (season.matchedBy == 'position')
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Matched by position — nothing in these filenames confirms the names. Worth checking a couple before publishing.',
+                        style: TextStyle(color: AppColors.amber, fontSize: 12, height: 1.4),
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  for (final episode in season.episodes)
+                    Text(
+                      '${episode.episode != null ? 'E${episode.episode}' : '—'}   ${episode.name}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _tertiary,
+                    ),
+                ],
+              ),
+            ),
+          if (plan.skipped.isNotEmpty)
+            Text(
+              'Left alone: ${plan.skipped.entries.map((e) => '${e.value} ${_reasons[e.key] ?? e.key}').join('; ')}.',
+              style: _tertiary,
+            ),
+          if (total > 0) ...[
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: _busy ? null : () => _run(dryRun: false),
+              child: Text(_busy ? 'Publishing…' : "Publish $total episode${total == 1 ? '' : 's'}"),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
 /// Mirrors the season control on the web's admin folder page: which season of its series this
 /// folder holds. Saving re-matches the whole series straight away.
 class AdminSeasonPanel extends StatefulWidget {

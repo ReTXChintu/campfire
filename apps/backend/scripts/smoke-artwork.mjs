@@ -336,8 +336,10 @@ await db.collection("catalogFolders").insertMany([
   // A folder whose name says nothing, but whose file names its own season.
   folder("f-hotd-lost", "f-hotd", "Lost Episode"),
   // One readable name and one DOS short name: all-or-nothing, so this folder goes by position.
-  folder("f-hotd-s3", "f-hotd", "Season 3"),
+  { ...folder("f-hotd-s3", "f-hotd", "Season 3"), status: "pending", title: null },
   folder("f-hotd-nofit", "f-hotd", "Season 3 Extras"),
+  // Curated but unpublished: an admin is holding this season back on purpose.
+  { ...folder("f-hotd-held", "f-hotd", "Season 1 Directors Cut"), status: "curated" },
 ]);
 const weaponsName = "Weapons (2025) (Hindi DD5.1-224Kbps HQ   English DD5.1-192Kbps) Dual Audio Hollywood Movie HD 1080p ESub.mkv";
 await db.collection("catalogVideos").insertMany([
@@ -351,7 +353,7 @@ await db.collection("catalogVideos").insertMany([
   video("v-ep3", "f-hotd-s1", "HOTD S01E03.mkv", "Renamed by hand", { titleOverridden: true, episodeOrder: 3 }),
   video("v-ep-pending", "f-hotd-s1", "HOTD S01E04.mkv", null, { titleOverridden: false, episodeOrder: 4, status: "pending" }),
   // A file in "Behind The Scenes" that names no episode, so the folder stays unplaced.
-  video("v-making-of", "f-hotd-extras", "HOTD Making Of.mkv", "Making Of", { titleOverridden: false }),
+  video("v-making-of", "f-hotd-extras", "HOTD Making Of.mkv", null, { status: "pending", titleOverridden: false }),
   video("v-s2e1", "f-hotd-s2", "HOTD S02E01.mkv", "Episode 1", { titleOverridden: false }),
   video("v-s2e2", "f-hotd-s2", "HOTD S02E02.mkv", "Episode 2", { titleOverridden: false }),
   video("v-s2e4", "f-hotd-s2", "HOTD S02E04.mkv", "Episode 3", { titleOverridden: false }),
@@ -361,8 +363,12 @@ await db.collection("catalogVideos").insertMany([
   video("v-s3-short1", "f-hotd-s3", "HOTDS3~1.MKV", null, { status: "pending", titleOverridden: false }),
   video("v-s3-short2", "f-hotd-s3", "HOTDS3~2.MKV", null, { status: "pending", titleOverridden: false }),
   // Too many gaps to fill: one readable episode 4 and a single short name could be any of 1–3.
-  video("v-nofit-e4", "f-hotd-nofit", "HOTD S03E04.mkv", "Episode A", { titleOverridden: false }),
-  video("v-nofit-short", "f-hotd-nofit", "HOTDX~1.MKV", "Episode B", { titleOverridden: false }),
+  video("v-nofit-e4", "f-hotd-nofit", "HOTD S03E04.mkv", null, { status: "pending", titleOverridden: false }),
+  video("v-nofit-short", "f-hotd-nofit", "HOTDX~1.MKV", null, { status: "pending", titleOverridden: false }),
+  // Curated, not published: held back for a subtitle check.
+  video("v-held", "f-hotd-s1", "HOTD S01E05.mkv", "Held for subtitles", { status: "curated", titleOverridden: true }),
+  // Never curated, but inside the held-back folder.
+  video("v-in-held", "f-hotd-held", "HOTD S01E01 DC.mkv", null, { status: "pending", titleOverridden: false }),
   // A flat series: episodes straight inside the series folder, whose own name says "s2".
   video("v-latent-e1", "f-latent", "Latent S02E01.mkv", "Episode 1", { titleOverridden: false, episodeOrder: 1 }),
 ]);
@@ -546,6 +552,37 @@ try {
   check("a folder with nothing to go on stays unmatched", !(await doc("video", "v-making-of"))?.episodeArtwork);
   const latentEp = await doc("video", "v-latent-e1");
   check("a flat series takes its season from its own name", latentEp?.episodeArtwork?.season === 2 && latentEp?.title === "Episode One", JSON.stringify(latentEp?.episodeArtwork));
+
+  console.log("\nPublishing what TMDb named");
+  const publishPath = "/api/admin/catalog/artwork/folder/f-hotd/publish-episodes";
+  check("viewers can't publish anything", (await api(publishPath, { token: viewer, method: "POST", body: { dryRun: true } })).status === 403);
+  const preview = (await api(publishPath, { token: admin, method: "POST", body: { dryRun: true } })).json;
+  const seasonOf = (id) => preview?.seasons?.find((s) => s.folderId === id);
+  check("the preview lists never-curated episodes TMDb named", seasonOf("f-hotd-s1")?.episodes?.some((e) => e.id === "v-ep-pending" && e.name === "King of the Narrow Sea" && e.episode === 4), JSON.stringify(seasonOf("f-hotd-s1")));
+  check("a season folder nobody published is published along with it", seasonOf("f-hotd-s3")?.publishesFolder === true && seasonOf("f-hotd-s3")?.episodes?.length === 4, JSON.stringify(seasonOf("f-hotd-s3")));
+  check("episodes are listed in episode order", JSON.stringify(seasonOf("f-hotd-s3")?.episodes?.map((e) => e.episode)) === JSON.stringify([1, 2, 3, 4]));
+  check("each season says how it was matched", seasonOf("f-hotd-s1")?.matchedBy === "filename" && seasonOf("f-hotd-s3")?.matchedBy === "filename+gaps");
+  check("a season matched by position is flagged, since nothing confirms its names", seasonOf("f-hotd-nofit")?.matchedBy === "position", JSON.stringify(seasonOf("f-hotd-nofit")));
+  const skippedFor = (id) => preview?.skipped?.find((x) => x.id === id)?.reason;
+  check("a curated, unpublished episode is left alone — it was held back", skippedFor("v-held") === "held-back");
+  check("so is everything in a held-back season folder", skippedFor("v-in-held") === "folder-held-back" && !seasonOf("f-hotd-held"));
+  check("an episode TMDb couldn't name is reported, not guessed", skippedFor("v-making-of") === "no-tmdb-name");
+  check("the preview writes nothing", preview?.published === false && (await doc("video", "v-ep-pending"))?.status === "pending" && (await doc("folder", "f-hotd-s3"))?.status === "pending");
+  const noFlag = (await api(publishPath, { token: admin, method: "POST", body: {} })).json;
+  check("anything short of an explicit dryRun: false is still only a preview", noFlag?.published === false && (await doc("video", "v-ep-pending"))?.status === "pending");
+
+  const done = (await api(publishPath, { token: admin, method: "POST", body: { dryRun: false } })).json;
+  const publishedEp = await doc("video", "v-ep-pending");
+  check("publishing goes live with TMDb's name", done?.published === true && publishedEp?.status === "published" && publishedEp?.title === "King of the Narrow Sea", JSON.stringify({ s: publishedEp?.status, t: publishedEp?.title }));
+  check("…credited to the admin who pressed it, and not counted as hand-typed", publishedEp?.curatedBy === envValue("ADMIN_EMAIL") && publishedEp?.titleOverridden === false);
+  const s3 = await doc("folder", "f-hotd-s3");
+  check("the season folder goes live under its Drive name", s3?.status === "published" && s3?.title === "Season 3", JSON.stringify({ s: s3?.status, t: s3?.title }));
+  check("…with every episode in it", (await doc("video", "v-s3-short1"))?.status === "published" && (await doc("video", "v-s3-short1"))?.title === "Third Season One");
+  check("held-back things are still held back", (await doc("video", "v-held"))?.status === "curated" && (await doc("video", "v-held"))?.title === "Held for subtitles" && (await doc("video", "v-in-held"))?.status === "pending" && (await doc("folder", "f-hotd-held"))?.status === "curated");
+  check("the unnamed episode is still pending", (await doc("video", "v-making-of"))?.status === "pending");
+  const liveSeason = (await api("/api/folder/f-hotd?season=f-hotd-s3", { token: viewer })).json;
+  check("viewers can see the newly published season", liveSeason?.seasons?.some((s) => s.id === "f-hotd-s3") && liveSeason?.seasonItems?.length === 4, JSON.stringify(liveSeason?.seasonItems?.map((e) => e.name)));
+  check("a title that isn't a series can't publish episodes", (await api("/api/admin/catalog/artwork/folder/f-unknown/publish-episodes", { token: admin, method: "POST", body: { dryRun: true } })).json?.code === "not-found");
 
   console.log("\nSeasons the names don't give away");
   const extras = (await api("/api/admin/catalog/folder/f-hotd-extras", { token: admin })).json;
