@@ -212,6 +212,64 @@ export type LibraryResponse = {
   progress?: WatchProgress[];
 };
 
+// --- Audio and subtitle tracks (backend lib/mediaTracks.ts) -----------------------------------
+
+/** One embedded track as viewers see it: an admin's name where set, the file's own tags otherwise.
+ * `n` counts each kind from 1 in file order — mpv's track id in the apps. */
+export type ViewerTrack = {
+  n: number;
+  label: string;
+  language: string | null;
+  languageName: string | null;
+  isDefault: boolean;
+  forced: boolean;
+  codec: string;
+  channels: number | null;
+};
+
+/** Which subtitle a player starts on. `external.index` points into the response's `subtitles`. */
+export type StartSubtitle = { source: "off" } | { source: "embedded"; n: number } | { source: "external"; index: number };
+
+/** `partial`: only some of a series' episodes have it. */
+export type TitleLanguage = { code: string; name: string; partial: boolean };
+export type TitleLanguages = { audio: TitleLanguage[]; subtitles: TitleLanguage[] };
+
+/** A viewer's languages. `foreign` turns subtitles on only when the audio isn't one of `audio`. */
+export type LanguagePrefs = {
+  audio: string[];
+  subtitles: string | null;
+  subtitleMode: "off" | "always" | "foreign";
+};
+
+/** A picker option (`GET /api/languages`). */
+export type LanguageOption = { code: string; name: string; inLibrary: boolean };
+
+/** One track exactly as the file describes it. */
+export type FileTrack = {
+  n: number;
+  language: string | null;
+  title: string | null;
+  codec: string;
+  channels: number | null;
+  isDefault: boolean;
+  forced: boolean;
+};
+
+/** `match` (and `default*Match` below) is stamped by the server on save — the language that
+ * position held — so a folder's name only reaches episodes laid out the same way. Never sent. */
+export type TrackName = { label?: string | null; language?: string | null; match?: string | null };
+
+/** Names and defaults set on a series, a season or one video; the nearest wins per field. For the
+ * defaults, absent means "inherit", null "no default here", and a subtitle 0 "start with them off". */
+export type TrackNaming = {
+  audio?: Record<string, TrackName>;
+  subtitles?: Record<string, TrackName>;
+  defaultAudio?: number | null;
+  defaultSubtitle?: number | null;
+  defaultAudioMatch?: string | null;
+  defaultSubtitleMatch?: string | null;
+};
+
 export type FolderFlatResponse = {
   mode: "flat";
   folderId: string;
@@ -220,6 +278,9 @@ export type FolderFlatResponse = {
   thumbnailFileId: string | null;
   items: CatalogListItem[];
   progress: WatchProgress[];
+  /** Audio/subtitle languages across its videos; null until they've been read (or from an older
+   * backend, absent). */
+  languages?: TitleLanguages | null;
 } & TitleMeta;
 
 export type FolderSeriesResponse = {
@@ -233,6 +294,8 @@ export type FolderSeriesResponse = {
   seasonItems: CatalogListItem[];
   specialItems: CatalogListItem[];
   progress: WatchProgress[];
+  /** Across every published episode; `partial` marks a language only some of them have. */
+  languages?: TitleLanguages | null;
 } & TitleMeta;
 
 export type FolderResponse = FolderFlatResponse | FolderSeriesResponse;
@@ -278,6 +341,15 @@ export type VideoResponse = {
   initialSubtitleTitle: string | null;
   initialAudioLanguage: string | null;
   initialAudioTitle: string | null;
+  // The file's embedded tracks under their admin names, and where to start — the server has
+  // already folded this video's own pick, the series' last pick, the viewer's profile languages
+  // and the admin default together. All absent from an older backend; the track lists are null
+  // until the file has been read.
+  audioTracks?: ViewerTrack[] | null;
+  subtitleTracks?: ViewerTrack[] | null;
+  startAudio?: number | null;
+  startSubtitle?: StartSubtitle | null;
+  languages?: TitleLanguages | null;
 } & TitleMeta;
 
 export type WatchParty = {

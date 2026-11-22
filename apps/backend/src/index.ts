@@ -30,6 +30,8 @@ import adminCatalogVideoRoutes from "./routes/admin/catalogVideo";
 import adminSubtitleSetRoutes from "./routes/admin/subtitleSets";
 import adminRequestRoutes from "./routes/admin/requests";
 import adminArtworkRoutes from "./routes/admin/artwork";
+import adminTrackRoutes from "./routes/admin/tracks";
+import { queueStaleTrackReads } from "./lib/mediaTracks";
 import { matchCatalog } from "./lib/episodeArtwork";
 
 const app = express();
@@ -64,6 +66,7 @@ app.use("/api/admin/catalog/video", adminCatalogVideoRoutes);
 app.use("/api/admin/subtitle-sets", adminSubtitleSetRoutes);
 app.use("/api/admin/requests", adminRequestRoutes);
 app.use("/api/admin/catalog/artwork", adminArtworkRoutes);
+app.use("/api/admin/catalog/tracks", adminTrackRoutes);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
@@ -95,6 +98,12 @@ Promise.all([
         if (parts.length > 0) console.log(`Artwork: ${parts.join(", ")} on TMDb`);
       })
       .catch((error) => console.error("Artwork auto-match failed:", error));
+    // Audio/subtitle tracks of every file not read yet (or replaced since), in the background.
+    queueStaleTrackReads()
+      .then((n) => {
+        if (n > 0) console.log(`Tracks: reading ${n} file(s) in the background`);
+      })
+      .catch((error) => console.error("Track reading failed to start:", error));
   })
   .catch((error) => {
     console.error("Failed to seed admin user:", error);

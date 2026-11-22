@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "../lib/api";
-import type { LibraryResponse, FolderResponse, VideoResponse } from "../lib/types";
+import type { LibraryResponse, FolderResponse, LanguageOption, VideoResponse } from "../lib/types";
 
 export function useLibrary() {
   return useQuery({ queryKey: ["library"], queryFn: () => apiGet<LibraryResponse>("/api/library") });
@@ -16,6 +16,15 @@ export function useFolder(folderId: string, season: string | null) {
 
 export function useVideo(fileId: string) {
   return useQuery({ queryKey: ["video", fileId], queryFn: () => apiGet<VideoResponse>(`/api/video/${fileId}`) });
+}
+
+/** Languages to offer in pickers: the common ones plus every language found in the library. */
+export function useLanguageOptions() {
+  return useQuery({
+    queryKey: ["languages"],
+    queryFn: () => apiGet<{ languages: LanguageOption[] }>("/api/languages").then((r) => r.languages),
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useSaveProgress() {

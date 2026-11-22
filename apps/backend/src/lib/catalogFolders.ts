@@ -1,5 +1,6 @@
 import { getDb } from "./mongodb";
 import type { ArtworkFields } from "./artwork";
+import type { TrackNaming } from "./mediaTracks";
 
 export type CatalogFolderStatus = "pending" | "curated" | "published";
 
@@ -21,6 +22,8 @@ export type CatalogFolder = {
   // order source, default intro-skip) — see routes/admin/catalogFolder.ts's publish-rule routes.
   // Independent of `status`/curation: saved purely so reopening the folder pre-fills the form.
   publishRule: CatalogFolderPublishRule | null;
+  // Track names and defaults for every episode below this folder (lib/mediaTracks.ts).
+  trackNaming?: TrackNaming | null;
   createdAt: Date;
   curatedAt: Date | null;
   curatedBy: string | null;

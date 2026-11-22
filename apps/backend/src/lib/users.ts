@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { getDb } from "./mongodb";
+import type { LanguagePrefs } from "./mediaTracks";
 
 export type UserDoc = {
   _id: string; // email, lowercased — the only user identity now that Google login is gone
@@ -7,6 +8,8 @@ export type UserDoc = {
   passwordHash: string;
   name: string | null;
   avatarUrl: string | null;
+  // The audio/subtitle languages this viewer wants every title to start in (lib/mediaTracks.ts).
+  languages?: LanguagePrefs | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -103,4 +106,9 @@ export async function resetPassword(email: string, newPassword: string): Promise
   const passwordHash = await bcrypt.hash(newPassword, 12);
   const result = await col.updateOne({ _id: id }, { $set: { passwordHash, updatedAt: new Date() } });
   return result.matchedCount > 0;
+}
+
+export async function setLanguagePrefs(userId: string, languages: LanguagePrefs | null): Promise<void> {
+  const col = await collection();
+  await col.updateOne({ _id: userId }, { $set: { languages, updatedAt: new Date() } });
 }

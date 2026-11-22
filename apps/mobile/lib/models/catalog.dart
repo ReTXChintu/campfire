@@ -2,6 +2,9 @@
 // the same apps/backend REST API.
 
 import 'title_meta.dart';
+import 'tracks.dart';
+
+export 'tracks.dart';
 
 sealed class CatalogListItem {
   final String id;
@@ -357,6 +360,10 @@ class FolderResponse {
   final List<CatalogListItem> specialItems;
   final List<WatchProgress> progress;
 
+  /// Audio and subtitle languages across its published episodes. Null until they've been read,
+  /// and on a backend older than the field.
+  final TitleLanguages? languages;
+
   const FolderResponse({
     required this.mode,
     required this.folderId,
@@ -370,6 +377,7 @@ class FolderResponse {
     this.seasonItems = const [],
     this.specialItems = const [],
     this.progress = const [],
+    this.languages,
   });
 
   bool get isSeries => mode == 'series';
@@ -397,6 +405,7 @@ class FolderResponse {
     progress: json['progress'] == null
         ? const []
         : (json['progress'] as List).map((e) => WatchProgress.fromJson(e)).toList(),
+    languages: TitleLanguages.tryParse(json['languages']),
   );
 }
 
@@ -533,6 +542,25 @@ class VideoResponse {
   /// A short "more like this" list for the end screen. Empty from an older backend.
   final List<UpNextItem> suggestions;
 
+  /// The file's embedded tracks under their admin-given names (see models/tracks.dart). Null
+  /// until the file has been read, and on an older backend — the player then labels tracks from
+  /// mpv's own tags, as before.
+  final List<ViewerTrack>? audioTracks;
+  final List<ViewerTrack>? subtitleTracks;
+
+  /// The tracks to start on, with this video's own pick, the series' last pick, the viewer's
+  /// profile languages and an admin's default already folded in server-side. Null leaves the
+  /// file's default (audio) / the player's usual start (subtitles).
+  final int? startAudio;
+  final StartSubtitle? startSubtitle;
+
+  /// The backend sends start tracks at all. When it does they replace the initialAudio*/
+  /// initialSubtitle* matching, which an older backend still needs.
+  final bool hasStartTracks;
+
+  /// What this one file has, for the details under the player. Null until read.
+  final TitleLanguages? languages;
+
   const VideoResponse({
     required this.fileId,
     required this.title,
@@ -560,6 +588,12 @@ class VideoResponse {
     this.episode,
     this.upNext,
     this.suggestions = const [],
+    this.audioTracks,
+    this.subtitleTracks,
+    this.startAudio,
+    this.startSubtitle,
+    this.hasStartTracks = false,
+    this.languages,
   });
 
   bool get isNative => seekMode == 'native';
@@ -597,5 +631,11 @@ class VideoResponse {
     initialSubtitleTitle: json['initialSubtitleTitle'] as String?,
     initialAudioLanguage: json['initialAudioLanguage'] as String?,
     initialAudioTitle: json['initialAudioTitle'] as String?,
+    audioTracks: ViewerTrack.tryParseList(json['audioTracks']),
+    subtitleTracks: ViewerTrack.tryParseList(json['subtitleTracks']),
+    startAudio: (json['startAudio'] as num?)?.toInt(),
+    startSubtitle: StartSubtitle.tryParse(json['startSubtitle']),
+    hasStartTracks: json.containsKey('startAudio') || json.containsKey('startSubtitle'),
+    languages: TitleLanguages.tryParse(json['languages']),
   );
 }

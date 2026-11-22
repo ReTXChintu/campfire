@@ -480,6 +480,59 @@ async function probeSource(source: MediaSource): Promise<ProbeResult> {
   };
 }
 
+export type RawTrack = {
+  language: string | null;
+  title: string | null;
+  codec: string;
+  channels: number | null;
+  isDefault: boolean;
+  forced: boolean;
+};
+
+/**
+ * Every audio and subtitle stream in a file, in file order — image subtitles (PGS/VobSub)
+ * included, unlike probeStreams, because the apps' player (mpv) lists those too and numbers
+ * each kind 1, 2, 3… in exactly this order. That shared numbering is what lets a track named in
+ * admin be found again in the player. Uncached: lib/mediaTracks.ts stores the result.
+ */
+export async function probeFileTracks(fileId: string): Promise<{ audio: RawTrack[]; subtitles: RawTrack[] }> {
+  const raw = await runBuffered(
+    env.ffprobePath,
+    "ffprobe",
+    ["-v", "error", "-print_format", "json", "-show_streams", ...(await driveInputArgs(fileId))],
+    30_000,
+  );
+  const parsed = JSON.parse(raw.toString("utf-8")) as {
+    streams?: {
+      codec_type: string;
+      codec_name?: string;
+      channels?: number;
+      disposition?: { default?: number; forced?: number };
+      tags?: Record<string, string>;
+    }[];
+  };
+  // MKV muxers write tags in either case ("language" / "LANGUAGE").
+  const tag = (tags: Record<string, string> | undefined, name: string) => {
+    if (!tags) return null;
+    const key = Object.keys(tags).find((k) => k.toLowerCase() === name);
+    const value = key ? tags[key]?.trim() : "";
+    return value ? value : null;
+  };
+  const toRaw = (s: NonNullable<typeof parsed.streams>[number]): RawTrack => ({
+    language: tag(s.tags, "language"),
+    title: tag(s.tags, "title"),
+    codec: s.codec_name ?? "unknown",
+    channels: typeof s.channels === "number" ? s.channels : null,
+    isDefault: s.disposition?.default === 1,
+    forced: s.disposition?.forced === 1,
+  });
+  const streams = parsed.streams ?? [];
+  return {
+    audio: streams.filter((s) => s.codec_type === "audio").map(toRaw),
+    subtitles: streams.filter((s) => s.codec_type === "subtitle").map(toRaw),
+  };
+}
+
 /**
  * Probes a Drive file's audio/subtitle streams and real duration via ffprobe, so the player can
  * offer track switching and a working seek bar. Drive's own `videoMediaMetadata.durationMillis`

@@ -21,8 +21,10 @@ import '../services/pip_service.dart';
 import '../services/watch_party_sync_controller.dart';
 import '../theme/app_theme.dart';
 import '../utils/media_meta.dart';
+import '../utils/start_tracks.dart';
 import 'episodes_panel.dart';
 import 'player_chrome.dart';
+import 'title_meta_views.dart';
 import 'tv_focusable.dart';
 import 'trickplay_preview.dart';
 import 'up_next.dart';
@@ -173,13 +175,23 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   SubtitleTrack _selectedSubtitleTrack = SubtitleTrack.no();
 
   // Remembered track preferences, saved with progress and reapplied on later opens.
-  String? _subtitlePreferenceSource; // "off" | "external" | null
+  String? _subtitlePreferenceSource; // "off" | "external" | "embedded" | null
   int? _subtitlePreferenceIndex;
   String? _subtitlePreferenceLanguage;
   String? _subtitlePreferenceTitle;
+  // mpv's own tags for the picked audio, which is what re-finding it in the track list matches on.
   String? _audioPreferenceLanguage;
   String? _audioPreferenceTitle;
+  // What's saved as audioLanguage: the canonical code from `audioTracks` when the backend has
+  // one, since an admin may have named a track the file leaves as "und".
+  String? _audioSaveLanguage;
   bool _hasAudioPreference = false;
+
+  // The backend's startAudio/startSubtitle (see utils/start_tracks.dart), applied once as soon as
+  // mpv reports the file's tracks. Cleared by the viewer's own pick or the party's, so a later
+  // track-list update can never switch a choice someone made back to the start one.
+  bool _startAudioPending = false;
+  bool _startSubtitlePending = false;
 
   // ---- Watch party ------------------------------------------------------------------------------
   final _engine = PartySyncEngine();
@@ -232,34 +244,10 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       if (saved != null && mounted) setState(() => _autoplay = saved);
     }).catchError((_) {});
 
-    _subtitlePreferenceSource = video.initialSubtitleSource == 'off' || video.initialSubtitleSource == 'external'
-        ? video.initialSubtitleSource
-        : null;
-    _subtitlePreferenceIndex = video.initialSubtitleIndex;
-    _subtitlePreferenceLanguage = video.initialSubtitleLanguage;
-    _subtitlePreferenceTitle = video.initialSubtitleTitle;
-    if (video.initialAudioLanguage != null || video.initialAudioTitle != null) {
-      _hasAudioPreference = true;
-      _audioPreferenceLanguage = video.initialAudioLanguage;
-      _audioPreferenceTitle = video.initialAudioTitle;
-    }
-    if (_subtitlePreferenceSource == 'external') {
-      ConvertedSubtitle? match;
-      if (_subtitlePreferenceLanguage != null || _subtitlePreferenceTitle != null) {
-        for (final s in video.subtitles) {
-          if (s.language == _subtitlePreferenceLanguage && s.title == _subtitlePreferenceTitle) {
-            match = s;
-            break;
-          }
-        }
-      } else if (_subtitlePreferenceIndex != null &&
-          _subtitlePreferenceIndex! >= 0 &&
-          _subtitlePreferenceIndex! < video.subtitles.length) {
-        match = video.subtitles[_subtitlePreferenceIndex!];
-      }
-      if (match != null) {
-        _selectedSubtitleTrack = SubtitleTrack.data(match.vtt, title: match.title, language: match.language);
-      }
+    if (video.hasStartTracks) {
+      _initStartTracks();
+    } else {
+      _initRememberedTracks();
     }
 
     _subs.addAll([
@@ -301,6 +289,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       _player.stream.tracks.listen((t) {
         if (!mounted) return;
         setState(() => _tracks = t);
+        _maybeApplyStartTracks();
         _maybeApplyAudioPreference();
         // The party's track choice may have arrived before this file's track list did.
         final target = _partyTarget;
@@ -338,6 +327,114 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       onSkipPrevious: video.previousFileId == null ? null : () => _navigateToEpisode(video.previousFileId!),
     );
   }
+
+  /// An older backend: re-find the remembered picks by name (initialAudio*/initialSubtitle*).
+  void _initRememberedTracks() {
+    _subtitlePreferenceSource = video.initialSubtitleSource == 'off' || video.initialSubtitleSource == 'external'
+        ? video.initialSubtitleSource
+        : null;
+    _subtitlePreferenceIndex = video.initialSubtitleIndex;
+    _subtitlePreferenceLanguage = video.initialSubtitleLanguage;
+    _subtitlePreferenceTitle = video.initialSubtitleTitle;
+    if (video.initialAudioLanguage != null || video.initialAudioTitle != null) {
+      _hasAudioPreference = true;
+      _audioPreferenceLanguage = video.initialAudioLanguage;
+      _audioSaveLanguage = video.initialAudioLanguage;
+      _audioPreferenceTitle = video.initialAudioTitle;
+    }
+    if (_subtitlePreferenceSource == 'external') {
+      ConvertedSubtitle? match;
+      if (_subtitlePreferenceLanguage != null || _subtitlePreferenceTitle != null) {
+        for (final s in video.subtitles) {
+          if (s.language == _subtitlePreferenceLanguage && s.title == _subtitlePreferenceTitle) {
+            match = s;
+            break;
+          }
+        }
+      } else if (_subtitlePreferenceIndex != null &&
+          _subtitlePreferenceIndex! >= 0 &&
+          _subtitlePreferenceIndex! < video.subtitles.length) {
+        match = video.subtitles[_subtitlePreferenceIndex!];
+      }
+      if (match != null) {
+        _selectedSubtitleTrack = SubtitleTrack.data(match.vtt, title: match.title, language: match.language);
+      }
+    }
+  }
+
+  /// A backend that already worked out where to start (this video's pick, the series' last one,
+  /// the profile languages, an admin's default). Off and an uploaded file don't need mpv's track
+  /// list, so they're set before the stream opens, as a remembered upload always was; the audio
+  /// and an embedded subtitle wait for it.
+  ///
+  /// Nothing here is recorded as a pick: saving it would turn a profile language into this
+  /// video's own choice, and the server works the start out again on every open anyway.
+  void _initStartTracks() {
+    // A restart-mode stream is a remux with one audio track and no subtitles, so mpv's ids there
+    // say nothing about the file's own track numbers.
+    _startAudioPending = video.startAudio != null && _tracksMatchFile;
+    final start = video.startSubtitle;
+    if (start == null) return;
+    if (start.isEmbedded) {
+      _startSubtitlePending = _tracksMatchFile;
+      return;
+    }
+    final subtitle = planStartTracks(
+      startAudio: null,
+      startSubtitle: start,
+      audioIds: const [],
+      subtitleIds: const [],
+      tracksKnown: false,
+      externalCount: video.subtitles.length,
+    ).subtitle;
+    if (subtitle == null) return;
+    if (subtitle.isOff) {
+      _selectedSubtitleTrack = SubtitleTrack.no();
+    } else {
+      final s = video.subtitles[subtitle.index!];
+      _selectedSubtitleTrack = SubtitleTrack.data(s.vtt, title: s.title, language: s.language);
+      // What the menu's tick and a party announcement read. Not saved: there's no source.
+      _subtitlePreferenceIndex = s.index;
+      _subtitlePreferenceLanguage = s.language;
+      _subtitlePreferenceTitle = s.title;
+    }
+  }
+
+  /// The start audio / embedded subtitle, once mpv has said which tracks the file has.
+  void _maybeApplyStartTracks() {
+    if (!_startAudioPending && !_startSubtitlePending) return;
+    bool real(String id) => id != 'auto' && id != 'no';
+    final audio = _tracks.audio.where((t) => real(t.id)).toList();
+    final subtitles = _tracks.subtitle.where((t) => real(t.id)).toList();
+    final plan = planStartTracks(
+      startAudio: _startAudioPending ? video.startAudio : null,
+      startSubtitle: _startSubtitlePending ? video.startSubtitle : null,
+      audioIds: [for (final t in audio) t.id],
+      subtitleIds: [for (final t in subtitles) t.id],
+      tracksKnown: audio.isNotEmpty || subtitles.isNotEmpty || _tracks.video.any((t) => real(t.id)),
+      externalCount: video.subtitles.length,
+    );
+    if (_startAudioPending && !plan.audioPending) {
+      _startAudioPending = false;
+      final track = audio.where((t) => t.id == plan.audioId).firstOrNull;
+      if (track != null && _track.audio.id != track.id) _player.setAudioTrack(track);
+    }
+    if (_startSubtitlePending && !plan.subtitlePending) {
+      _startSubtitlePending = false;
+      final n = plan.subtitle?.n;
+      final track = n == null ? null : subtitles.where((t) => t.id == '$n').firstOrNull;
+      if (track != null) _selectSubtitle(track);
+    }
+  }
+
+  /// mpv numbers a file's tracks the way the backend's `n` does — except in a restart-mode remux.
+  bool get _tracksMatchFile => _streamIsSeekable;
+
+  ViewerTrack? _viewerAudio(String id) =>
+      _tracksMatchFile ? video.audioTracks?.where((t) => t.mpvId == id).firstOrNull : null;
+
+  ViewerTrack? _viewerSubtitle(String id) =>
+      _tracksMatchFile ? video.subtitleTracks?.where((t) => t.mpvId == id).firstOrNull : null;
 
   Uri _streamUri({double restartOffsetSeconds = 0}) {
     final params = <String, String>{'token': ?_mediaToken};
@@ -577,10 +674,14 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   /// own subtitles afterwards without being overridden every heartbeat.
   void _applyPartyTracks(PartyPlaybackState target) {
     final audio = target.audio;
-    if (audio != null && audio != _appliedPartyAudio && _applyAudioChoice(audio)) _appliedPartyAudio = audio;
+    if (audio != null && audio != _appliedPartyAudio && _applyAudioChoice(audio)) {
+      _appliedPartyAudio = audio;
+      _startAudioPending = false;
+    }
     final subtitle = target.subtitle;
     if (subtitle != null && subtitle != _appliedPartySubtitle && _applySubtitleChoice(subtitle)) {
       _appliedPartySubtitle = subtitle;
+      _startSubtitlePending = false;
     }
   }
 
@@ -603,6 +704,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     // update doesn't switch it straight back.
     _hasAudioPreference = true;
     _audioPreferenceLanguage = match.language;
+    _audioSaveLanguage = _viewerAudio(match.id)?.language ?? match.language;
     _audioPreferenceTitle = match.title;
     return true;
   }
@@ -630,7 +732,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         final match = embedded.where((t) => t.id == choice.id).firstOrNull ??
             embedded.where((t) => t.language == choice.language && t.title == choice.title).firstOrNull;
         if (match == null) return true;
-        _selectSubtitle(match);
+        _selectSubtitle(match, source: _embeddedSource);
         return true;
       default:
         return true;
@@ -707,7 +809,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       subtitleIndex: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceIndex,
       subtitleLanguage: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceLanguage,
       subtitleTitle: _subtitlePreferenceSource == null ? unsetProgressField : _subtitlePreferenceTitle,
-      audioLanguage: _hasAudioPreference ? _audioPreferenceLanguage : unsetProgressField,
+      audioLanguage: _hasAudioPreference ? _audioSaveLanguage : unsetProgressField,
       audioTitle: _hasAudioPreference ? _audioPreferenceTitle : unsetProgressField,
     ).catchError((_) {});
   }
@@ -1125,7 +1227,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   // ===============================================================================================
   // Tracks
 
-  /// Applies a subtitle pick and records it as the remembered preference.
+  /// Applies a subtitle choice. With a [source] it's also recorded as the remembered pick ("off",
+  /// "external", "embedded"); without one (the backend's start choice) it's only shown.
   void _selectSubtitle(SubtitleTrack track, {String? source, ConvertedSubtitle? external}) {
     _selectedSubtitleTrack = track;
     _player.setSubtitleTrack(track);
@@ -1139,9 +1242,22 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       _subtitlePreferenceIndex = external.index;
       _subtitlePreferenceLanguage = external.language;
       _subtitlePreferenceTitle = external.title;
+    } else if (source == 'embedded') {
+      // Found again on the next open (startTracks in the backend's lib/mediaTracks.ts) by its
+      // position first — mpv's id is the file's track number, and files often carry several
+      // tracks with identical tags — then by language + title, with the canonical code when the
+      // backend has one (the file may say "und" where an admin named the track).
+      _subtitlePreferenceSource = 'embedded';
+      _subtitlePreferenceIndex = int.tryParse(track.id);
+      _subtitlePreferenceLanguage = _viewerSubtitle(track.id)?.language ?? track.language;
+      _subtitlePreferenceTitle = track.title;
     }
     if (mounted) setState(() {});
   }
+
+  /// Only a backend that knows the "embedded" source gets embedded picks remembered — an older one
+  /// would refuse the whole progress save over it.
+  String? get _embeddedSource => video.hasStartTracks ? 'embedded' : null;
 
   void _maybeApplyAudioPreference() {
     if (!_hasAudioPreference) return;
@@ -1158,13 +1274,17 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   String _subtitleLabel() {
     final s = _selectedSubtitleTrack;
     if (s.id == 'no') return 'Off';
+    if (!s.data) {
+      final named = _viewerSubtitle(s.id);
+      if (named != null) return named.label;
+    }
     return _languageName(s.language) ?? s.title ?? 'On';
   }
 
   String _audioLabel() {
     final a = _track.audio;
     if (a.id == 'auto' || a.id == 'no') return 'Default';
-    return _languageName(a.language) ?? a.title ?? 'Track ${a.id}';
+    return _viewerAudio(a.id)?.label ?? _languageName(a.language) ?? a.title ?? 'Track ${a.id}';
   }
 
   static const _languages = {
@@ -1432,6 +1552,11 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                         Padding(
                           padding: const EdgeInsets.only(top: 3),
                           child: Text(meta.line, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12)),
+                        ),
+                      if (video.languages case final languages? when languages.parts.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: TitleLanguagesLine(languages: languages, fontSize: 12),
                         ),
                     ],
                   ),
@@ -1785,6 +1910,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
             label: 'Off',
             selected: _selectedSubtitleTrack.id == 'no',
             onTap: () {
+              _startSubtitlePending = false;
               _selectSubtitle(SubtitleTrack.no(), source: 'off');
               _saveProgress(force: true);
               _announce(PartyStateKind.action);
@@ -1797,6 +1923,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
               detail: [?s.title, 'Uploaded'].join(' · '),
               selected: _selectedSubtitleTrack.data && _subtitlePreferenceIndex == s.index,
               onTap: () {
+                _startSubtitlePending = false;
                 _selectSubtitle(SubtitleTrack.data(s.vtt, title: s.title, language: s.language), source: 'external', external: s);
                 _saveProgress(force: true);
                 _announce(PartyStateKind.action);
@@ -1804,31 +1931,36 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
               },
             ),
           for (final t in embedded)
-            _trackRow(
-              label: _languageName(t.language) ?? t.title ?? 'Track ${t.id}',
-              detail: [?t.title, 'In the file'].join(' · '),
-              selected: !_selectedSubtitleTrack.data && _selectedSubtitleTrack.id == t.id,
-              onTap: () {
-                _selectSubtitle(t);
-                _announce(PartyStateKind.action);
-                onDone();
-              },
-            ),
+            if (_viewerSubtitle(t.id) case final named?)
+              // The backend's label already says what the file's own title would add.
+              _trackRow(
+                label: named.label,
+                detail: [if (named.forced) 'Forced', 'In the file'].join(' · '),
+                selected: !_selectedSubtitleTrack.data && _selectedSubtitleTrack.id == t.id,
+                onTap: () => _pickEmbeddedSubtitle(t, onDone),
+              )
+            else
+              _trackRow(
+                label: _languageName(t.language) ?? t.title ?? 'Track ${t.id}',
+                detail: [?t.title, 'In the file'].join(' · '),
+                selected: !_selectedSubtitleTrack.data && _selectedSubtitleTrack.id == t.id,
+                onTap: () => _pickEmbeddedSubtitle(t, onDone),
+              ),
         ];
       case _Menu.audio:
         final real = _tracks.audio.where((t) => t.id != 'no').toList();
         return [
           for (final t in real)
             _trackRow(
-              label: t.id == 'auto' ? 'Default' : (_languageName(t.language) ?? t.title ?? 'Track ${t.id}'),
-              detail: t.id == 'auto'
-                  ? 'Whichever track the file marks as default'
-                  : ([?t.title, ?t.language].where((p) => p != _languageName(t.language)).join(' · ')).ifEmpty,
+              label: t.id == 'auto' ? 'Default' : _audioRowLabel(t),
+              detail: t.id == 'auto' ? 'Whichever track the file marks as default' : _audioRowDetail(t),
               selected: _track.audio.id == t.id,
               onTap: () {
+                _startAudioPending = false;
                 _player.setAudioTrack(t);
                 _hasAudioPreference = t.id != 'auto';
                 _audioPreferenceLanguage = t.id == 'auto' ? null : t.language;
+                _audioSaveLanguage = t.id == 'auto' ? null : (_viewerAudio(t.id)?.language ?? t.language);
                 _audioPreferenceTitle = t.id == 'auto' ? null : t.title;
                 _saveProgress(force: true);
                 // The track change lands asynchronously; announce what was picked, not _track.
@@ -1872,6 +2004,25 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       case _Menu.none:
         return const [];
     }
+  }
+
+  void _pickEmbeddedSubtitle(SubtitleTrack t, VoidCallback onDone) {
+    _startSubtitlePending = false;
+    _selectSubtitle(t, source: _embeddedSource);
+    _saveProgress(force: true);
+    _announce(PartyStateKind.action);
+    onDone();
+  }
+
+  String _audioRowLabel(AudioTrack t) =>
+      _viewerAudio(t.id)?.label ?? _languageName(t.language) ?? t.title ?? 'Track ${t.id}';
+
+  String? _audioRowDetail(AudioTrack t) {
+    final named = _viewerAudio(t.id);
+    // The backend's label is built from the language and channels already; the file's own title
+    // is the only thing left that might tell two tracks apart.
+    if (named != null) return t.title != null && t.title != named.label ? t.title : null;
+    return ([?t.title, ?t.language].where((p) => p != _languageName(t.language)).join(' · ')).ifEmpty;
   }
 
   Widget _pillButton(String label, VoidCallback onTap) {

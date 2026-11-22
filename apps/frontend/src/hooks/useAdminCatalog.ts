@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostText, apiPut } from "../lib/api";
-import type { CatalogArtwork, CatalogFolder, CatalogVideo } from "../lib/types";
+import type { CatalogArtwork, CatalogFolder, CatalogVideo, FileTrack, TrackNaming, ViewerTrack } from "../lib/types";
 import { useInvalidateCatalog } from "./useCatalog";
 
 type AdminOverview = {
@@ -352,6 +352,128 @@ export function useMatchMissingArtwork() {
       queryClient.invalidateQueries({ queryKey: ["admin-folder"] });
       queryClient.invalidateQueries({ queryKey: ["admin-video"] });
       invalidateCatalog();
+    },
+  });
+}
+
+// --- Audio and subtitle tracks (backend routes/admin/tracks.ts) ---------------------------------
+
+export type TrackReportVideo = { id: string; title: string; season: string | null; status: CatalogVideo["status"] };
+
+export type TrackLayout = { audio: FileTrack[]; subtitles: FileTrack[] };
+export type EffectiveTracks = { audio: ViewerTrack[]; subtitles: ViewerTrack[] };
+
+export type FolderTracks = {
+  folderId: string;
+  title: string;
+  naming: TrackNaming;
+  /** Merged from the folders above; empty for a series root. */
+  inherited: TrackNaming;
+  /** The most common layout below this folder — what the naming form edits. */
+  usual: TrackLayout | null;
+  effective: EffectiveTracks | null;
+  report: {
+    /** Every distinct layout, the usual one first. */
+    groups: (TrackLayout & { usual: boolean; differences: string[]; videos: TrackReportVideo[] })[];
+    unread: TrackReportVideo[];
+    failed: (TrackReportVideo & { error: string })[];
+  };
+  /** Files still queued to be read, server-wide. */
+  reading: number;
+};
+
+export type VideoTracks = {
+  fileId: string;
+  title: string;
+  tracks: (TrackLayout & { readAt: string; readSize: number | null; error: string | null }) | null;
+  naming: TrackNaming;
+  inherited: TrackNaming;
+  effective: EffectiveTracks | null;
+  series: { id: string; title: string } | null;
+  /** How this file differs from most of its series; empty when it doesn't (or has no series). */
+  differences: string[];
+  reading: number;
+};
+
+/** Names and defaults reach every episode below a folder, and the languages the details pages
+ * list, so a save refreshes all of those. */
+function useInvalidateTracks() {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ["admin-folder-tracks"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-video-tracks"] });
+    queryClient.invalidateQueries({ queryKey: ["folder"] });
+    queryClient.invalidateQueries({ queryKey: ["video"] });
+  };
+}
+
+export function useFolderTracks(folderId: string) {
+  return useQuery({
+    queryKey: ["admin-folder-tracks", folderId],
+    queryFn: () => apiGet<FolderTracks>(`/api/admin/catalog/tracks/folder/${folderId}`),
+    // Files are read in the background (ffprobe, two at a time), so follow along while any are
+    // queued. Unread files with nothing queued are only waiting on the next startup or a "Read
+    // tracks again", so those get a slower check instead of none.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      if (data.reading > 0) return 3000;
+      return data.report.unread.length > 0 ? 15000 : false;
+    },
+  });
+}
+
+export function useSaveFolderTracks(folderId: string) {
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidateTracks();
+  return useMutation({
+    mutationFn: (naming: TrackNaming) => apiPut<FolderTracks>(`/api/admin/catalog/tracks/folder/${folderId}`, naming),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["admin-folder-tracks", folderId], data);
+      invalidate();
+    },
+  });
+}
+
+/** Queues every file below the folder to be read again; the panel's polling picks up the rest. */
+export function useReadFolderTracks(folderId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiPost<{ queued: number; reading: number }>(`/api/admin/catalog/tracks/folder/${folderId}/read`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-folder-tracks", folderId] }),
+  });
+}
+
+export function useVideoTracks(fileId: string) {
+  return useQuery({
+    queryKey: ["admin-video-tracks", fileId],
+    queryFn: () => apiGet<VideoTracks>(`/api/admin/catalog/tracks/video/${fileId}`),
+    // An unread file is usually just queued behind others; check back until it's been read.
+    refetchInterval: (query) => (query.state.data && !query.state.data.tracks ? 5000 : false),
+  });
+}
+
+export function useSaveVideoTracks(fileId: string) {
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidateTracks();
+  return useMutation({
+    mutationFn: (naming: TrackNaming) => apiPut<VideoTracks>(`/api/admin/catalog/tracks/video/${fileId}`, naming),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["admin-video-tracks", fileId], data);
+      invalidate();
+    },
+  });
+}
+
+/** Reads this one file now (a few seconds) and answers with the result. */
+export function useReadVideoTracks(fileId: string) {
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidateTracks();
+  return useMutation({
+    mutationFn: () => apiPost<VideoTracks>(`/api/admin/catalog/tracks/video/${fileId}/read`),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["admin-video-tracks", fileId], data);
+      invalidate();
     },
   });
 }

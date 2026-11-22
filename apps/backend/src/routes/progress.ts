@@ -49,7 +49,7 @@ router.post("/", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Invalid payload" });
     return;
   }
-  if (subtitleSource !== undefined && !["off", "external", "restart"].includes(subtitleSource)) {
+  if (subtitleSource !== undefined && !["off", "external", "restart", "embedded"].includes(subtitleSource)) {
     res.status(400).json({ error: "Invalid subtitleSource" });
     return;
   }

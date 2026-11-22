@@ -7,6 +7,7 @@ import EpisodeNamingPanel, { SeasonField } from "../../components/admin/EpisodeN
 import PublishEpisodesPanel from "../../components/admin/PublishEpisodesPanel";
 import FolderPublishRule from "../../components/admin/FolderPublishRule";
 import CatalogChildrenList from "../../components/admin/CatalogChildrenList";
+import { FolderTracksPanel } from "../../components/admin/TracksPanel";
 import NotFoundPage from "../NotFoundPage";
 
 export default function AdminCatalogFolderPage() {
@@ -26,6 +27,12 @@ export default function AdminCatalogFolderPage() {
   const { folder, breadcrumbs, childFolders, childVideos, isTopLevel, episodeSeries } = data;
   // A matched series can have its episodes named; only a TV match has seasons to name them from.
   const isSeries = isTopLevel && folder.artwork?.tmdbType === "tv";
+  // Breadcrumbs run root-first and end with this folder, so the one before it is its parent. A
+  // season's track names fall back to its series' (episodeSeries names it when it's matched).
+  const parentCrumb = breadcrumbs.length >= 2 ? breadcrumbs[breadcrumbs.length - 2] : null;
+  const tracksInheritFrom = isTopLevel
+    ? null
+    : (episodeSeries?.title ?? (parentCrumb ? (parentCrumb.title ?? parentCrumb.driveName) : null));
 
   return (
     <AdminShell section="catalog" title={folder.title ?? folder.driveName}>
@@ -87,6 +94,10 @@ export default function AdminCatalogFolderPage() {
             }
           />
         </section>
+      )}
+
+      {(childVideos.length > 0 || childFolders.length > 0) && (
+        <FolderTracksPanel folderId={folderId!} inheritsFrom={tracksInheritFrom} />
       )}
 
       {childVideos.length > 0 && (

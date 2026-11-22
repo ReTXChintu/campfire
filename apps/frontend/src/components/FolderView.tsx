@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { CatalogListItem, CatalogVideoListItem } from "../lib/catalogListItem";
-import type { TitleMeta, WatchProgress } from "../lib/types";
+import type { TitleLanguages, TitleMeta, WatchProgress } from "../lib/types";
+import { languageFacts } from "../lib/titleLanguages";
 import CastRow from "./CastRow";
 import DetailHeader from "./DetailHeader";
 import EpisodeRow from "./EpisodeRow";
@@ -17,6 +18,7 @@ export default function FolderView({
   backHref,
   thumbnailFileId,
   meta,
+  languages,
   items,
   progressByFileId,
 }: {
@@ -26,6 +28,8 @@ export default function FolderView({
   thumbnailFileId: string | null;
   /** What TMDb knows about this title (see lib/types' TitleMeta). */
   meta: TitleMeta;
+  /** Audio/subtitle languages across its published videos; hidden while null. */
+  languages?: TitleLanguages | null;
   items: CatalogListItem[];
   progressByFileId: Map<string, WatchProgress>;
 }) {
@@ -47,6 +51,8 @@ export default function FolderView({
           { label: "Items", value: items.length },
           ...(folders.length > 0 ? [{ label: "Folders", value: folders.length }] : []),
           ...(formats.length > 0 ? [{ label: "Formats", value: formats.join(", ") }] : []),
+          // A shelf can mix films and episodes, so a partial language is just "some".
+          ...languageFacts(languages, "some"),
         ]}
         actions={
           first && (

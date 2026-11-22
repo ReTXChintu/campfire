@@ -6,7 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config.dart';
+import '../models/tracks.dart';
 import '../platform_info.dart';
+import '../services/api_client.dart';
 import '../services/app_update_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
@@ -15,12 +17,15 @@ import '../widgets/join_party_action.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/ui_kit.dart';
 
+part 'profile_languages.dart';
+
 /// Profile / Settings — a real destination for everything the old avatar `PopupMenuButton` hid
 /// (email, version, admin links, sign out), plus the TV pairing explanation.
 ///
 /// Every row here maps to something that actually exists. There is no playback-quality setting:
-/// every title streams at its one source quality, so a picker could only ever offer that. Audio
-/// and subtitle tracks are chosen in the player, per title. The version check is
+/// every title streams at its one source quality, so a picker could only ever offer that. The
+/// languages here are where every title *starts* (`PUT /auth/me/languages`); a pick made in the
+/// player still wins for that title and its series. The version check is
 /// [AppUpdateService] / `GET /api/app-version`, pairing is the backend's `/auth/pair/*` flow. No
 /// placeholder toggles.
 class ProfileScreen extends StatefulWidget {
@@ -168,6 +173,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 subtitle: 'Enter a code someone shared with you',
                 onTap: () => promptJoinWatchParty(context),
               ),
+              if (user != null && user.supportsLanguages) ...[
+                const _GroupLabel('Languages'),
+                LanguageSettingsSection(
+                  prefs: user.languages,
+                  loadOptions: AuthService.fetchLanguageOptions,
+                  onSave: auth.saveLanguages,
+                ),
+              ],
               const _GroupLabel('Library'),
               SettingsRow(
                 icon: Icons.auto_awesome_outlined,

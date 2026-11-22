@@ -4,6 +4,7 @@ import { ApiError } from "../../lib/api";
 import AdminShell from "../../components/admin/AdminShell";
 import VideoCurationForm from "../../components/admin/VideoCurationForm";
 import ArtworkPanel from "../../components/admin/ArtworkPanel";
+import { VideoTracksPanel } from "../../components/admin/TracksPanel";
 import NotFoundPage from "../NotFoundPage";
 
 export default function AdminCatalogVideoPage() {
@@ -80,6 +81,8 @@ export default function AdminCatalogVideoPage() {
           />
         </div>
       )}
+
+      <VideoTracksPanel fileId={fileId!} />
 
       <section className="mt-10 rounded-xl border border-danger/30 bg-danger-soft p-4">
         <h2 className="text-sm font-semibold text-danger">Danger zone</h2>

@@ -5,7 +5,9 @@ import { getDb } from "./mongodb";
 // "restart" is a raw ffprobe stream index, only meaningful for the live-extracted-on-seek
 // subtitle path non-native/non-MKV content uses (see routes/subtitle.ts). "off" is an explicit
 // choice to disable subtitles, distinct from having no saved preference at all (absent field).
-export type SubtitleSource = "off" | "external" | "restart";
+// "embedded" is a subtitle stream inside the file itself, remembered by language/title (the apps'
+// player, which can show those directly).
+export type SubtitleSource = "off" | "external" | "restart" | "embedded";
 
 export type WatchProgress = {
   userId: string;
@@ -88,6 +90,24 @@ export async function getMostRecentPreferenceForFolder(
     },
     { sort: { updatedAt: -1 } },
   );
+}
+
+/** The viewer's latest audio pick and latest subtitle pick anywhere in a series (every season),
+ * each looked up on its own — picking subtitles on one episode shouldn't hide the audio picked on
+ * another. */
+export async function getSeriesPreferences(userId: string, folderIds: string[], excludeFileId: string) {
+  const col = await collection();
+  const base = { userId, parentFolderId: { $in: folderIds }, fileId: { $ne: excludeFileId } };
+  const [audio, subtitles] = await Promise.all([
+    // A save with both fields null carries no pick (the player clears them when "Default" is
+    // chosen), so it mustn't hide a real pick made on another episode.
+    col.findOne(
+      { ...base, $or: [{ audioLanguage: { $nin: [null] } }, { audioTitle: { $nin: [null] } }] },
+      { sort: { updatedAt: -1 } },
+    ),
+    col.findOne({ ...base, subtitleSource: { $exists: true } }, { sort: { updatedAt: -1 } }),
+  ]);
+  return { audio, subtitles };
 }
 
 /** Every user's progress on one video — the admin "Delete video" action. */

@@ -1,6 +1,7 @@
 import { getDb } from "./mongodb";
 import type { RenditionHeight } from "./qualityLadder";
 import type { ArtworkFields } from "./artwork";
+import type { FileTracks, TrackNaming } from "./mediaTracks";
 
 export type CatalogVideoStatus = "pending" | "curated" | "published";
 
@@ -38,6 +39,10 @@ export type CatalogVideo = {
   titleOverridden: boolean;
   introOverridden: boolean; // covers introStart + introEnd together
   renditions: CatalogVideoRenditions;
+  // The file's audio/subtitle tracks, read once in the background (lib/mediaTracks.ts), and this
+  // video's own names/defaults for them, layered over its season's and series'.
+  tracks?: FileTracks | null;
+  trackNaming?: TrackNaming | null;
   createdAt: Date;
   curatedAt: Date | null;
   curatedBy: string | null;

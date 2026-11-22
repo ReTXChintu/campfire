@@ -553,6 +553,8 @@ export default function WatchPage() {
                 initialSubtitleTitle={video.initialSubtitleTitle}
                 initialAudioLanguage={video.initialAudioLanguage}
                 initialAudioTitle={video.initialAudioTitle}
+                // A watch party keeps the subtitle behaviour it always had.
+                startSubtitle={partyId ? null : (video.startSubtitle ?? null)}
                 upNext={video.upNext ?? null}
                 suggestions={video.suggestions ?? []}
                 watchPartySync={watchPartySyncProp}

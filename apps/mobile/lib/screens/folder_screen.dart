@@ -139,6 +139,10 @@ class _FolderScreenState extends State<FolderScreen> {
                         if (data.isSeries && episodes.isNotEmpty) '${episodes.length} in this season',
                       ],
                     ),
+                    if (data.languages?.isEmpty == false) ...[
+                      const SizedBox(height: 8),
+                      TitleLanguagesLine(languages: data.languages),
+                    ],
                     if (data.meta.tagline != null) ...[
                       const SizedBox(height: 8),
                       Text(

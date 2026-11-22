@@ -17,7 +17,19 @@ import {
   getProgressForFolder,
   getMostRecentPreferenceForFolder,
   getRecentInProgress,
+  getSeriesPreferences,
 } from "../lib/progress";
+import {
+  effectiveTracks,
+  folderLanguages,
+  folderTree,
+  languageOptions,
+  namingForVideo,
+  seriesFolderOf,
+  startTracks,
+  titleLanguages,
+} from "../lib/mediaTracks";
+import { getUserById } from "../lib/users";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
@@ -350,6 +362,8 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
       // `year` and `overview` are part of this — same field names as before, so an older client
       // keeps reading exactly what it used to and ignores the rest.
       ...titleMeta(folder.artwork, "folder", folderId),
+      // Audio and subtitle languages across its episodes (lib/mediaTracks.ts); null until read.
+      languages: await folderLanguages(folderId),
       items,
       progress: progressList,
     });
@@ -382,6 +396,7 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
     backHref,
     thumbnailFileId: listedThumbnailFileId(folder),
     ...titleMeta(folder.artwork, "folder", folderId),
+    languages: await folderLanguages(folderId),
     seasons,
     selectedSeasonId,
     seasonItems,
@@ -475,6 +490,33 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     .flatMap((s) => s.subtitles)
     .map((s, i) => ({ ...s, index: i }));
 
+  // Audio and subtitle tracks under the names an admin gave them, and which ones to start on —
+  // the viewer's own picks first, then their profile's languages, then the admin's default (see
+  // startTracks in lib/mediaTracks.ts). Older apps keep using the initial* fields above.
+  const [{ merged: naming, folders }, user] = await Promise.all([
+    namingForVideo(video),
+    getUserById(req.authUser!.userId),
+  ]);
+  const tracks = video.tracks && !video.tracks.error ? video.tracks : null;
+  const viewerTracks = effectiveTracks(tracks, naming);
+  const series = seriesFolderOf(folders);
+  const seriesPrefs = series
+    ? await getSeriesPreferences(
+        req.authUser!.userId,
+        (await folderTree(series._id)).map((f) => f._id),
+        fileId,
+      )
+    : { audio: null, subtitles: null };
+  const start = startTracks({
+    raw: tracks,
+    ...viewerTracks,
+    external: subtitles,
+    own: progress,
+    series: seriesPrefs,
+    profile: user?.languages ?? null,
+    naming,
+  });
+
   res.json({
     fileId,
     title: video.title,
@@ -505,10 +547,22 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     seekMode,
     durationSeconds: video.durationSeconds,
     subtitles,
+    // Null until the file's tracks have been read; an app then falls back to the file's own.
+    audioTracks: tracks ? viewerTracks.audio : null,
+    subtitleTracks: tracks ? viewerTracks.subtitles : null,
+    startAudio: start.audio,
+    startSubtitle: start.subtitle,
+    languages: tracks ? titleLanguages([{ ...viewerTracks, external: subtitles }]) : null,
     introStart: video.introStart,
     introEnd: video.introEnd,
     outroStart: video.outroStart,
   });
+});
+
+/** Languages to offer in the profile and admin pickers: common ones plus all in the library. */
+router.get("/languages", requireAuth, async (_req, res) => {
+  res.setHeader("cache-control", "private, max-age=300");
+  res.json({ languages: await languageOptions() });
 });
 
 export default router;

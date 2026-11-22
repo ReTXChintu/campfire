@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/title_meta.dart';
+import '../models/tracks.dart';
 import '../theme/app_theme.dart';
 import 'authed_network_image.dart';
 
@@ -96,6 +97,43 @@ class MetaLine extends StatelessWidget {
             ],
           ),
       ],
+    );
+  }
+}
+
+/// The languages a title can be watched in — "Audio Hindi, Tamil · Subtitles English", with a
+/// language only some episodes have marked "(some episodes)". One run of text rather than chips,
+/// so a long list wraps onto the next line instead of overflowing a row. Nothing when the backend
+/// hasn't read the files yet.
+class TitleLanguagesLine extends StatelessWidget {
+  final TitleLanguages? languages;
+  final double fontSize;
+
+  const TitleLanguagesLine({super.key, required this.languages, this.fontSize = 12.5});
+
+  @override
+  Widget build(BuildContext context) {
+    final languages = this.languages;
+    if (languages == null || languages.isEmpty) return const SizedBox.shrink();
+    String names(List<TitleLanguage> list) =>
+        list.map((l) => l.partial ? '${l.name} (some episodes)' : l.name).join(', ');
+    final label = TextStyle(color: AppColors.textTertiary, fontSize: fontSize, fontWeight: FontWeight.w600);
+    final value = TextStyle(color: AppColors.textSecondary, fontSize: fontSize);
+    final spans = <InlineSpan>[];
+    void add(String heading, List<TitleLanguage> list) {
+      if (list.isEmpty) return;
+      if (spans.isNotEmpty) spans.add(TextSpan(text: '  ·  ', style: label));
+      spans
+        ..add(TextSpan(text: '$heading ', style: label))
+        ..add(TextSpan(text: names(list), style: value));
+    }
+
+    add('Audio', languages.audio);
+    add('Subtitles', languages.subtitles);
+    return Semantics(
+      label: languages.parts.join('. '),
+      excludeSemantics: true,
+      child: Text.rich(TextSpan(children: spans), style: const TextStyle(height: 1.4)),
     );
   }
 }

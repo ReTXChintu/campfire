@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import throttle from "lodash.throttle";
-import type { ProbeResult, ConvertedSubtitle, WatchPartySyncState } from "../lib/types";
+import type { ProbeResult, ConvertedSubtitle, StartSubtitle, WatchPartySyncState } from "../lib/types";
 import { languageName } from "../lib/languageNames";
 import { API_URL, apiGet, apiPost, apiPostKeepalive } from "../lib/api";
 import { useMediaToken } from "../lib/mediaToken";
@@ -64,6 +64,10 @@ type Props = {
   initialSubtitleTitle: string | null;
   initialAudioLanguage: string | null;
   initialAudioTitle: string | null;
+  /** Where the server says to start (this video's pick, the series' last pick, the viewer's
+   * profile languages, the admin default — in that order). Only an uploaded subtitle or "off" can
+   * be shown here; an embedded pick, or none, leaves the initialSubtitle* logic to decide. */
+  startSubtitle?: StartSubtitle | null;
   /** The up-next card's choice and the end screen's "more like this" (lib/upNext.ts); absent from
    * an older backend, which keeps the plain "Next Episode" button. */
   upNext?: UpNextItem | null;
@@ -168,6 +172,7 @@ export default function VideoPlayer({
   initialSubtitleTitle,
   initialAudioLanguage,
   initialAudioTitle,
+  startSubtitle = null,
   upNext = null,
   suggestions = [],
   watchPartySync,
@@ -251,6 +256,10 @@ export default function VideoPlayer({
   // native-mode only — subtitles is available synchronously (a prop, not fetched), so this can
   // resolve by name right away instead of waiting on probe the way restart-mode/audio do.
   const [nativeSubtitleIndex, setNativeSubtitleIndex] = useState<number | null>(() => {
+    if (startSubtitle?.source === "off") return null;
+    if (startSubtitle?.source === "external" && subtitles.some((s) => s.index === startSubtitle.index)) {
+      return startSubtitle.index;
+    }
     if (initialSubtitleSource !== "external") return null;
     if (initialSubtitleLanguage == null && initialSubtitleTitle == null) {
       // No name recorded at all (older saved preference, or one with no language/title metadata

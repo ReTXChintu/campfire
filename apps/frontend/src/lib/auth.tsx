@@ -4,8 +4,17 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, getToken, setToken, clearToken, SIGNED_OUT_EVENT } from "./api";
+import type { LanguagePrefs } from "./types";
 
-type Me = { userId: string; email: string; name: string | null; avatarUrl: string | null; isAdmin: boolean };
+type Me = {
+  userId: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  isAdmin: boolean;
+  /** The languages every title starts in; null when never set, absent from an older backend. */
+  languages?: LanguagePrefs | null;
+};
 
 type AuthContextValue = {
   token: string | null;

@@ -6,7 +6,8 @@ import { EmptyState } from "./ui/States";
 import { formatLabel } from "../lib/mediaFormat";
 import { PAGE_X } from "../lib/layout";
 import CastRow from "./CastRow";
-import type { TitleMeta, WatchProgress } from "../lib/types";
+import type { TitleLanguages, TitleMeta, WatchProgress } from "../lib/types";
+import { languageFacts } from "../lib/titleLanguages";
 import type { CatalogListItem, CatalogVideoListItem } from "../lib/catalogListItem";
 
 /** The most recently touched in-progress episode, which is what "Resume" should open. Falls back
@@ -36,6 +37,7 @@ export default function SeriesView({
   backHref,
   thumbnailFileId,
   meta,
+  languages,
   seasons,
   selectedSeasonId,
   seasonItems,
@@ -48,6 +50,8 @@ export default function SeriesView({
   thumbnailFileId: string | null;
   /** What TMDb knows about the series (see lib/types' TitleMeta). */
   meta: TitleMeta;
+  /** Audio/subtitle languages across its published episodes; hidden while null. */
+  languages?: TitleLanguages | null;
   seasons: { id: string; name: string }[];
   selectedSeasonId: string;
   seasonItems: CatalogListItem[];
@@ -78,6 +82,7 @@ export default function SeriesView({
           },
           ...(specialItems.length > 0 ? [{ label: "Specials", value: specialItems.length }] : []),
           ...(formats.length > 0 ? [{ label: "Formats", value: formats.join(", ") }] : []),
+          ...languageFacts(languages),
         ]}
         actions={
           resume && (

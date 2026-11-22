@@ -7,11 +7,13 @@ import {
   EmailAlreadyRegisteredError,
   getUserByEmail,
   getUserById,
+  setLanguagePrefs,
   resetPassword,
   verifyPassword,
 } from "../lib/users";
 import { requireAuth } from "../middleware/auth";
 import { isAdminEmail } from "../lib/admin";
+import { parseLanguagePrefs } from "../lib/mediaTracks";
 
 const router = Router();
 
@@ -103,7 +105,26 @@ router.get("/me", requireAuth, async (req, res) => {
     name: user.name,
     avatarUrl: user.avatarUrl,
     isAdmin: isAdminEmail(user.email),
+    // Audio/subtitle languages to start every title in (null: never set).
+    languages: user.languages ?? null,
   });
+});
+
+/** Saves (or, with `null`, clears) the viewer's language preferences. */
+router.put("/me/languages", requireAuth, async (req, res) => {
+  const body = req.body as { languages?: unknown };
+  if (body?.languages === null) {
+    await setLanguagePrefs(req.authUser!.userId, null);
+    res.json({ languages: null });
+    return;
+  }
+  const prefs = parseLanguagePrefs(body?.languages);
+  if (typeof prefs === "string") {
+    res.status(400).json({ error: prefs });
+    return;
+  }
+  await setLanguagePrefs(req.authUser!.userId, prefs);
+  res.json({ languages: prefs });
 });
 
 // TV pairing-code login — a TV isn't logged in yet, so it shows a short human-typeable code (and a
