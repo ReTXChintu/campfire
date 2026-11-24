@@ -5,6 +5,7 @@ import SpotlightCarousel from "../components/SpotlightCarousel";
 import Rail, { RailItem } from "../components/Rail";
 import { genreShelves } from "../lib/discovery";
 import VideoCard from "../components/VideoCard";
+import ForYouRails from "../components/ForYouRails";
 import FolderCard from "../components/FolderCard";
 import RequestModal from "../components/requests/RequestModal";
 import { CardSkeletonRail, EmptyState, ErrorCard, Skeleton } from "../components/ui/States";
@@ -90,6 +91,8 @@ export default function LibraryPage() {
           ))}
         </Rail>
       )}
+
+      <ForYouRails items={[...folders, ...videos]} />
 
       {folders.length > 0 && (
         <Rail title="Series" eyebrow={`${folders.length} in your library`} seeAllHref="/discover?type=series">

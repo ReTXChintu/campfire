@@ -7,6 +7,7 @@ import { seedAdminUser } from "./lib/users";
 import { ensureIndexes as ensureDevicePairingIndexes } from "./lib/devicePairings";
 import { ensureIndexes as ensureMediaRequestIndexes } from "./lib/mediaRequests";
 import { ensureIndexes as ensureSourceIndexes, startSourceSync } from "./lib/videoSources";
+import { ensureIndexes as ensureOpinionIndexes } from "./lib/opinions";
 import { startRenditionQueue } from "./lib/renditionQueue";
 
 import authRoutes from "./routes/auth";
@@ -24,6 +25,7 @@ import watchPartyRoutes from "./routes/watchParties";
 import requestRoutes, { requestImageRouter } from "./routes/requests";
 import exploreRoutes from "./routes/explore";
 import titleRoutes from "./routes/title";
+import opinionRoutes from "./routes/opinions";
 import sourceStreamRoutes from "./routes/sourceStream";
 
 import adminScanRoutes from "./routes/admin/scan";
@@ -64,6 +66,7 @@ app.use("/api/requests", requestRoutes);
 app.use("/api/request-image", requestImageRouter);
 app.use("/api/explore", exploreRoutes);
 app.use("/api/title", titleRoutes);
+app.use("/api/opinions", opinionRoutes);
 app.use("/api/source-stream", sourceStreamRoutes);
 
 app.use("/api/admin/scan", adminScanRoutes);
@@ -89,6 +92,7 @@ Promise.all([
   ensureDevicePairingIndexes(),
   ensureMediaRequestIndexes(),
   ensureSourceIndexes(),
+  ensureOpinionIndexes(),
 ])
   .then(() => {
     startRenditionQueue();

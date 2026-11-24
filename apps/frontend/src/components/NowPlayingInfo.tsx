@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import MetaLine, { RatingChip } from "./MetaLine";
 import CastRow from "./CastRow";
+import OpinionButtons from "./OpinionButtons";
 import type { VideoResponse } from "../lib/types";
 import { airDateLabel, episodeLabel, runtimeLabel } from "../lib/tmdbFormat";
 import { hasTitleLanguages, languageListLabel } from "../lib/titleLanguages";
@@ -78,6 +79,7 @@ export default function NowPlayingInfo({ video }: { video: VideoResponse }) {
         <p className="mt-2 max-w-[80ch] text-sm leading-relaxed text-text-secondary">{video.overview}</p>
       )}
       <LanguagesLine video={video} />
+      <OpinionButtons title={video.tmdb} className="mt-4" />
       <CastRow cast={video.cast} variant="inline" />
     </section>
   );

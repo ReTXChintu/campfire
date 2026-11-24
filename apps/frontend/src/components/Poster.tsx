@@ -128,3 +128,14 @@ export function PosterAction({ label }: { label: string }) {
     </div>
   );
 }
+
+/** The tick on a title the viewer has watched. */
+export function WatchedBadge() {
+  return (
+    <span className="ml-auto grid h-5 w-5 place-items-center rounded-full bg-live" role="img" aria-label="Watched" title="Watched">
+      <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="black" strokeWidth={3} aria-hidden="true">
+        <polyline points="4 12 9 17 20 6" />
+      </svg>
+    </span>
+  );
+}

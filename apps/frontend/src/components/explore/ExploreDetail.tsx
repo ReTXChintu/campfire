@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { exploreMetaLine, libraryHref, useExploreTitle, type ExploreDetail as Detail, type ExploreOffer } from "../../lib/explore";
 import { useCreateRequest, useToggleUpvote } from "../../hooks/useRequests";
 import { Skeleton } from "../ui/States";
+import OpinionButtons from "../OpinionButtons";
 import Trailer from "../Trailer";
 import { Star } from "./ExploreRow";
 
@@ -240,6 +241,8 @@ function DetailBody({ d }: { d: Detail }) {
             {d.genres.length > 0 && <p className="text-[13px] text-text-tertiary">{d.genres.join(" · ")}</p>}
           </div>
         </div>
+
+        <OpinionButtons title={{ type: d.tmdbType, id: d.tmdbId }} />
 
         {d.tagline && <p className="text-sm italic text-text-tertiary">{d.tagline}</p>}
         {d.overview && <p className="text-sm leading-relaxed text-[#d8d1c6]">{d.overview}</p>}

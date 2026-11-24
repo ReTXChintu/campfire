@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import type { CatalogVideoListItem } from "../lib/catalogListItem";
 import type { WatchProgress } from "../lib/types";
-import Poster, { PosterAction, PosterBadge, PosterProgress } from "./Poster";
+import Poster, { PosterAction, PosterBadge, PosterProgress, WatchedBadge } from "./Poster";
+import { useOpinion } from "../lib/opinions";
 import { formatLabel, playsInBrowser, remainingLabel } from "../lib/mediaFormat";
 import { progressPercent } from "../lib/progress";
 import { RatingChip } from "./MetaLine";
@@ -25,6 +26,9 @@ export default function VideoCard({
   const remaining = progress
     ? remainingLabel(progress.positionSeconds, progress.durationSeconds, progress.completed)
     : null;
+  // What the viewer said about the film, else whether it was played to the end.
+  const opinion = useOpinion(item.tmdb);
+  const watched = opinion?.watched ?? progress?.completed;
   const browserPlayable = playsInBrowser(item.mimeType);
 
   return (
@@ -32,13 +36,7 @@ export default function VideoCard({
       <Poster path={`/api/thumbnail/${item.id}`} title={item.name} id={item.id} ratio={ratio}>
         <div className="absolute inset-x-1.5 top-1.5 flex items-start justify-between gap-2">
           <PosterBadge tone={browserPlayable ? "neutral" : "warn"}>{formatLabel(item.mimeType)}</PosterBadge>
-          {progress?.completed && (
-            <span className="grid h-5 w-5 place-items-center rounded-full bg-live" title="Watched">
-              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="black" strokeWidth={3} aria-hidden="true">
-                <polyline points="4 12 9 17 20 6" />
-              </svg>
-            </span>
-          )}
+          {watched && <WatchedBadge />}
         </div>
         <PosterAction label={percent > 0 && !progress?.completed ? "Resume" : "Play"} />
         {percent > 0 && <PosterProgress percent={percent} done={!!progress?.completed} />}

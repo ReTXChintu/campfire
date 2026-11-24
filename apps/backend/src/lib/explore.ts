@@ -529,13 +529,33 @@ export function isTmdbId(value: string): boolean {
   return /^\d{1,10}$/.test(value);
 }
 
-export async function exploreDetail(type: TmdbType, tmdbId: string, viewerId: string): Promise<ExploreDetail | null> {
-  if (!isTmdbId(tmdbId)) return null;
-  const raw = await tmdbCached<TmdbDetail>(
+function rawDetail(type: TmdbType, tmdbId: string) {
+  return tmdbCached<TmdbDetail>(
     `/${type}/${tmdbId}`,
     { language: "en-US", append_to_response: "credits,watch/providers" },
     DETAIL_TTL_MS,
   );
+}
+
+const billed = (raw: TmdbDetail) => (raw.credits?.cast ?? []).slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+/** What suggestions compare a title by (lib/forYou.ts); from the same cached answer as its panel. */
+export async function tmdbTitleFacts(type: TmdbType, tmdbId: string) {
+  const raw = await rawDetail(type, tmdbId);
+  const title = (raw?.title || raw?.name || "").trim();
+  if (!raw || !title) return null;
+  return { title, genres: (raw.genres ?? []).map((g) => g.name), cast: billed(raw).slice(0, CAST_SIZE).map((c) => c.name) };
+}
+
+/** What TMDb says people who liked a title also liked. */
+export async function tmdbRecommendations(type: TmdbType, tmdbId: string): Promise<Omit<ExploreItem, "inLibrary">[]> {
+  const spec: RowSpec = { id: "recommended", title: "", sources: [{ path: `/${type}/${tmdbId}/recommendations`, type }] };
+  return buildRow(spec, await genreNames());
+}
+
+export async function exploreDetail(type: TmdbType, tmdbId: string, viewerId: string): Promise<ExploreDetail | null> {
+  if (!isTmdbId(tmdbId)) return null;
+  const raw = await rawDetail(type, tmdbId);
   if (!raw || !(raw.title || raw.name)) return null;
 
   const title = (raw.title || raw.name || "").trim();
@@ -574,9 +594,7 @@ export async function exploreDetail(type: TmdbType, tmdbId: string, viewerId: st
     runtime: raw.runtime || raw.episode_run_time?.[0] || null,
     seasons: type === "tv" ? (raw.number_of_seasons ?? null) : null,
     episodes: type === "tv" ? (raw.number_of_episodes ?? null) : null,
-    cast: (raw.credits?.cast ?? [])
-      .slice()
-      .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+    cast: billed(raw)
       .slice(0, CAST_SIZE)
       .map((c) => ({ name: c.name, character: c.character?.trim() || null, profileUrl: image("w185", c.profile_path) })),
     link,

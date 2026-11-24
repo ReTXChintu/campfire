@@ -169,7 +169,7 @@ async function api(path, { token, method = "GET", body } = {}) {
 }
 
 try {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 180; i++) {
     if ((await fetch(`${BASE}/api/health/db`).catch(() => null))?.ok) break;
     await sleep(500);
   }

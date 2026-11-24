@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { WatchedBadge } from "../Poster";
+import { useOpinion } from "../../lib/opinions";
 import type { ExploreItem, ExploreRow as Row, ExploreService } from "../../lib/explore";
 
 const DRIFT_PX_PER_FRAME = 0.45;
@@ -107,11 +109,12 @@ function PosterCard({
 }) {
   const logos = item.services.map((id) => services.get(id)).filter((s): s is ExploreService => Boolean(s?.logoUrl));
   const kind = item.tmdbType === "tv" ? "Series" : "Film";
+  const watched = useOpinion({ type: item.tmdbType, id: item.tmdbId })?.watched;
   return (
     <button
       type="button"
       onClick={() => onOpen(item)}
-      aria-label={`${item.title}${item.year ? ` (${item.year})` : ""}, ${kind}${item.inLibrary ? ", in Campfire" : ""}`}
+      aria-label={`${item.title}${item.year ? ` (${item.year})` : ""}, ${kind}${item.inLibrary ? ", in Campfire" : ""}${watched ? ", watched" : ""}`}
       className="group w-[140px] shrink-0 text-left sm:w-[160px]"
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-xl border border-divider bg-surface transition group-hover:border-divider-strong group-focus-visible:ring-2 group-focus-visible:ring-accent">
@@ -128,6 +131,11 @@ function PosterCard({
           <span className="absolute left-2 top-2 rounded-md bg-live px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-background">
             IN CAMPFIRE
           </span>
+        )}
+        {watched && (
+          <div className="absolute right-2 top-2 flex">
+            <WatchedBadge />
+          </div>
         )}
         {logos.length > 0 && (
           <div className="absolute bottom-2 right-2 flex gap-1">

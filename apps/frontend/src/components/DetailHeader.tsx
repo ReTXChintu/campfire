@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import Poster from "./Poster";
 import MetaLine from "./MetaLine";
+import OpinionButtons from "./OpinionButtons";
 import TitleWordmark from "./TitleWordmark";
 import { useAuthedImage } from "../hooks/useAuthedImage";
 import { PAGE_X } from "../lib/layout";
@@ -90,6 +91,7 @@ export default function DetailHeader({
               <p className="mt-3 line-clamp-4 max-w-[68ch] text-sm leading-relaxed text-text-secondary">{overview}</p>
             )}
             {actions && <div className="mt-5 flex flex-wrap gap-2.5">{actions}</div>}
+            <OpinionButtons title={meta.tmdb} className="mt-4" />
             {aside && <div className="mt-5">{aside}</div>}
           </div>
 

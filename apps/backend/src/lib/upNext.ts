@@ -4,6 +4,8 @@ import { listPublishedVideosByParent, type CatalogVideo } from "./catalogVideos"
 import { naturalSort, orderEpisodes } from "./catalogListItem";
 import { getProgressForFiles } from "./progress";
 import { guessSeasonNumber } from "./episodeArtwork";
+import { settledTitles } from "./opinions";
+import { tmdbKey, tmdbRefOf } from "./tmdbRef";
 import type { CatalogArtwork } from "./artwork";
 
 /**
@@ -116,8 +118,8 @@ type Candidate = { kind: "folder" | "video"; id: string; title: string; artwork:
 /**
  * The library's best matches for what was just watched. A title scores for every genre it shares
  * (3 each) and every lead actor it shares (2 each), with TMDb's score breaking ties, so "more like
- * this" really is like this. Films the viewer has already finished are left out; so is the title
- * itself. With nothing to compare against (an unmatched title), it falls back to the best-rated,
+ * this" really is like this. Titles the viewer has watched, liked or disliked are left out; so is
+ * the title itself. With nothing to compare against (an unmatched title), it falls back to the best-rated,
  * then the most recently added.
  */
 export async function suggestionsFor(userId: string, video: CatalogVideo, limit = 6): Promise<UpNextItem[]> {
@@ -127,19 +129,24 @@ export async function suggestionsFor(userId: string, video: CatalogVideo, limit 
   const genres = new Set(source?.genres ?? []);
   const cast = new Set((source?.cast ?? []).slice(0, 8).map((c) => c.name));
 
-  const [folders, films] = await Promise.all([
+  const [folders, films, settled] = await Promise.all([
     listPublishedFoldersByParent(env.driveRootFolderId),
     listPublishedVideosByParent(env.driveRootFolderId),
+    settledTitles(userId),
   ]);
+  const isSettled = (doc: Pick<CatalogVideo, "artwork">) => {
+    const ref = tmdbRefOf(doc);
+    return !!ref && settled.has(tmdbKey(ref));
+  };
   const finished = new Set(
     (await getProgressForFiles(userId, films.map((f) => f._id))).filter((p) => p.completed).map((p) => p.fileId),
   );
   const candidates: Candidate[] = [
     ...folders
-      .filter((f) => f._id !== series?._id)
+      .filter((f) => f._id !== series?._id && !isSettled(f))
       .map((f) => ({ kind: "folder" as const, id: f._id, title: f.title ?? f.driveName, artwork: f.artwork, at: f.curatedAt?.getTime?.() ?? 0 })),
     ...films
-      .filter((f) => f._id !== video._id && !finished.has(f._id))
+      .filter((f) => f._id !== video._id && !finished.has(f._id) && !isSettled(f))
       .map((f) => ({ kind: "video" as const, id: f._id, title: f.title ?? f.driveName, artwork: f.artwork, at: f.curatedAt?.getTime?.() ?? 0 })),
   ];
 

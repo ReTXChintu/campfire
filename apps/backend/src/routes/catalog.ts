@@ -32,6 +32,7 @@ import {
 import { getUserById } from "../lib/users";
 import { playersFor } from "../lib/videoSources";
 import { tmdbRefOf } from "../lib/tmdbRef";
+import { markedWatched, titleKey } from "../lib/opinions";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
@@ -210,19 +211,29 @@ router.get("/library", requireAuth, async (req, res) => {
   // knows (matches heroPlayHref/heroInfoHref's own "hand back a usable href" convention).
   const heroTargets = await toSlideTargets(hero as SpotlightSource);
 
-  const continueWatching = await getRecentInProgress(req.authUser!.userId, 12);
+  // A title marked watched since it was last played isn't offered to carry on with. More than
+  // twelve are read so leaving some out doesn't shorten the row.
+  const [continueWatching, watched] = await Promise.all([
+    getRecentInProgress(req.authUser!.userId, 40),
+    markedWatched(req.authUser!.userId),
+  ]);
   const continueWatchingItems = (
     await Promise.all(
       continueWatching.map(async (progress) => {
         const video = await getCatalogVideo(progress.fileId);
         if (!video || video.status !== "published") return null; // unpublished or deleted — skip rather than break the row
+        const ref = tmdbRefOf(video);
+        const watchedAt = ref ? watched.get(titleKey(ref.type, ref.id)) : undefined;
+        if (watchedAt && watchedAt >= progress.updatedAt) return null;
         return {
           item: { kind: "video" as const, id: video._id, name: video.title!, mimeType: video.mimeType },
           progress,
         };
       }),
     )
-  ).filter((v): v is NonNullable<typeof v> => v !== null);
+  )
+    .filter((v): v is NonNullable<typeof v> => v !== null)
+    .slice(0, 12);
 
   // --- Spotlight carousel -------------------------------------------------------------------
   // Library picks first (most recently curated), then any request that has since been published,
