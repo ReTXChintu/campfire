@@ -51,6 +51,8 @@ export function isSupportedReferenceLink(raw: string): boolean {
 
 const POSTER_BASE = "https://image.tmdb.org/t/p/w342";
 const LOOKUP_TIMEOUT_MS = 6000;
+const MAX_ATTEMPTS = 6;
+const RETRY_DELAY_MS = 120;
 
 export async function tmdbFetch<T>(path: string, params: Record<string, string>): Promise<T | null> {
   const key = env.tmdbApiKey;
@@ -65,11 +67,18 @@ export async function tmdbFetch<T>(path: string, params: Record<string, string>)
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: controller.signal, headers: { accept: "application/json" } });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await fetch(url, { signal: controller.signal, headers: { accept: "application/json" } });
+        if (!res.ok) return null;
+        return (await res.json()) as T;
+      } catch {
+        // A dropped connection, which some networks do to TMDb often, is tried again in the time left.
+        // An answer that isn't good is not.
+        if (controller.signal.aborted || attempt === MAX_ATTEMPTS) return null;
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+      }
+    }
   } finally {
     clearTimeout(timer);
   }

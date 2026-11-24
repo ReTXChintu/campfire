@@ -34,6 +34,8 @@ function check(name, condition, detail) {
 let calls = [];
 let down = false;
 let broken = null; // a path that fails
+let flaky = false; // cuts each address's first two connections
+const cut = new Map();
 let generation = 1;
 const title = (id, type) => ({
   id, media_type: type, ...(type === "movie" ? { title: `Film ${id}`, release_date: "2020-01-01" } : { name: `Show ${id}`, first_air_date: "2020-01-01" }),
@@ -43,6 +45,10 @@ const mock = createServer((req, res) => {
   const url = new URL(req.url, "http://mock");
   calls.push(url);
   const json = (status, body) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
+  if (flaky && (cut.get(req.url) ?? 0) < 2) {
+    cut.set(req.url, (cut.get(req.url) ?? 0) + 1);
+    return req.socket.destroy();
+  }
   if (down || (broken && url.pathname === broken)) return json(500, {});
   if (url.pathname.startsWith("/genre/")) return json(200, { genres: [{ id: 28, name: "Action" }] });
   if (url.pathname.endsWith("/images")) {
@@ -196,6 +202,11 @@ try {
   check("a section that fails is left out", partial.status === 200 && partial.body.sections.length === 5 && !partial.body.sections.some((s) => s.id === "cinemas"), partial.body.sections?.map((s) => s.id));
   check("and that copy isn't kept", (await db.collection("feedPages").countDocuments({ _id: "all:0" })) === 0);
   broken = null;
+  flaky = true;
+  await start();
+  const bumpy = await feed();
+  check("dropped connections are tried again", bumpy.body.sections?.length === 6 && bumpy.body.hero.every((h) => h.logoUrl) && cut.size > 10, [bumpy.body.sections?.length, cut.size]);
+  flaky = false;
 
   // --- a section on its own ---
   const one = (await section("action")).body;
