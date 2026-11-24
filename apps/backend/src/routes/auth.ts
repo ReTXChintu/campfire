@@ -71,7 +71,7 @@ router.post("/signup", async (req, res) => {
 });
 
 // No email/token step, no old-password check — personal-use app, forgetting the password
-// shouldn't lock anyone out. See lib/users.ts's resetPassword for the admin-account caveat.
+// shouldn't lock anyone out. The admin account is refused (lib/users.ts's resetPassword).
 router.post("/reset-password", async (req, res) => {
   const { email, newPassword } = req.body as { email?: string; newPassword?: string };
   if (!email || !newPassword) {
@@ -85,7 +85,7 @@ router.post("/reset-password", async (req, res) => {
 
   const updated = await resetPassword(email, newPassword);
   if (!updated) {
-    res.status(404).json({ error: "No account with that email" });
+    res.status(404).json({ error: "No account with that email can be reset here" });
     return;
   }
 

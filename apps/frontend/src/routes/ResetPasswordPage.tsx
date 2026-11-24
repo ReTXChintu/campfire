@@ -104,9 +104,8 @@ export default function ResetPasswordPage() {
         </form>
 
         <p className="rounded-lg border border-divider bg-surface px-3.5 py-3 text-xs text-text-tertiary">
-          Resetting the seeded admin account? Also update <code className="font-mono">ADMIN_PASSWORD</code> in the
-          backend&apos;s <code className="font-mono">.env</code> — otherwise this change reverts on the next server
-          restart.
+          The admin account cannot be reset here. Set <code className="font-mono">ADMIN_PASSWORD</code> in the
+          backend&apos;s <code className="font-mono">.env</code> and restart the server.
         </p>
 
         <p className="text-sm text-text-secondary">

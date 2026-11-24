@@ -328,53 +328,65 @@ export default function SettingsPage() {
           )}
         </Panel>
 
-        <Panel
-          title="Change password"
-          description="Sets a new password for this account straight away. There is no email confirmation."
-        >
-          <form onSubmit={onChangePassword} className="grid gap-4">
-            <PasswordField
-              id="settings-new-password"
-              label="New password"
-              value={newPassword}
-              onChange={(value) => {
-                setNewPassword(value);
-                setSaved(false);
-              }}
-              autoComplete="new-password"
-              minLength={8}
-              hint="At least 8 characters."
-            />
-            <PasswordField
-              id="settings-confirm-password"
-              label="Confirm new password"
-              value={confirmPassword}
-              onChange={(value) => {
-                setConfirmPassword(value);
-                setSaved(false);
-              }}
-              autoComplete="new-password"
-              minLength={8}
-            />
-            {error && (
-              <p role="alert" className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
-                {error}
-              </p>
-            )}
-            {saved && (
-              <p className="rounded-lg border border-live/30 bg-live/10 px-3 py-2 text-sm text-live">
-                Password updated.
-              </p>
-            )}
-            <button
-              type="submit"
-              disabled={saving || !newPassword || !confirmPassword}
-              className="min-h-11 w-fit rounded-lg bg-accent px-5 py-2.5 text-sm font-bold text-black transition hover:brightness-110 disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Update password"}
-            </button>
-          </form>
-        </Panel>
+        {isAdmin ? (
+          <Panel
+            title="Change password"
+            description="The admin password is set on the server, so nobody can reset it from a browser."
+          >
+            <p className="text-sm text-text-secondary">
+              Change <code className="font-mono">ADMIN_PASSWORD</code> in the backend&apos;s{" "}
+              <code className="font-mono">.env</code>, then restart the server.
+            </p>
+          </Panel>
+        ) : (
+          <Panel
+            title="Change password"
+            description="Sets a new password for this account straight away. There is no email confirmation."
+          >
+            <form onSubmit={onChangePassword} className="grid gap-4">
+              <PasswordField
+                id="settings-new-password"
+                label="New password"
+                value={newPassword}
+                onChange={(value) => {
+                  setNewPassword(value);
+                  setSaved(false);
+                }}
+                autoComplete="new-password"
+                minLength={8}
+                hint="At least 8 characters."
+              />
+              <PasswordField
+                id="settings-confirm-password"
+                label="Confirm new password"
+                value={confirmPassword}
+                onChange={(value) => {
+                  setConfirmPassword(value);
+                  setSaved(false);
+                }}
+                autoComplete="new-password"
+                minLength={8}
+              />
+              {error && (
+                <p role="alert" className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+                  {error}
+                </p>
+              )}
+              {saved && (
+                <p className="rounded-lg border border-live/30 bg-live/10 px-3 py-2 text-sm text-live">
+                  Password updated.
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={saving || !newPassword || !confirmPassword}
+                className="min-h-11 w-fit rounded-lg bg-accent px-5 py-2.5 text-sm font-bold text-black transition hover:brightness-110 disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Update password"}
+              </button>
+            </form>
+          </Panel>
+        )}
 
         <LanguagesPanel initial={user.languages ?? null} />
 

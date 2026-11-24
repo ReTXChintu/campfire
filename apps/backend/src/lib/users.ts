@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { isAdminEmail } from "./admin";
 import { getDb } from "./mongodb";
 import type { LanguagePrefs } from "./mediaTracks";
 
@@ -96,14 +97,15 @@ export async function verifyPassword(user: UserDoc, password: string): Promise<b
   return bcrypt.compare(password, user.passwordHash);
 }
 
-/** No email/token step by design — this app is personal-use only. Note the admin account is a
- * special case: seedAdminUser re-syncs its passwordHash from ADMIN_PASSWORD on every backend
- * restart, so a reset here won't stick for that account past the next restart unless .env is
- * also updated. Returns false if no account has this email. */
+/** No email/token step by design — this app is personal-use only. That makes it a way to take an
+ * account over, so the admin account is refused: its password only ever comes from ADMIN_PASSWORD
+ * in .env. Returns false for the admin and for an unknown email alike, after the same hashing
+ * work, so the answer doesn't give away which email is the admin's. */
 export async function resetPassword(email: string, newPassword: string): Promise<boolean> {
   const col = await collection();
   const id = email.toLowerCase();
   const passwordHash = await bcrypt.hash(newPassword, 12);
+  if (isAdminEmail(id)) return false;
   const result = await col.updateOne({ _id: id }, { $set: { passwordHash, updatedAt: new Date() } });
   return result.matchedCount > 0;
 }
