@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { Router, type Response } from "express";
+import { Router, type Request, type Response } from "express";
 import {
   streamFile,
   getMimeType,
@@ -51,7 +51,7 @@ async function serveLocalFile(filePath: string, range: string | null, res: Respo
   res.on("close", () => readStream.destroy());
 }
 
-router.get("/:fileId", requireMediaAccess("fileId"), async (req, res) => {
+async function serveStream(req: Request, res: Response) {
   const { fileId } = req.params;
   const range = req.headers.range ?? null;
   const mimeType = await getMimeType(fileId);
@@ -135,6 +135,16 @@ router.get("/:fileId", requireMediaAccess("fileId"), async (req, res) => {
   res.setHeader("cache-control", "no-store");
   mp4Stream.pipe(res);
   res.on("close", () => mp4Stream.destroy());
+}
+
+router.get("/:fileId", requireMediaAccess("fileId"), (req, res) => {
+  // Uncaught, a file that's gone from Drive would take the whole server down with it.
+  serveStream(req, res).catch((error: { code?: unknown; status?: unknown }) => {
+    const missing = error?.code === 404 || error?.status === 404;
+    if (!missing) console.error(`[stream] ${req.params.fileId}:`, error);
+    if (res.headersSent) res.destroy();
+    else res.status(missing ? 404 : 502).json({ error: missing ? "Not found" : "Couldn't read the file from Drive" });
+  });
 });
 
 export default router;
