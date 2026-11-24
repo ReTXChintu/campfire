@@ -25,6 +25,7 @@ import {
   NO_ID,
   parseFrameCode,
   parseVideoLines,
+  playsEveryFile,
   type Frame,
   type FrameConfig,
 } from "./frameSource";
@@ -244,6 +245,8 @@ function view(source: SourceDoc) {
     enabled: source.enabled,
     features: source.features,
     config: source.config,
+    /** An "any player" that goes by Drive file ids: there are no videos to list. */
+    playsEveryFile: source.kind === "frame" && playsEveryFile(source.config as FrameConfig),
     hasApiKey: !!source.apiKey,
     hasTokenKey: !!source.tokenKey,
     sync: source.sync,
@@ -444,6 +447,9 @@ async function checkBunnyCdn(config: BunnyConfig, videos: HostVideo[], tokenKey:
   }
 }
 
+/** How a listed video without a TMDb match says which it is: "file-<Drive id>". */
+const FILE_TAG = /^file-([\w-]+)(?=\s|$)/;
+
 async function isFrame(sourceId: string): Promise<boolean> {
   return (await (await sources()).countDocuments({ _id: sourceId, kind: "frame" })) > 0;
 }
@@ -456,6 +462,15 @@ export async function addFrameVideos(sourceId: string, lines: unknown): Promise<
   if (bad.length) throw new SourceInputError(`That isn't a video ID: ${bad[0].slice(0, 80)}`);
   if (videos.length === 0) throw new SourceInputError("Enter at least one video ID.");
   if (videos.length > MAX_ADD) throw new SourceInputError(`Add up to ${MAX_ADD} videos at a time.`);
+  const named = videos.flatMap((v) => v.name.match(FILE_TAG)?.[1] ?? []);
+  const files = new Set(
+    (
+      await (await getDb())
+        .collection<VideoDoc>("catalogVideos")
+        .find({ _id: { $in: named } }, { projection: { _id: 1 } })
+        .toArray()
+    ).map((v) => v._id),
+  );
   const col = await sourceVideos();
   const ids = videos.map((v) => `${sourceId}:${v.videoId}`);
   const links = new Map(
@@ -465,7 +480,8 @@ export async function addFrameVideos(sourceId: string, lines: unknown): Promise<
     videos.map(({ videoId, name }) => {
       const _id = `${sourceId}:${videoId}`;
       const manualKey = links.get(_id) ?? null;
-      const autoKey = keyFromName(name);
+      const file = name.match(FILE_TAG)?.[1];
+      const autoKey = file && files.has(file) ? fileKey(file) : keyFromName(name);
       const replacement: SourceVideoDoc = {
         _id, sourceId, videoId, name, ready: true, durationSeconds: null, height: null, captions: [], hls: null,
         signed: false, autoKey, manualKey, key: manualKey ?? autoKey,
@@ -478,8 +494,8 @@ export async function addFrameVideos(sourceId: string, lines: unknown): Promise<
   return videos.length;
 }
 
-/** Every published title an "any player" source has no video of, as lines for addFrameVideos that
- * only lack the id: "? tmdb-603 The Matrix". Null when there's no such source. */
+/** Every published video an "any player" source doesn't have, as lines for addFrameVideos that only
+ * lack the id: "? tmdb-603 The Matrix". Null when there's no such source. */
 export async function missingFrameTitles(sourceId: string): Promise<string[] | null> {
   if (!(await isFrame(sourceId))) return null;
   const db = await getDb();
@@ -501,12 +517,14 @@ export async function missingFrameTitles(sourceId: string): Promise<string[] | n
   const has = new Set(taken);
   const lines = new Map<string, string>();
   for (const video of catalog) {
+    if (keysOf(video).some((key) => has.has(key))) continue;
     const ref = tmdbRefOf(video);
-    if (!ref || keysOf(video).some((key) => has.has(key))) continue;
-    const isEpisode = ref.season != null && ref.episode != null;
-    // A name can only say a film or an episode.
-    if (ref.type === "tv" && !isEpisode) continue;
-    const tag = `tmdb-${ref.id}${isEpisode ? `-s${ref.season}e${ref.episode}` : ""}`;
+    const isEpisode = ref?.season != null && ref.episode != null;
+    // A TMDb tag can only say a film or an episode; anything else goes by its file.
+    const tag =
+      ref && (ref.type === "movie" || isEpisode)
+        ? `tmdb-${ref.id}${isEpisode ? `-s${ref.season}e${ref.episode}` : ""}`
+        : `file-${video._id}`;
     lines.set(tag, `${NO_ID} ${tag} ${(video.title ?? video.driveName).replace(/\s+/g, " ")}`);
   }
   return [...lines.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -602,6 +620,10 @@ export async function playersFor(video: VideoDoc): Promise<PlayerOption[]> {
     ...enabled.flatMap((s): PlayerOption[] => {
       const features = parseFeatures(s.features, allFeatures());
       if (s.kind === "drive") return [{ id: s._id, kind: "drive", name: "Library", features }];
+      if (s.kind === "frame" && playsEveryFile(s.config as FrameConfig)) {
+        const config = s.config as FrameConfig;
+        return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, video._id), frame: frameOf(config) }];
+      }
       const found = have.get(s._id);
       if (!found) return [];
       if (s.kind !== "frame") return [{ id: s._id, kind: "stream", name: s.name, features }];

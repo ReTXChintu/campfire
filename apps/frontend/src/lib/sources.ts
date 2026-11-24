@@ -18,6 +18,8 @@ export type VideoSource = {
   enabled: boolean;
   features: PlayerFeatures;
   config: ({ libraryId?: string; cdnHostname?: string; accountId?: string } & Partial<FrameConfig>) | null;
+  /** Plays every video by its Drive file id, so it has no list of them. */
+  playsEveryFile?: boolean;
   hasApiKey: boolean;
   hasTokenKey: boolean;
   sync: { at: string; error: string | null; videos: number; matched: number } | null;

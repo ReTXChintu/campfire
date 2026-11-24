@@ -1,11 +1,13 @@
 import { env } from "../config/env";
 
 /** The "any player" source: an iframe's embed code, pasted by an admin, with a placeholder where the
- * video's id on that site goes. Everything the player needs is read out of the code; whatever could
- * reach beyond its own frame is left out. The ids are the site's own, given per video by an admin. */
+ * video's id goes. Everything the player needs is read out of the code; whatever could reach beyond
+ * its own frame is left out. The id is either the site's own, given per video by an admin
+ * (`{{media_id}}`), or the video's Drive file id (`{{file_id}}`), for a player that holds the
+ * library's own files: that one has every video without listing any. */
 
 export type FrameConfig = {
-  /** The player's address, with `{{media_id}}` in it. */
+  /** The player's address, with one of the placeholders in it. */
   template: string;
   /** Permission policy features, ";"-separated. */
   allow: string;
@@ -23,7 +25,8 @@ export type Frame = Omit<FrameConfig, "template">;
 
 export class FrameError extends Error {}
 
-export const PLACEHOLDER = "{{media_id}}";
+const PLACEHOLDER = "{{media_id}}";
+const FILE_PLACEHOLDER = "{{file_id}}";
 
 const MAX_CODE = 4000;
 const MAX_MEDIA_ID = 300;
@@ -86,10 +89,15 @@ function parseTemplate(raw: string): string {
     names.add((double ?? single).toLowerCase());
     return PLACEHOLDER;
   });
-  if (names.size === 0) throw new FrameError(`Put ${PLACEHOLDER} where the video's ID goes in the src.`);
-  if (names.size > 1) {
-    throw new FrameError(`The src has more than one placeholder (${[...names].join(", ")}); it can have only ${PLACEHOLDER}.`);
+  if (names.size === 0) {
+    throw new FrameError(
+      `Put ${PLACEHOLDER} where the video's ID goes in the src, or ${FILE_PLACEHOLDER} for its Drive file ID.`,
+    );
   }
+  if (names.size > 1) {
+    throw new FrameError(`The src has more than one placeholder (${[...names].join(", ")}); it can have only one.`);
+  }
+  const placeholder = names.has("file_id") ? FILE_PLACEHOLDER : PLACEHOLDER;
   // Straight after the host it would run into its name.
   address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{media_id\}\})(?=$|[/?#])/i, "$1/$2");
   const probe = address.replaceAll(PLACEHOLDER, PROBE);
@@ -102,7 +110,7 @@ function parseTemplate(raw: string): string {
   if (url.host.includes(PROBE)) throw new FrameError(`${PLACEHOLDER} can't be part of the site's name.`);
   // Framed here, Campfire's own pages could reach the viewer's sign-in.
   if (url.host === new URL(env.frontendUrl).host) throw new FrameError("The src can't be Campfire itself.");
-  return url.toString().replaceAll(PROBE, PLACEHOLDER);
+  return url.toString().replaceAll(PROBE, placeholder);
 }
 
 function parseRadius(style: string): number | null {
@@ -161,8 +169,11 @@ export function parseFrameCode(raw: unknown): { config: FrameConfig; ignored: st
 
 /** The name a source gets when the admin doesn't type one. */
 export function frameSiteName(config: FrameConfig): string {
-  return new URL(config.template.replaceAll(PLACEHOLDER, PROBE)).hostname.replace(/^www\./, "");
+  return new URL(config.template.replace(/\{\{\w+\}\}/g, PROBE)).hostname.replace(/^www\./, "");
 }
+
+/** Whether the player goes by Drive file ids, and so has every video. */
+export const playsEveryFile = (config: FrameConfig) => config.template.includes(FILE_PLACEHOLDER);
 
 /** A video's id on the site, as typed: one word, and nothing that climbs out of its path. */
 function parseMediaId(raw: string): string | null {
@@ -172,8 +183,8 @@ function parseMediaId(raw: string): string | null {
 }
 
 /** The address a video plays from. Everything in the id but "/" is escaped, so it stays an id. */
-export function frameUrl(config: FrameConfig, mediaId: string): string {
-  return config.template.replaceAll(PLACEHOLDER, () => mediaId.split("/").map(encodeURIComponent).join("/"));
+export function frameUrl(config: FrameConfig, id: string): string {
+  return config.template.replace(/\{\{(media|file)_id\}\}/g, () => id.split("/").map(encodeURIComponent).join("/"));
 }
 
 export function frameOf({ allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio }: FrameConfig): Frame {

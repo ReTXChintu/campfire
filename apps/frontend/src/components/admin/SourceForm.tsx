@@ -66,6 +66,7 @@ const list = (values: string, strip = "") =>
 function FrameSummary({ preview: { config, ignored } }: { preview: FramePreview }) {
   const rows: [string, string][] = [
     ["Plays from", config.template],
+    ["Videos", config.template.includes("{{file_id}}") ? "Every one, by its Drive file ID" : "The ones you list"],
     ["May use", list(config.allow)],
     ["Sandbox allows", list(config.sandbox, "allow-")],
     ["Full screen", config.allowFullscreen ? "Yes" : "No"],
@@ -106,7 +107,9 @@ function FrameFields({ code, onChange, preview, error }: {
           className={`${FIELD} font-mono`}
         />
         <span className="text-xs text-text-tertiary">
-          Put {"{{media_id}}"} where the video's ID on that site goes. Only add players you may show here.
+          Put {"{{file_id}}"} where the ID goes if the player holds your own Drive files: every video then plays from it, in
+          the sources' order, with nothing to list. For a site with its own IDs use {"{{media_id}}"} and list its videos. Only
+          add players you may show here.
         </span>
       </label>
       <div className="grid content-start gap-1.5" aria-live="polite">

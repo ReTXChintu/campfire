@@ -118,7 +118,9 @@ function SourceCard({
           <p className="text-xs text-text-tertiary">
             {KIND_LABELS[source.kind]}
             {!source.enabled && " · off"}
-            {source.sync && ` · ${source.sync.videos} videos, ${source.sync.matched} matched`}
+            {source.playsEveryFile
+              ? " · every video"
+              : source.sync && ` · ${source.sync.videos} videos, ${source.sync.matched} matched`}
           </p>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
@@ -138,9 +140,11 @@ function SourceCard({
                   {sync.isPending ? "Checking…" : "Check for new videos"}
                 </button>
               )}
-              <button type="button" className={BUTTON} aria-expanded={showVideos} onClick={() => setShowVideos((v) => !v)}>
-                {showVideos ? "Hide videos" : "Videos"}
-              </button>
+              {!source.playsEveryFile && (
+                <button type="button" className={BUTTON} aria-expanded={showVideos} onClick={() => setShowVideos((v) => !v)}>
+                  {showVideos ? "Hide videos" : "Videos"}
+                </button>
+              )}
               <button type="button" className={BUTTON} aria-expanded={editing} onClick={() => setEditing((v) => !v)}>
                 {isFrame ? "Player" : "Connection"}
               </button>
@@ -200,8 +204,12 @@ function SourceCard({
           <SourceForm source={source} onDone={() => setEditing(false)} />
         </div>
       )}
-      {showVideos && isFrame && <AddFrameVideos sourceId={source.id} />}
-      {showVideos && <Videos sourceId={source.id} isFrame={isFrame} />}
+      {showVideos && !source.playsEveryFile && (
+        <>
+          {isFrame && <AddFrameVideos sourceId={source.id} />}
+          <Videos sourceId={source.id} isFrame={isFrame} />
+        </>
+      )}
     </li>
   );
 }
@@ -240,7 +248,7 @@ function AddFrameVideos({ sourceId }: { sourceId: string }) {
         />
         <span className="text-xs text-text-tertiary">
           One per line: the video's ID on that site, then a name. A TMDb id in the name matches it by itself; link the rest below.
-          "Add all videos" lists every library title this source doesn't have: put its ID in place of each "?". Lines left with a "?" are kept for later.
+          "Add all videos" lists every library video this source doesn't have: put its ID in place of each "?". Lines left with a "?" are kept for later.
         </span>
       </label>
       <div className="flex flex-wrap items-center gap-2.5">
@@ -250,7 +258,7 @@ function AddFrameVideos({ sourceId }: { sourceId: string }) {
         <button type="button" className={BUTTON} disabled={missing.isPending || add.isPending} onClick={listAll}>
           {missing.isPending ? "Listing…" : "Add all videos"}
         </button>
-        {missing.data?.length === 0 && <span className="text-sm text-text-tertiary">It already has every matched title.</span>}
+        {missing.data?.length === 0 && <span className="text-sm text-text-tertiary">It already has every video.</span>}
         {(add.error ?? missing.error) && (
           <span role="alert" className="text-sm text-danger">
             {(add.error ?? missing.error)!.message}

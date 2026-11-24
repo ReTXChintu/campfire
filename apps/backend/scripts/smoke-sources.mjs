@@ -396,15 +396,19 @@ try {
   check("a title without one doesn't", (await framePlayer("film")) === undefined && (await framePlayer("home")) === undefined);
   const missing = async (id = frameId) => asAdmin(`/${id}/missing`, "GET");
   check(
-    "lists every title it lacks, published and matched, without an ID",
-    JSON.stringify((await missing()).body.lines) === JSON.stringify(["? tmdb-603 The Matrix", "? tmdb-10331 Night of the Living Dead"]),
+    "lists every published video it lacks, without an ID",
+    JSON.stringify((await missing()).body.lines) ===
+      JSON.stringify(["? file-home Home video", "? tmdb-603 The Matrix", "? tmdb-10331 Night of the Living Dead"]),
     (await missing()).body,
   );
   check("for its own kind only, and admins", (await missing(cfId)).status === 404 && (await api(`${A}/${frameId}/missing`, { token: viewer })).status === 403);
   check("lines without an ID add nothing", (await addVideos("? tmdb-603 The Matrix")).status === 400);
   check("filled in, they're matched", (await addVideos("m1 tmdb-603 The Matrix\n? tmdb-10331 Night")).body.added === 1 && (await framePlayer("mkv"))?.url === "https://player.example/m1");
-  check("and no longer listed", (await missing()).body.lines.length === 1);
-  await asAdmin(`/${frameId}/videos/m1`, "DELETE");
+  check("and no longer listed", (await missing()).body.lines.length === 2);
+  await addVideos("h1 file-home Home video\nh2 file-nope Nothing");
+  check("one without a TMDb match goes by its file", (await framePlayer("home"))?.url === "https://player.example/h1" && (await missing()).body.lines.length === 1);
+  check("a file that isn't there is no match", (await db.collection("sourceVideos").findOne({ _id: `${frameId}:h2` })).key === null);
+  for (const id of ["m1", "h1", "h2"]) await asAdmin(`/${frameId}/videos/${id}`, "DELETE");
   const odd = encodeURIComponent("lib/a?b#c");
   check("linking by hand", (await asAdmin(`/${frameId}/videos/${odd}`, "PUT", { fileId: "home" })).status === 200);
   check("an ID can't change the address around it", (await framePlayer("home"))?.url === "https://player.example/lib/a%3Fb%23c", await framePlayer("home"));
@@ -422,6 +426,20 @@ try {
   check("removing a video", (await asAdmin(`/${frameId}/videos/${odd}`, "DELETE")).status === 200 && (await framePlayer("home")) === undefined);
   check("but not a host's", (await asAdmin(`/${bunnyId}/videos/${BUNNY_VIDEO}`, "DELETE")).status === 404);
   check("the count follows", (await list()).find((s) => s.id === frameId).sync.videos === 2);
+  // --- one that goes by Drive file ids ---
+  const everyId = (await asAdmin("", "POST", { kind: "frame", name: "Every", code: "https://own.example{{file_id}}" })).body.id;
+  const every = async (id) => (await api(`/api/video/${id}`, { token: viewer })).body.players.find((p) => p.id === everyId)?.url;
+  check("every video plays from it, with none listed", (await Promise.all(["film", "mkv", "home", "ep"].map(every))).join() === ["film", "mkv", "home", "ep"].map((id) => `https://own.example/${id}`).join());
+  check("and it says so", (await list()).find((s) => s.id === everyId).playsEveryFile === true && (await list()).find((s) => s.id === frameId).playsEveryFile === false);
+  await asAdmin("/order", "PUT", { ids: ["drive", everyId] });
+  check("in its place in the order", (await players("home")).startsWith("Library,Every"), await players("home"));
+  await asAdmin("/order", "PUT", { ids: [everyId] });
+  check("wherever that is", (await players("home")).startsWith("Every"), await players("home"));
+  await asAdmin(`/${everyId}`, "PATCH", { enabled: false });
+  check("unless it's off", (await every("home")) === undefined);
+  check("both placeholders at once are refused", (await read("https://own.example/{{file_id}}/{{media_id}}")).status === 400);
+  await asAdmin(`/${everyId}`, "DELETE");
+
   if (!HOLD) {
     await asAdmin(`/${frameId}`, "DELETE");
     check("removing the source takes its videos", (await db.collection("sourceVideos").countDocuments({ sourceId: frameId })) === 0);

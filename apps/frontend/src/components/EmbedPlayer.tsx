@@ -45,9 +45,9 @@ function saysFailed(host: string, raw: unknown): boolean {
   }
 }
 
-/** Plays a title in another site's own player, calling `onFailed` when that says it can't. The
- * server has already dropped ones their provider says are gone; the buttons are for a failure the
- * player doesn't report. No watch party, resume or tracks here. */
+/** Plays a title in another site's own player, calling `onFailed` when that says it can't or the site
+ * can't be reached. The server has already dropped ones their provider says are gone; the buttons are
+ * for a failure the player doesn't report. No watch party, resume or tracks here. */
 export default function EmbedPlayer({
   url,
   frame: look = DEFAULT_FRAME,
@@ -87,7 +87,14 @@ export default function EmbedPlayer({
       if (saysFailed(hostname, event.data)) failed.current();
     };
     window.addEventListener("message", onMessage);
+    // A frame "loads" the browser's own error page too, so whether the site answers at all is asked
+    // apart. What it answers can't be read from here.
+    const abort = new AbortController();
+    fetch(url, { mode: "no-cors", credentials: "omit", referrerPolicy: "origin", signal: abort.signal }).catch(() => {
+      if (!abort.signal.aborted) failed.current();
+    });
     return () => {
+      abort.abort();
       window.clearTimeout(timer);
       window.removeEventListener("message", onMessage);
     };
