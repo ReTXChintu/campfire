@@ -1,7 +1,15 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { isTmdbSearchAvailable } from "../lib/tmdbSearch";
-import { exploreDetail, explorePage, exploreWall, parseExploreKind, parseExploreServices } from "../lib/explore";
+import {
+  exploreDetail,
+  explorePage,
+  exploreWall,
+  isTmdbId,
+  parseExploreKind,
+  parseExploreServices,
+  similarTitles,
+} from "../lib/explore";
 
 /** Explore (lib/explore.ts): every film and series on TMDb, with where each streams in India. */
 const router = Router();
@@ -52,6 +60,17 @@ router.get("/title/:type/:tmdbId", requireAuth, async (req, res) => {
     return;
   }
   res.json({ title: detail });
+});
+
+router.get("/title/:type/:tmdbId/similar", requireAuth, (req, res, next) => {
+  const { type, tmdbId } = req.params;
+  if ((type !== "movie" && type !== "tv") || !isTmdbId(tmdbId)) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  similarTitles(type, tmdbId)
+    .then((items) => res.json({ items }))
+    .catch(next);
 });
 
 export default router;

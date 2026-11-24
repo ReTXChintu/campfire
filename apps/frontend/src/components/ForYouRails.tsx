@@ -1,9 +1,8 @@
-import { Link } from "react-router-dom";
 import Rail, { RailItem } from "./Rail";
 import FolderCard from "./FolderCard";
 import VideoCard from "./VideoCard";
 import { Star } from "./explore/ExploreRow";
-import { titleParam } from "../lib/explore";
+import type { ExploreItem } from "../lib/explore";
 import { useForYou } from "../lib/opinions";
 import type { CatalogFolderListItem, CatalogListItem, CatalogVideoListItem } from "../lib/catalogListItem";
 
@@ -14,7 +13,14 @@ function Reason({ text }: { text: string | null }) {
 
 /** What to watch next, from what the viewer has liked and watched: the library's titles, then ones
  * on TMDb that aren't in it. Nothing until there's something to go on. */
-export default function ForYouRails({ items }: { items: CatalogListItem[] }) {
+export default function ForYouRails({
+  items,
+  onOpen,
+}: {
+  items: CatalogListItem[];
+  /** Opens a title that isn't in the library; without it only the library's are shown. */
+  onOpen?: (item: ExploreItem) => void;
+}) {
   const { data } = useForYou();
   if (!data?.ready) return null;
   const byKey = new Map(items.map((item) => [`${item.kind}:${item.id}`, item]));
@@ -39,11 +45,11 @@ export default function ForYouRails({ items }: { items: CatalogListItem[] }) {
           ))}
         </Rail>
       )}
-      {data.explore.length > 0 && (
-        <Rail title="You might also like" eyebrow="Not in your library yet" seeAllHref="/explore" seeAllLabel="Explore">
+      {onOpen && data.explore.length > 0 && (
+        <Rail title="You might also like" eyebrow="From what you liked and watched">
           {data.explore.map((item) => (
             <RailItem key={`${item.tmdbType}-${item.tmdbId}`}>
-              <Link to={`/explore?title=${titleParam(item.tmdbType, item.tmdbId)}`} className="group block rounded-xl">
+              <button type="button" onClick={() => onOpen(item)} className="group block w-full rounded-xl text-left">
                 <div className="aspect-[2/3] overflow-hidden rounded-xl border border-divider bg-surface transition group-hover:border-divider-strong">
                   {item.posterUrl && (
                     <img src={item.posterUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
@@ -59,7 +65,7 @@ export default function ForYouRails({ items }: { items: CatalogListItem[] }) {
                   )}
                   <span>{[item.year, item.tmdbType === "tv" ? "Series" : "Film"].filter(Boolean).join(" · ")}</span>
                 </p>
-              </Link>
+              </button>
               <Reason text={item.reason} />
             </RailItem>
           ))}

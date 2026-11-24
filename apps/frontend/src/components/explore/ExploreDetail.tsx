@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
-import { exploreMetaLine, libraryHref, useExploreTitle, type ExploreDetail as Detail, type ExploreOffer } from "../../lib/explore";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { exploreMetaLine, libraryHref, titleParam, useExploreTitle, type ExploreDetail as Detail, type ExploreOffer } from "../../lib/explore";
 import { useCreateRequest, useToggleUpvote } from "../../hooks/useRequests";
 import { Skeleton } from "../ui/States";
 import OpinionButtons from "../OpinionButtons";
 import Trailer from "../Trailer";
+import { itemKey, useSimilarTitles } from "../../lib/feed";
 import { Star } from "./ExploreRow";
 
 /** One title opened: what it is, where it streams in India, and — when it isn't in Campfire — a
@@ -207,6 +208,44 @@ function RequestBlock({ d }: { d: Detail }) {
   );
 }
 
+/** Opens another title in this same panel. It replaces the one open in the history, so Back still
+ * closes the panel rather than walking back through every title looked at. */
+function MoreLikeThis({ d }: { d: Detail }) {
+  const { data } = useSimilarTitles(d.tmdbType, d.tmdbId);
+  const [params] = useSearchParams();
+  const location = useLocation();
+  if (!data?.length) return null;
+  const hrefOf = (type: "movie" | "tv", id: string) => {
+    const next = new URLSearchParams(params);
+    next.set("title", titleParam(type, id));
+    return `?${next}`;
+  };
+  return (
+    <section aria-labelledby="explore-more-heading" className="grid gap-3">
+      <h3 id="explore-more-heading" className="text-[13px] font-bold tracking-[0.1em] text-text-secondary">
+        MORE LIKE THIS
+      </h3>
+      <ul className="grid grid-cols-3 gap-3">
+        {data.map((item) => (
+          <li key={itemKey(item)} className="min-w-0">
+            <Link to={hrefOf(item.tmdbType, item.tmdbId)} replace state={location.state} className="group grid gap-1.5">
+              <span className="relative block aspect-[2/3] overflow-hidden rounded-xl bg-surface ring-1 ring-divider transition group-hover:ring-2 group-hover:ring-white/70">
+                {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                {item.inLibrary && (
+                  <span className="absolute left-1.5 top-1.5 rounded-md bg-live px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-background">
+                    IN LIBRARY
+                  </span>
+                )}
+              </span>
+              <span className="line-clamp-2 text-[13px] font-semibold leading-tight text-white">{item.title}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function DetailBody({ d }: { d: Detail }) {
   const nowhere = !d.watch.stream.length && !d.watch.free.length && !d.watch.rentBuy.length;
   return (
@@ -317,6 +356,8 @@ function DetailBody({ d }: { d: Detail }) {
             </ul>
           </section>
         )}
+
+        <MoreLikeThis d={d} />
 
         <p className="text-[11px] text-text-tertiary">
           Availability from JustWatch, via TMDB. "Open" takes you to that service's own site.{" "}

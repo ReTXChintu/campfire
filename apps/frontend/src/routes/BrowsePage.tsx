@@ -61,7 +61,7 @@ function chipClass(active: boolean): string {
   }`;
 }
 
-/** Discover — the whole library in one grid. Series and Movies are chips here rather than two
+/** The whole library in one grid. Series and Movies are chips here rather than two
  * separate destinations; `?type=` keeps the chip in the URL so the Home rails' "See all" (and the
  * old /series and /movies bookmarks) land on the right one. */
 export default function BrowsePage() {
@@ -129,7 +129,7 @@ export default function BrowsePage() {
     <main className={`w-full flex-1 ${PAGE_X} py-8`}>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-4xl tracking-wide text-white">Discover</h1>
+          <h1 className="font-display text-4xl tracking-wide text-white">Your library</h1>
           {data && (
             <p className="mt-1 text-sm text-text-secondary">
               {items.length} of {source.length} shown

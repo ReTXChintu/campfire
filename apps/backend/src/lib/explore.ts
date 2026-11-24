@@ -21,7 +21,7 @@ const LIST_TTL_MS = 6 * 60 * 60_000;
 const DETAIL_TTL_MS = 12 * 60 * 60_000;
 const STATIC_TTL_MS = 7 * 24 * 60 * 60_000; // genre names, service logos
 const FAILED_TTL_MS = 60_000; // an outage is asked about again a minute later, not on every view
-const MAX_CACHE_ENTRIES = 1500;
+const MAX_CACHE_ENTRIES = 3000;
 const MAX_IN_FLIGHT = 6;
 const ROW_SIZE = 24;
 const MIN_ROW_SIZE = 10;
@@ -49,7 +49,7 @@ const SERVICE_SEARCH: Record<number, (title: string) => string> = {
 };
 
 export type ExploreKind = "all" | "movie" | "tv";
-type TmdbType = "movie" | "tv";
+export type TmdbType = "movie" | "tv";
 
 export type ExploreItem = {
   tmdbType: TmdbType;
@@ -164,7 +164,7 @@ const yearOf = (date: string | undefined) => (date && /^\d{4}/.test(date) ? Numb
 const ratingOf = (r: TmdbListResult) =>
   typeof r.vote_average === "number" && r.vote_average > 0 && (r.vote_count ?? 0) >= 5 ? Math.round(r.vote_average * 10) / 10 : null;
 
-async function genreNames(): Promise<Map<number, string>> {
+export async function genreNames(): Promise<Map<number, string>> {
   const [movie, tv] = await Promise.all(
     (["movie", "tv"] as const).map((t) =>
       tmdbCached<{ genres?: { id: number; name: string }[] }>(`/genre/${t}/list`, { language: "en" }, STATIC_TTL_MS),
@@ -187,21 +187,25 @@ export async function exploreServices(): Promise<ExploreService[]> {
 
 /** One row is one or two TMDb lists — two when "All" needs a film list and a series list, which
  * are then interleaved so neither crowds the other out. */
-type RowSource = { path: string; params?: Record<string, string>; type: TmdbType | "mixed" };
-type RowSpec = { id: string; title: string; sources: RowSource[]; services?: number[] };
+export type RowSource = { path: string; params?: Record<string, string>; type: TmdbType | "mixed" };
+export type RowSpec = { id: string; title: string; sources: RowSource[]; services?: number[] };
 
 const thisYear = () => new Date().getFullYear();
 
-function discover(type: TmdbType, params: Record<string, string>): RowSource {
-  return { path: `/discover/${type}`, type, params: { include_adult: "false", ...params } };
+export function discover(type: TmdbType, params: Record<string, string>): RowSource {
+  return { path: `/discover/${type}`, type, params: { include_adult: "false", without_keywords: EXPLICIT, ...params } };
 }
 
+/** TMDb's "adult" flag leaves out pornography only. These are its keywords for softcore, erotic film
+ * and unsimulated sex, which otherwise turn up among the popular. */
+const EXPLICIT = "155477|190370|282903";
+
 /** Same query for films and series; the date field differs between them. */
-function both(kind: ExploreKind, build: (type: TmdbType) => RowSource): RowSource[] {
+export function both(kind: ExploreKind, build: (type: TmdbType) => RowSource): RowSource[] {
   return kind === "all" ? [build("movie"), build("tv")] : [build(kind)];
 }
 
-const streamingIn = (ids: number[]) => ({
+export const streamingIn = (ids: number[]) => ({
   watch_region: EXPLORE_REGION,
   with_watch_providers: ids.join("|"),
   with_watch_monetization_types: "flatrate|free|ads",
@@ -329,10 +333,14 @@ function toItem(r: TmdbListResult, type: TmdbType, genres: Map<number, string>, 
   };
 }
 
-async function buildRow(spec: RowSpec, genres: Map<number, string>): Promise<Omit<ExploreItem, "inLibrary">[]> {
+export async function buildRow(
+  spec: RowSpec,
+  genres: Map<number, string>,
+  page = 1,
+): Promise<Omit<ExploreItem, "inLibrary">[]> {
   const lists = await Promise.all(
     spec.sources.map(async (source) => {
-      const list = await tmdbCached<TmdbList>(source.path, { language: "en-US", page: "1", ...source.params }, LIST_TTL_MS);
+      const list = await tmdbCached<TmdbList>(source.path, { language: "en-US", page: String(page), ...source.params }, LIST_TTL_MS);
       return (list?.results ?? [])
         .map((r) => {
           const type = source.type === "mixed" ? r.media_type : source.type;
@@ -551,6 +559,13 @@ export async function tmdbTitleFacts(type: TmdbType, tmdbId: string) {
 export async function tmdbRecommendations(type: TmdbType, tmdbId: string): Promise<Omit<ExploreItem, "inLibrary">[]> {
   const spec: RowSpec = { id: "recommended", title: "", sources: [{ path: `/${type}/${tmdbId}/recommendations`, type }] };
   return buildRow(spec, await genreNames());
+}
+
+/** "More like this" under a title, each saying whether it's in the library. */
+export async function similarTitles(type: TmdbType, tmdbId: string): Promise<ExploreItem[]> {
+  const items = (await tmdbRecommendations(type, tmdbId)).slice(0, 12);
+  const library = await libraryMatches(items);
+  return items.map((item) => ({ ...item, inLibrary: library.get(`${item.tmdbType}:${item.tmdbId}`) ?? null }));
 }
 
 export async function exploreDetail(type: TmdbType, tmdbId: string, viewerId: string): Promise<ExploreDetail | null> {

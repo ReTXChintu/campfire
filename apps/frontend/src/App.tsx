@@ -8,7 +8,7 @@ import { PAGE_X } from "./lib/layout";
 // Loaded up front: the pages almost every visit opens first — signing in, the library, browsing,
 // a title's page — plus the 404, which has to render even when a chunk can't be fetched.
 import LoginPage from "./routes/LoginPage";
-import LibraryPage from "./routes/LibraryPage";
+import HomePage from "./routes/HomePage";
 import BrowsePage from "./routes/BrowsePage";
 import FolderPage from "./routes/FolderPage";
 import NotFoundPage from "./routes/NotFoundPage";
@@ -21,6 +21,7 @@ const RequestsPage = lazyRoute(() => import("./routes/RequestsPage"));
 const ExplorePage = lazyRoute(() => import("./routes/ExplorePage"));
 const SettingsPage = lazyRoute(() => import("./routes/SettingsPage"));
 const LinkDevicePage = lazyRoute(() => import("./routes/LinkDevicePage"));
+const SectionPage = lazyRoute(() => import("./routes/SectionPage"));
 const TitlePage = lazyRoute(() => import("./routes/TitlePage"));
 const ResetPasswordPage = lazyRoute(() => import("./routes/ResetPasswordPage"));
 const AdminOverviewPage = lazyRoute(() => import("./routes/admin/AdminOverviewPage"));
@@ -53,7 +54,15 @@ export default function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <LibraryPage />
+                <HomePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/section/:id"
+            element={
+              <ProtectedRoute>
+                <SectionPage />
               </ProtectedRoute>
             }
           />

@@ -1,11 +1,13 @@
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "../lib/api";
+import { parseTitleParam, titleParam } from "../lib/explore";
 import { PAGE } from "../lib/layout";
 import NotFoundPage from "./NotFoundPage";
 
 /** `/title/movie/603`, `/title/tv/1396?season=1&episode=2` — a link to a title by its TMDb id,
- * which stays right when its file is replaced. Goes to wherever the library has it. */
+ * which stays right when its file is replaced. Goes to wherever the library has it, else opens what
+ * TMDb says about it. */
 export default function TitlePage() {
   const { type, tmdbId } = useParams();
   const [params] = useSearchParams();
@@ -21,6 +23,9 @@ export default function TitlePage() {
     retry: false,
   });
   if (isLoading) return <div className={PAGE} aria-busy="true" />;
-  if (!data) return <NotFoundPage />;
+  if (!data) {
+    const known = parseTitleParam(`${type}-${tmdbId}`);
+    return known ? <Navigate to={`/?title=${titleParam(known.type, known.id)}`} replace /> : <NotFoundPage />;
+  }
   return <Navigate to={data.kind === "folder" ? `/folder/${data.id}` : `/watch/${data.id}`} replace />;
 }

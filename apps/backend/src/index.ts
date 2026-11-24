@@ -8,6 +8,7 @@ import { ensureIndexes as ensureDevicePairingIndexes } from "./lib/devicePairing
 import { ensureIndexes as ensureMediaRequestIndexes } from "./lib/mediaRequests";
 import { ensureIndexes as ensureSourceIndexes, startSourceSync } from "./lib/videoSources";
 import { ensureIndexes as ensureOpinionIndexes } from "./lib/opinions";
+import { ensureIndexes as ensureFeedIndexes } from "./lib/feed";
 import { startRenditionQueue } from "./lib/renditionQueue";
 
 import authRoutes from "./routes/auth";
@@ -24,6 +25,7 @@ import appVersionRoutes from "./routes/appVersion";
 import watchPartyRoutes from "./routes/watchParties";
 import requestRoutes, { requestImageRouter } from "./routes/requests";
 import exploreRoutes from "./routes/explore";
+import feedRoutes from "./routes/feed";
 import titleRoutes from "./routes/title";
 import opinionRoutes from "./routes/opinions";
 import sourceStreamRoutes from "./routes/sourceStream";
@@ -65,6 +67,7 @@ app.use("/api/watch-parties", watchPartyRoutes);
 app.use("/api/requests", requestRoutes);
 app.use("/api/request-image", requestImageRouter);
 app.use("/api/explore", exploreRoutes);
+app.use("/api/feed", feedRoutes);
 app.use("/api/title", titleRoutes);
 app.use("/api/opinions", opinionRoutes);
 app.use("/api/source-stream", sourceStreamRoutes);
@@ -93,6 +96,7 @@ Promise.all([
   ensureMediaRequestIndexes(),
   ensureSourceIndexes(),
   ensureOpinionIndexes(),
+  ensureFeedIndexes(),
 ])
   .then(() => {
     startRenditionQueue();

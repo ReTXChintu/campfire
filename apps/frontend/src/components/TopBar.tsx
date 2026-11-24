@@ -11,7 +11,7 @@ const desktopAppDownloadUrl = import.meta.env.VITE_DESKTOP_APP_DOWNLOAD_URL;
  * here or on the Settings page. */
 const DESTINATIONS = [
   { to: "/", label: "Home" },
-  { to: "/discover", label: "Discover" },
+  { to: "/discover", label: "Library" },
   { to: "/explore", label: "Explore" },
   { to: "/requests", label: "Requests" },
 ];
@@ -135,8 +135,8 @@ export default function TopBar() {
                   <circle cx="11" cy="11" r="7" />
                   <path d="m20 20-3.5-3.5" />
                 </svg>
-                <span className="hidden sm:inline">Search titles</span>
-                <span className="sr-only sm:hidden">Search titles</span>
+                <span className="hidden sm:inline">Search films and series</span>
+                <span className="sr-only sm:hidden">Search films and series</span>
                 <span className="ml-auto hidden rounded border border-divider-strong px-1.5 font-mono text-[10px] sm:inline">
                   /
                 </span>

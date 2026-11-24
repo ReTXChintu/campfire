@@ -6,7 +6,7 @@ export default function NotFoundPage() {
       <h1 className="font-display text-5xl tracking-wide text-white">Not Found</h1>
       <p className="text-text-secondary">This page doesn't exist, or you don't have access to it.</p>
       <Link to="/" className="text-sm font-medium text-accent hover:underline">
-        ← Back to Library
+        ← Back to Home
       </Link>
     </div>
   );

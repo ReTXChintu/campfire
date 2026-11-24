@@ -26,8 +26,8 @@ export default function Rail({
   };
 
   return (
-    <section className={`${PAGE_X} py-4`}>
-      <div className="mb-3 flex items-end justify-between gap-4">
+    <section className="py-4">
+      <div className={`mb-3 flex items-end justify-between gap-4 ${PAGE_X}`}>
         <div>
           {eyebrow && (
             <p className="font-display text-xs tracking-[0.16em] text-text-tertiary uppercase">{eyebrow}</p>
@@ -65,7 +65,9 @@ export default function Rail({
       </div>
       <div
         ref={trackRef}
-        className="no-scrollbar flex snap-x gap-4 overflow-x-auto overscroll-x-contain pb-2"
+        // Runs to the edges of the screen, its first card lined up with the heading. Positioned, so that
+        // visually hidden text in a card off to the side doesn't widen the page.
+        className={`no-scrollbar relative flex snap-x scroll-px-4 gap-4 overflow-x-auto overscroll-x-contain pb-2 sm:scroll-px-6 lg:scroll-px-8 ${PAGE_X}`}
       >
         {children}
       </div>
