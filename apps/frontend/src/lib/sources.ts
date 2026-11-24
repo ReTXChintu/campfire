@@ -18,22 +18,9 @@ export type VideoSource = {
   enabled: boolean;
   features: PlayerFeatures;
   config: ({ libraryId?: string; cdnHostname?: string; accountId?: string } & Partial<FrameConfig>) | null;
-  /** Plays every video by its Drive file id, so it has no list of them. */
-  playsEveryFile?: boolean;
   hasApiKey: boolean;
   hasTokenKey: boolean;
   sync: { at: string; error: string | null; videos: number; matched: number } | null;
-};
-
-export type SourceVideo = {
-  videoId: string;
-  name: string;
-  ready: boolean;
-  durationSeconds: number | null;
-  height: number | null;
-  key: string | null;
-  linkedByHand: boolean;
-  title: string | null;
 };
 
 export type SourceInput = {
@@ -67,14 +54,6 @@ export function useSources() {
   });
 }
 
-export function useSourceVideos(id: string, enabled: boolean) {
-  return useQuery({
-    queryKey: [...KEY, "videos", id],
-    queryFn: () => apiGet<{ videos: SourceVideo[] }>(`/api/admin/sources/${id}/videos`).then((r) => r.videos),
-    enabled,
-  });
-}
-
 function useSourceMutation<T, R = unknown>(mutationFn: (input: T) => Promise<R>) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -98,11 +77,6 @@ export const useOrderSources = () => useSourceMutation((ids: string[]) => apiPut
 
 export const useSyncSource = () => useSourceMutation((id: string) => apiPost(`/api/admin/sources/${id}/sync`));
 
-export const useLinkSourceVideo = () =>
-  useSourceMutation(({ id, videoId, fileId }: { id: string; videoId: string; fileId: string | null }) =>
-    apiPut(`/api/admin/sources/${id}/videos/${encodeURIComponent(videoId)}`, { fileId }),
-  );
-
 /** What the server reads an embed code as. */
 export function useFramePreview(code: string) {
   return useQuery({
@@ -113,22 +87,6 @@ export function useFramePreview(code: string) {
     staleTime: Infinity,
   });
 }
-
-export const useAddFrameVideos = () =>
-  useSourceMutation(({ id, lines }: { id: string; lines: string }) =>
-    apiPost<{ added: number }>(`/api/admin/sources/${id}/videos`, { lines }),
-  );
-
-/** Every library title the source has no video of, as lines that only lack the id. */
-export const useMissingFrameTitles = () =>
-  useMutation({
-    mutationFn: (id: string) => apiGet<{ lines: string[] }>(`/api/admin/sources/${id}/missing`).then((r) => r.lines),
-  });
-
-export const useRemoveFrameVideo = () =>
-  useSourceMutation(({ id, videoId }: { id: string; videoId: string }) =>
-    apiDelete(`/api/admin/sources/${id}/videos/${encodeURIComponent(videoId)}`),
-  );
 
 /** A saved player's embed code again, for changing it. */
 export function frameCode(config: VideoSource["config"]): string {

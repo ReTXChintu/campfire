@@ -165,7 +165,8 @@ async function api(path, { token, method = "GET", body } = {}) {
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  return { status: res.status, body: text ? JSON.parse(text) : null, text };
+  // A route that doesn't exist answers with a page.
+  return { status: res.status, body: text && !text.startsWith("<") ? JSON.parse(text) : null, text };
 }
 
 try {
@@ -293,21 +294,17 @@ try {
   check("Drive can't be removed", (await asAdmin("/drive", "DELETE")).status === 404);
 
   // --- linking by hand, and syncing ---
-  const videos = (await asAdmin(`/${bunnyId}/videos`, "GET")).body.videos;
-  check("videos are listed", videos.length === 130);
-  check("a matched one says its title", ["Night of the Living Dead", "Draft"].includes(videos.find((v) => v.videoId === BUNNY_VIDEO)?.title));
-  check("linking works", (await asAdmin(`/${bunnyId}/videos/${guid(2)}`, "PUT", { fileId: "mkv" })).status === 200);
-  check("the linked title has it", (await players("mkv")) === "Bunny,Library");
-  check("an unmatched video can be linked too", (await asAdmin(`/${bunnyId}/videos/${guid(101)}`, "PUT", { fileId: "home" })).status === 200 && (await players("home")) === "Bunny,Library");
-  check("linking to nothing known is 404", (await asAdmin(`/${bunnyId}/videos/${guid(2)}`, "PUT", { fileId: "nope" })).status === 404);
+  check("there's nothing to select", (await asAdmin(`/${bunnyId}/videos`, "GET")).status === 404 && (await asAdmin(`/${bunnyId}/videos/${guid(2)}`, "PUT", { fileId: "mkv" })).status === 404);
+  check("one without a TMDb id in its name is never found", (await players("mkv")) === "Library");
   bunnyVideos = bunnyVideos.map((v) => (v.guid === guid(1) ? { ...v, status: 4 } : v)).filter((v) => v.guid !== guid(126));
   await asAdmin(`/${bunnyId}/sync`, "POST");
   all = await list();
   check("a sync finds changes", all.find((s) => s.id === bunnyId).sync.videos === 129, all.find((s) => s.id === bunnyId).sync);
   check("one that finished encoding is offered", (await players("ep")) === "Cloudflare,Bunny,Library");
-  check("links made by hand survive it", (await players("mkv")) === "Bunny,Library");
-  await asAdmin(`/${bunnyId}/videos/${guid(2)}`, "PUT", { fileId: null });
-  check("unlinking goes back to the name", (await players("mkv")) === "Library");
+  bunnyVideos = bunnyVideos.map((v) => (v.guid === guid(2) ? { ...v, title: "holiday clip tmdb-603" } : v));
+  await asAdmin(`/${bunnyId}/sync`, "POST");
+  check("until it's renamed with one", (await players("mkv")) === "Bunny,Library");
+  bunnyVideos = bunnyVideos.map((v) => (v.guid === guid(2) ? { ...v, title: "holiday clip" } : v));
   down = true;
   await asAdmin(`/${bunnyId}/sync`, "POST");
   const failed = (await list()).find((s) => s.id === bunnyId);
@@ -332,7 +329,7 @@ try {
 
   // --- any player, by its embed code ---
   const CODE = `<iframe
-  src="https://player.example{{media_id}}"
+  src="https://player.example{{file_id}}"
   width="100%"
   height="100%"
   frameborder="0"
@@ -345,7 +342,7 @@ try {
   const full = (await read(CODE)).body;
   check("everything in an embed code is recognized", JSON.stringify(full) === JSON.stringify({
     config: {
-      template: "https://player.example/{{media_id}}", allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
+      template: "https://player.example/{{file_id}}", allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
       allowFullscreen: true, sandbox: "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms",
       referrerPolicy: "strict-origin-when-cross-origin", radius: 12, ratio: null,
     },
@@ -353,14 +350,14 @@ try {
   }), full);
   const T = async (src) => (await read(src)).body.config?.template;
   for (const [what, code, want] of [
-    ["a bare address", "https://v.example/e/{{media_id}}?x=1", "https://v.example/e/{{media_id}}?x=1"],
-    ["single quotes, inside other markup", "<div><iframe src='https://v.example/{{ id }}'></iframe></div>", "https://v.example/{{media_id}}"],
-    ["no quotes, escaped braces", "<iframe src=https://v.example/%7B%7Bmedia_id%7D%7D></iframe>", "https://v.example/{{media_id}}"],
-    ["entities", '<iframe src="https://v.example/?a=1&amp;v={{media_id}}"></iframe>', "https://v.example/?a=1&v={{media_id}}"],
-    ["no scheme", '<iframe src="//v.example/{{media_id}}"></iframe>', "https://v.example/{{media_id}}"],
-    ["a server on the network", "http://10.0.0.5:8096/{{media_id}}", "http://10.0.0.5:8096/{{media_id}}"],
+    ["a bare address", "https://v.example/e/{{file_id}}?x=1", "https://v.example/e/{{file_id}}?x=1"],
+    ["single quotes, inside other markup", "<div><iframe src='https://v.example/{{ file_id }}'></iframe></div>", "https://v.example/{{file_id}}"],
+    ["no quotes, escaped braces", "<iframe src=https://v.example/%7B%7Bfile_id%7D%7D></iframe>", "https://v.example/{{file_id}}"],
+    ["entities", '<iframe src="https://v.example/?a=1&amp;v={{file_id}}"></iframe>', "https://v.example/?a=1&v={{file_id}}"],
+    ["no scheme", '<iframe src="//v.example/{{file_id}}"></iframe>', "https://v.example/{{file_id}}"],
+    ["a server on the network", "http://10.0.0.5:8096/{{file_id}}", "http://10.0.0.5:8096/{{file_id}}"],
   ]) check(`reads ${what}`, (await T(code)) === want, await T(code));
-  const risky = (await read('<iframe src="https://v.example/{{media_id}}" width="640" height="480" onload="x()" srcdoc="<b>" allow="camera; autoplay *" referrerpolicy="unsafe-url" sandbox="allow-scripts allow-top-navigation"></iframe>')).body;
+  const risky = (await read('<iframe src="https://v.example/{{file_id}}" width="640" height="480" onload="x()" srcdoc="<b>" allow="camera; autoplay *" referrerpolicy="unsafe-url" sandbox="allow-scripts allow-top-navigation"></iframe>')).body;
   check(
     "leaves out what reaches beyond the frame, and says so",
     risky.config.allow === "autoplay" && risky.config.sandbox === "allow-scripts" && risky.config.ratio === 640 / 480 &&
@@ -368,14 +365,15 @@ try {
       ["allow: camera", "sandbox: allow-top-navigation", "referrerpolicy: unsafe-url", "onload", "srcdoc"].every((i) => risky.ignored.includes(i)),
     risky,
   );
-  check("a code without a sandbox gets one", (await read('<iframe src="https://v.example/{{media_id}}"></iframe>')).body.config.sandbox === "allow-scripts allow-same-origin allow-presentation");
+  check("a code without a sandbox gets one", (await read('<iframe src="https://v.example/{{file_id}}"></iframe>')).body.config.sandbox === "allow-scripts allow-same-origin allow-presentation");
   for (const [what, code] of [
-    ["nothing", ""], ["no iframe", "<video src='https://v.example/{{media_id}}'>"], ["no src", "<iframe></iframe>"],
-    ["no placeholder", "https://v.example/abc"], ["two placeholders", "https://v.example/{{a}}/{{b}}"],
-    ["a script address", "javascript:alert('{{media_id}}')"], ["a data address", "data:text/html,{{media_id}}"],
-    ["a host that's the placeholder", "https://{{media_id}}.example/"], ["half a host", "https://v.{{media_id}}/"],
-    ["a host with the placeholder in it", "https://v{{media_id}}.example/"], ["a password", "https://a:b@v.example/{{media_id}}"], ["not an address", "{{media_id}}"],
-    ["Campfire itself", `${process.env.SMOKE_FRONTEND ?? envValue("FRONTEND_URL")}/{{media_id}}`],
+    ["nothing", ""], ["no iframe", "<video src='https://v.example/{{file_id}}'>"], ["no src", "<iframe></iframe>"],
+    ["no placeholder", "https://v.example/abc"], ["two placeholders", "https://v.example/{{file_id}}/{{b}}"],
+    ["a placeholder that isn't the file", "https://v.example/{{media_id}}"],
+    ["a script address", "javascript:alert('{{file_id}}')"], ["a data address", "data:text/html,{{file_id}}"],
+    ["a host that's the placeholder", "https://{{file_id}}.example/"], ["half a host", "https://v.{{file_id}}/"],
+    ["a host with the placeholder in it", "https://v{{file_id}}.example/"], ["a password", "https://a:b@v.example/{{file_id}}"], ["not an address", "{{file_id}}"],
+    ["Campfire itself", `${process.env.SMOKE_FRONTEND ?? envValue("FRONTEND_URL")}/{{file_id}}`],
   ]) check(`refuses ${what}`, (await read(code)).status === 400, await read(code));
   check("viewers can't read codes", (await api(`${A}/read-code`, { token: viewer, method: "POST", body: { code: CODE } })).status === 403);
   check("a bad code adds nothing", (await asAdmin("", "POST", { kind: "frame", code: "x" })).status === 400);
@@ -384,65 +382,31 @@ try {
   let frameSource = (await list()).find((s) => s.id === frameId);
   check("it's named after its site", frameSource.name === "player.example" && frameSource.kind === "frame", frameSource);
   check("and goes before Drive", (await list()).at(-2).id === frameId && (await list()).at(-1).id === "drive");
-  check("without videos nothing plays from it", !(await players("film")).includes("player.example"));
-  const addVideos = (lines, id = frameId) => asAdmin(`/${id}/videos`, "POST", { lines });
-  check("adds videos", (await addVideos("ep-1 Pilot tmdb-1396-s1e1\n\n lib/a?b#c Home\nplain")).body.added === 3);
-  frameSource = (await list()).find((s) => s.id === frameId);
-  check("counts them", frameSource.sync.videos === 3 && frameSource.sync.matched === 1, frameSource.sync);
-  for (const bad of ["", "../x name", "a/./b", "a\\b"]) check(`refuses the ID "${bad}"`, (await addVideos(bad)).status === 400);
-  check("only to its own kind", (await addVideos("x", cfId)).status === 404 && (await addVideos("x", "nope")).status === 404);
   const framePlayer = async (id) => (await api(`/api/video/${id}`, { token: viewer })).body.players.find((p) => p.id === frameId);
-  check("a matched one plays, as the code said", (await framePlayer("ep"))?.url === "https://player.example/ep-1" && (await framePlayer("ep")).frame.radius === 12 && !("template" in (await framePlayer("ep")).frame), await framePlayer("ep"));
-  check("a title without one doesn't", (await framePlayer("film")) === undefined && (await framePlayer("home")) === undefined);
-  const missing = async (id = frameId) => asAdmin(`/${id}/missing`, "GET");
   check(
-    "lists every published video it lacks, without an ID",
-    JSON.stringify((await missing()).body.lines) ===
-      JSON.stringify(["? file-home Home video", "? tmdb-603 The Matrix", "? tmdb-10331 Night of the Living Dead"]),
-    (await missing()).body,
+    "every video is tried in it, with none listed",
+    (await Promise.all(["film", "mkv", "home", "ep"].map(async (id) => (await framePlayer(id))?.url))).join() ===
+      ["film", "mkv", "home", "ep"].map((id) => `https://player.example/${id}`).join(),
   );
-  check("for its own kind only, and admins", (await missing(cfId)).status === 404 && (await api(`${A}/${frameId}/missing`, { token: viewer })).status === 403);
-  check("lines without an ID add nothing", (await addVideos("? tmdb-603 The Matrix")).status === 400);
-  check("filled in, they're matched", (await addVideos("m1 tmdb-603 The Matrix\n? tmdb-10331 Night")).body.added === 1 && (await framePlayer("mkv"))?.url === "https://player.example/m1");
-  check("and no longer listed", (await missing()).body.lines.length === 2);
-  await addVideos("h1 file-home Home video\nh2 file-nope Nothing");
-  check("one without a TMDb match goes by its file", (await framePlayer("home"))?.url === "https://player.example/h1" && (await missing()).body.lines.length === 1);
-  check("a file that isn't there is no match", (await db.collection("sourceVideos").findOne({ _id: `${frameId}:h2` })).key === null);
-  for (const id of ["m1", "h1", "h2"]) await asAdmin(`/${frameId}/videos/${id}`, "DELETE");
-  const odd = encodeURIComponent("lib/a?b#c");
-  check("linking by hand", (await asAdmin(`/${frameId}/videos/${odd}`, "PUT", { fileId: "home" })).status === 200);
-  check("an ID can't change the address around it", (await framePlayer("home"))?.url === "https://player.example/lib/a%3Fb%23c", await framePlayer("home"));
-  await addVideos("lib/a?b#c Renamed");
-  check("adding it again keeps the link", (await framePlayer("home")) !== undefined);
+  check("drawn as the code said", (await framePlayer("ep")).frame.radius === 12 && !("template" in (await framePlayer("ep")).frame), await framePlayer("ep"));
+  check("it has no videos to add or take away", (await asAdmin(`/${frameId}/videos`, "POST", { lines: "x" })).status === 404 && (await asAdmin(`/${frameId}/missing`, "GET")).status === 404);
   check("apps aren't sent it", (await api("/api/video/home", { token: viewer })).body.embeds.length === 0);
   check("it has no stream of its own", (await stream(frameId, "home")).status === 404);
   check("nor a list to check", (await asAdmin(`/${frameId}/sync`, "POST")).status === 404);
-  await asAdmin(`/${frameId}`, "PATCH", { code: "https://other.example/v/{{media_id}}" });
-  check("changing the code moves every video", (await framePlayer("home"))?.url === "https://other.example/v/lib/a%3Fb%23c");
+  await asAdmin("/order", "PUT", { ids: [cfId, frameId, bunnyId, "drive"] });
+  check("its place in the order is every video's", (await players("film")) === "Cloudflare,player.example,Bunny,Library" && (await players("home")) === "player.example,Library", await players("film"));
+  await asAdmin("/order", "PUT", { ids: ["drive", frameId] });
+  check("wherever that is", (await players("home")) === "Library,player.example", await players("home"));
+  await asAdmin(`/${frameId}`, "PATCH", { code: "https://other.example/v/{{file_id}}" });
+  check("changing the code moves every video", (await framePlayer("home"))?.url === "https://other.example/v/home");
   check("a bad code changes nothing", (await asAdmin(`/${frameId}`, "PATCH", { code: "nope" })).status === 400 && (await framePlayer("home"))?.url.startsWith("https://other.example/"));
   await asAdmin(`/${frameId}`, "PATCH", { enabled: false });
   check("switched off, it isn't offered", (await framePlayer("home")) === undefined);
   await asAdmin(`/${frameId}`, "PATCH", { enabled: true, name: "Other" });
-  check("removing a video", (await asAdmin(`/${frameId}/videos/${odd}`, "DELETE")).status === 200 && (await framePlayer("home")) === undefined);
-  check("but not a host's", (await asAdmin(`/${bunnyId}/videos/${BUNNY_VIDEO}`, "DELETE")).status === 404);
-  check("the count follows", (await list()).find((s) => s.id === frameId).sync.videos === 2);
-  // --- one that goes by Drive file ids ---
-  const everyId = (await asAdmin("", "POST", { kind: "frame", name: "Every", code: "https://own.example{{file_id}}" })).body.id;
-  const every = async (id) => (await api(`/api/video/${id}`, { token: viewer })).body.players.find((p) => p.id === everyId)?.url;
-  check("every video plays from it, with none listed", (await Promise.all(["film", "mkv", "home", "ep"].map(every))).join() === ["film", "mkv", "home", "ep"].map((id) => `https://own.example/${id}`).join());
-  check("and it says so", (await list()).find((s) => s.id === everyId).playsEveryFile === true && (await list()).find((s) => s.id === frameId).playsEveryFile === false);
-  await asAdmin("/order", "PUT", { ids: ["drive", everyId] });
-  check("in its place in the order", (await players("home")).startsWith("Library,Every"), await players("home"));
-  await asAdmin("/order", "PUT", { ids: [everyId] });
-  check("wherever that is", (await players("home")).startsWith("Every"), await players("home"));
-  await asAdmin(`/${everyId}`, "PATCH", { enabled: false });
-  check("unless it's off", (await every("home")) === undefined);
-  check("both placeholders at once are refused", (await read("https://own.example/{{file_id}}/{{media_id}}")).status === 400);
-  await asAdmin(`/${everyId}`, "DELETE");
 
   if (!HOLD) {
     await asAdmin(`/${frameId}`, "DELETE");
-    check("removing the source takes its videos", (await db.collection("sourceVideos").countDocuments({ sourceId: frameId })) === 0);
+    check("removed, nothing plays from it", (await framePlayer("home")) === undefined);
   }
 
   if (HOLD) {

@@ -1,18 +1,12 @@
 import { Router, type Request, type Response } from "express";
 import { requireAdmin } from "../../middleware/auth";
-import { getCatalogVideo } from "../../lib/catalogVideos";
 import { HostError } from "../../lib/videoHosts";
 import {
-  addFrameVideos,
   createSource,
   deleteSource,
   FEATURES,
-  linkVideo,
   listSources,
-  listSourceVideos,
-  missingFrameTitles,
   previewFrame,
-  removeFrameVideo,
   setOrder,
   SourceInputError,
   syncSource,
@@ -74,40 +68,6 @@ router.delete("/:id", requireAdmin, handle(async (req, res) => {
 
 router.post("/:id/sync", requireAdmin, handle(async (req, res) => {
   if (await syncSource(req.params.id)) res.json({ ok: true });
-  else notFound(res);
-}));
-
-router.get("/:id/videos", requireAdmin, handle(async (req, res) => {
-  res.json({ videos: await listSourceVideos(req.params.id) });
-}));
-
-/** An "any player" source's videos, one per line: the id on that site, then an optional name. */
-router.post("/:id/videos", requireAdmin, handle(async (req, res) => {
-  const added = await addFrameVideos(req.params.id, (req.body as { lines?: unknown })?.lines);
-  if (added === null) notFound(res);
-  else res.status(201).json({ added });
-}));
-
-router.get("/:id/missing", requireAdmin, handle(async (req, res) => {
-  const lines = await missingFrameTitles(req.params.id);
-  if (lines) res.json({ lines });
-  else notFound(res);
-}));
-
-router.delete("/:id/videos/:videoId", requireAdmin, handle(async (req, res) => {
-  if (await removeFrameVideo(req.params.id, req.params.videoId)) res.json({ ok: true });
-  else notFound(res);
-}));
-
-/** `fileId` links the video to that catalog video's title; null goes back to matching by name. */
-router.put("/:id/videos/:videoId", requireAdmin, handle(async (req, res) => {
-  const fileId = (req.body as { fileId?: unknown })?.fileId;
-  const video = typeof fileId === "string" ? await getCatalogVideo(fileId) : null;
-  if (fileId !== null && !video) {
-    notFound(res);
-    return;
-  }
-  if (await linkVideo(req.params.id, req.params.videoId, video)) res.json({ ok: true });
   else notFound(res);
 }));
 

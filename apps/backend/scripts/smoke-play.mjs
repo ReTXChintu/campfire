@@ -204,6 +204,9 @@ try {
   for (const bad of ["tmdb:movie:0", "tmdb:movie:abc", "tmdb:tv:1396", "tmdb:tv:1396:s1e99", "tmdb:movie:99999"]) check(`nothing at ${bad}`, (await V(bad)).status === 404);
 
   // --- nothing has it ---
+  const ownId = await addSource({ kind: "frame", name: "Own", code: "https://own.example/{{file_id}}" });
+  check("a player of the library's own files has nothing for it", names(await V("tmdb:movie:13")) === "" && names(await V("home")) === "Own,Library");
+  await api(`/api/admin/sources/${ownId}`, { token: admin, method: "DELETE" });
   asked = [];
   let r = await V("tmdb:movie:700");
   check("with no source having it there's nothing to play", r.status === 200 && names(r) === "" && r.body.title === "Nowhere Film", r.body);

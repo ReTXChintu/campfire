@@ -23,23 +23,19 @@ import {
   frameOf,
   frameSiteName,
   frameUrl,
-  NO_ID,
   parseFrameCode,
-  parseVideoLines,
-  playsEveryFile,
   type Frame,
   type FrameConfig,
 } from "./frameSource";
 
-/** Video sources: the libraries a title can play from, in one global order an admin sets — Bunny
- * Stream libraries, Cloudflare Stream accounts, any other site's player by its embed code
- * (lib/frameSource.ts), and Drive itself. A hosted source's videos are listed through the account's
- * own API key every half hour; an embed code's are added by an admin, by their ids on that site. They
- * belong to a title by the TMDb id in their name ("tmdb-603", "tmdb-1396-s1e2"), or because an admin
- * linked them. Players try the sources in order and fall to the next when one fails. */
+/** Video sources: the places a title can play from, in one global order an admin sets — Bunny Stream
+ * libraries, Cloudflare Stream accounts, any other player by its embed code (lib/frameSource.ts), and
+ * Drive itself. The rule is that every title is tried in every source, in that order, with nothing to
+ * select: a host has a title when one of its videos has the TMDb id in its name ("tmdb-603",
+ * "tmdb-1396-s1e2"), which is looked up each time and listed every half hour; a player by its embed
+ * code and Drive have every one of the library's files. A player that fails falls to the next. */
 
 export const DRIVE_ID = "drive";
-const MAX_ADD = 1000;
 const SYNC_EVERY_MS = 30 * 60_000;
 
 export const FEATURES = [
@@ -76,9 +72,7 @@ type SourceDoc = {
 type SourceVideoDoc = HostVideo & {
   _id: string; // `${sourceId}:${videoId}`
   sourceId: string;
-  autoKey: string | null;
-  /** Set by an admin; wins over the name. */
-  manualKey: string | null;
+  /** The title its name says it is. */
   key: string | null;
 };
 
@@ -141,13 +135,6 @@ export function keyFromName(name: string): string | null {
     : tmdbKey({ type: "movie", id: String(Number(id)) });
 }
 
-const fileKey = (fileId: string) => `file:${fileId}`;
-
-function keysOf(video: VideoDoc): string[] {
-  const ref = tmdbRefOf(video);
-  return [...(ref ? [tmdbKey(ref)] : []), fileKey(video._id)];
-}
-
 // ---- Syncing --------------------------------------------------------------------------------------
 
 function apiKeyOf(source: SourceDoc): string {
@@ -162,20 +149,12 @@ function listVideos(source: SourceDoc, apiKey: string, search?: HostSearch): Pro
     : listCloudflare(source.config as CloudflareConfig, apiKey, search);
 }
 
-/** Saves videos as their host lists them, keeping links made by hand. */
+/** Saves videos as their host lists them. */
 async function saveVideos(sourceId: string, videos: HostVideo[]): Promise<SourceVideoDoc[]> {
   const col = await sourceVideos();
-  const existing = new Map(
-    (
-      await col.find({ _id: { $in: videos.map((v) => `${sourceId}:${v.videoId}`) } }, { projection: { manualKey: 1 } }).toArray()
-    ).map((d) => [d._id, d.manualKey ?? null]),
+  const docs = videos.map(
+    (v): SourceVideoDoc => ({ ...v, _id: `${sourceId}:${v.videoId}`, sourceId, key: keyFromName(v.name) }),
   );
-  const docs = videos.map((v): SourceVideoDoc => {
-    const _id = `${sourceId}:${v.videoId}`;
-    const manualKey = existing.get(_id) ?? null;
-    const autoKey = keyFromName(v.name);
-    return { ...v, _id, sourceId, autoKey, manualKey, key: manualKey ?? autoKey };
-  });
   if (docs.length) {
     await col.bulkWrite(
       docs.map((d) => ({ replaceOne: { filter: { _id: d._id }, replacement: d, upsert: true } })),
@@ -255,8 +234,6 @@ function view(source: SourceDoc) {
     enabled: source.enabled,
     features: source.features,
     config: source.config,
-    /** An "any player" that goes by Drive file ids: there are no videos to list. */
-    playsEveryFile: source.kind === "frame" && playsEveryFile(source.config as FrameConfig),
     hasApiKey: !!source.apiKey,
     hasTokenKey: !!source.tokenKey,
     sync: source.sync,
@@ -334,7 +311,7 @@ async function createFrameSource(input: SourceInput): Promise<string> {
     config,
     apiKey: null,
     tokenKey: null,
-    sync: { at: new Date(), error: null, videos: 0, matched: 0 },
+    sync: null,
   };
   await insertSource(doc);
   return doc._id;
@@ -457,145 +434,6 @@ async function checkBunnyCdn(config: BunnyConfig, videos: HostVideo[], tokenKey:
   }
 }
 
-/** How a listed video without a TMDb match says which it is: "file-<Drive id>". */
-const FILE_TAG = /^file-([\w-]+)(?=\s|$)/;
-
-async function isFrame(sourceId: string): Promise<boolean> {
-  return (await (await sources()).countDocuments({ _id: sourceId, kind: "frame" })) > 0;
-}
-
-/** Adds videos to an "any player" source, one per line (parseVideoLines). One it already has is
- * renamed, keeping its link. Null when there's no such source. */
-export async function addFrameVideos(sourceId: string, lines: unknown): Promise<number | null> {
-  if (!(await isFrame(sourceId))) return null;
-  const { videos, bad } = parseVideoLines(lines);
-  if (bad.length) throw new SourceInputError(`That isn't a video ID: ${bad[0].slice(0, 80)}`);
-  if (videos.length === 0) throw new SourceInputError("Enter at least one video ID.");
-  if (videos.length > MAX_ADD) throw new SourceInputError(`Add up to ${MAX_ADD} videos at a time.`);
-  const named = videos.flatMap((v) => v.name.match(FILE_TAG)?.[1] ?? []);
-  const files = new Set(
-    (
-      await (await getDb())
-        .collection<VideoDoc>("catalogVideos")
-        .find({ _id: { $in: named } }, { projection: { _id: 1 } })
-        .toArray()
-    ).map((v) => v._id),
-  );
-  const col = await sourceVideos();
-  const ids = videos.map((v) => `${sourceId}:${v.videoId}`);
-  const links = new Map(
-    (await col.find({ _id: { $in: ids } }, { projection: { manualKey: 1 } }).toArray()).map((d) => [d._id, d.manualKey ?? null]),
-  );
-  await col.bulkWrite(
-    videos.map(({ videoId, name }) => {
-      const _id = `${sourceId}:${videoId}`;
-      const manualKey = links.get(_id) ?? null;
-      const file = name.match(FILE_TAG)?.[1];
-      const autoKey = file && files.has(file) ? fileKey(file) : keyFromName(name);
-      const replacement: SourceVideoDoc = {
-        _id, sourceId, videoId, name, ready: true, durationSeconds: null, height: null, captions: [], hls: null,
-        signed: false, autoKey, manualKey, key: manualKey ?? autoKey,
-      };
-      return { replaceOne: { filter: { _id }, replacement, upsert: true } };
-    }),
-    { ordered: false },
-  );
-  await recount(sourceId);
-  return videos.length;
-}
-
-/** Every published video an "any player" source doesn't have, as lines for addFrameVideos that only
- * lack the id: "? tmdb-603 The Matrix". Null when there's no such source. */
-export async function missingFrameTitles(sourceId: string): Promise<string[] | null> {
-  if (!(await isFrame(sourceId))) return null;
-  const db = await getDb();
-  const [taken, catalog] = await Promise.all([
-    (await sourceVideos()).distinct("key", { sourceId }),
-    db
-      .collection<NamedVideo & { status: string }>("catalogVideos")
-      .find(
-        { status: "published" },
-        {
-          projection: {
-            title: 1, driveName: 1, "artwork.tmdbType": 1, "artwork.tmdbId": 1,
-            "episodeArtwork.seriesTmdbId": 1, "episodeArtwork.season": 1, "episodeArtwork.episode": 1,
-          },
-        },
-      )
-      .toArray(),
-  ]);
-  const has = new Set(taken);
-  const lines = new Map<string, string>();
-  for (const video of catalog) {
-    if (keysOf(video).some((key) => has.has(key))) continue;
-    const ref = tmdbRefOf(video);
-    const isEpisode = ref?.season != null && ref.episode != null;
-    // A TMDb tag can only say a film or an episode; anything else goes by its file.
-    const tag =
-      ref && (ref.type === "movie" || isEpisode)
-        ? `tmdb-${ref.id}${isEpisode ? `-s${ref.season}e${ref.episode}` : ""}`
-        : `file-${video._id}`;
-    lines.set(tag, `${NO_ID} ${tag} ${(video.title ?? video.driveName).replace(/\s+/g, " ")}`);
-  }
-  return [...lines.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-}
-
-/** Takes a video off an "any player" source; a hosted one's list is its host's. */
-export async function removeFrameVideo(sourceId: string, videoId: string): Promise<boolean> {
-  if (!(await isFrame(sourceId))) return false;
-  const { deletedCount } = await (await sourceVideos()).deleteOne({ _id: `${sourceId}:${videoId}` });
-  await recount(sourceId);
-  return deletedCount > 0;
-}
-
-type NamedVideo = VideoDoc & { title: string | null; driveName: string };
-
-/** A source's videos, unmatched first, each with the catalog title it belongs to. */
-export async function listSourceVideos(sourceId: string) {
-  const db = await getDb();
-  const [videos, catalog] = await Promise.all([
-    (await sourceVideos()).find({ sourceId }).sort({ name: 1 }).toArray(),
-    db
-      .collection<NamedVideo>("catalogVideos")
-      .find(
-        {},
-        {
-          projection: {
-            title: 1, driveName: 1, "artwork.tmdbType": 1, "artwork.tmdbId": 1,
-            "episodeArtwork.seriesTmdbId": 1, "episodeArtwork.season": 1, "episodeArtwork.episode": 1,
-          },
-        },
-      )
-      .toArray(),
-  ]);
-  const titles = new Map<string, string>();
-  for (const v of catalog) for (const key of keysOf(v)) titles.set(key, v.title ?? v.driveName);
-  return videos
-    .map((v) => ({
-      videoId: v.videoId,
-      name: v.name,
-      ready: v.ready,
-      durationSeconds: v.durationSeconds,
-      height: v.height,
-      key: v.key,
-      linkedByHand: !!v.manualKey,
-      /** Null when the library has no such title (yet). */
-      title: v.key ? (titles.get(v.key) ?? null) : null,
-    }))
-    .sort((a, b) => Number(!!a.title) - Number(!!b.title) || a.name.localeCompare(b.name, undefined, { numeric: true }));
-}
-
-/** Links a video to a title by hand, or (null) goes back to what its name says. */
-export async function linkVideo(sourceId: string, videoId: string, video: VideoDoc | null): Promise<boolean> {
-  const col = await sourceVideos();
-  const doc = await col.findOne({ _id: `${sourceId}:${videoId}` });
-  if (!doc) return false;
-  const manualKey = video ? keysOf(video)[0] : null;
-  await col.updateOne({ _id: doc._id }, { $set: { manualKey, key: manualKey ?? doc.autoKey } });
-  await recount(sourceId);
-  return true;
-}
-
 // ---- Playing --------------------------------------------------------------------------------------
 
 /** One way to play a title. `id` is what a client asks for it by. */
@@ -606,12 +444,13 @@ export type PlayerOption =
   | { id: string; kind: "drive"; name: string; features: Features };
 
 async function matching(video: VideoDoc, sourceIds: string[]): Promise<SourceVideoDoc[]> {
-  const keys = keysOf(video);
+  const ref = tmdbRefOf(video);
+  if (!ref) return [];
   const found = await (await sourceVideos())
-    .find({ key: { $in: keys }, sourceId: { $in: sourceIds }, ready: true })
+    .find({ key: tmdbKey(ref), sourceId: { $in: sourceIds }, ready: true })
     .toArray();
-  // The title's own id before the file's, then the sharpest copy.
-  return found.sort((a, b) => keys.indexOf(a.key!) - keys.indexOf(b.key!) || (b.height ?? 0) - (a.height ?? 0));
+  // The sharpest copy first.
+  return found.sort((a, b) => (b.height ?? 0) - (a.height ?? 0));
 }
 
 const LIVE_TIMEOUT_MS = 4000;
@@ -658,7 +497,7 @@ export async function playersFor(
   // A title the library doesn't have has no file of its own to play.
   const hasFile = !parseTitleId(video._id);
   const enabled = all.filter((s) => s.enabled || s.kind === "drive");
-  const hosted = enabled.filter((s) => s.kind !== "drive").map((s) => s._id);
+  const hosted = enabled.filter(isHosted).map((s) => s._id);
   // The best match of each source.
   const have = new Map<string, SourceVideoDoc>();
   for (const v of hosted.length ? await matching(video, hosted) : []) {
@@ -681,9 +520,9 @@ export async function playersFor(
     const features = parseFeatures(s.features, allFeatures());
     if (s.kind === "drive") return hasFile ? { id: s._id, kind: "drive", name: "Library", features } : null;
     if (s.kind === "frame") {
+      if (!hasFile) return null;
       const config = s.config as FrameConfig;
-      const id = playsEveryFile(config) ? (hasFile ? video._id : null) : have.get(s._id)?.videoId;
-      return id ? { id: s._id, kind: "frame", name: s.name, url: frameUrl(config, id), frame: frameOf(config) } : null;
+      return { id: s._id, kind: "frame", name: s.name, url: frameUrl(config, video._id), frame: frameOf(config) };
     }
     const answer = have.has(s._id) ? "found" : (answers.get(s._id) ?? "none");
     return answer === "none" ? null : { id: s._id, kind: "stream", name: s.name, features };

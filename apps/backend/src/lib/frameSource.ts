@@ -1,13 +1,13 @@
 import { env } from "../config/env";
 
-/** The "any player" source: an iframe's embed code, pasted by an admin, with a placeholder where the
- * video's id goes. Everything the player needs is read out of the code; whatever could reach beyond
- * its own frame is left out. The id is either the site's own, given per video by an admin
- * (`{{media_id}}`), or the video's Drive file id (`{{file_id}}`), for a player that holds the
- * library's own files: that one has every video without listing any. */
+/** The "any player" source: an iframe's embed code, pasted by an admin, with `{{file_id}}` where the
+ * video's Drive file id goes, for a player that holds the library's own files. Every one of the
+ * library's videos is tried in it, in its place in the order; there's nothing to list or link.
+ * Everything the player needs is read out of the code; whatever could reach beyond its own frame is
+ * left out. */
 
 export type FrameConfig = {
-  /** The player's address, with one of the placeholders in it. */
+  /** The player's address, with `{{file_id}}` in it. */
   template: string;
   /** Permission policy features, ";"-separated. */
   allow: string;
@@ -25,11 +25,9 @@ export type Frame = Omit<FrameConfig, "template">;
 
 export class FrameError extends Error {}
 
-const PLACEHOLDER = "{{media_id}}";
-const FILE_PLACEHOLDER = "{{file_id}}";
+const PLACEHOLDER = "{{file_id}}";
 
 const MAX_CODE = 4000;
-const MAX_MEDIA_ID = 300;
 const DEFAULT_ALLOW = "autoplay; fullscreen; encrypted-media; picture-in-picture";
 const DEFAULT_SANDBOX = "allow-scripts allow-same-origin allow-presentation";
 const DEFAULT_REFERRER = "strict-origin-when-cross-origin";
@@ -78,7 +76,7 @@ function attributesOf(code: string): Map<string, string> | null {
 }
 
 /** Stands in for the id while an address is checked; nothing a real one would hold. */
-const PROBE = "campfire-media-id-probe";
+const PROBE = "campfire-file-id-probe";
 
 function parseTemplate(raw: string): string {
   let address = raw.replace(/%7B/gi, "{").replace(/%7D/gi, "}").trim();
@@ -89,17 +87,15 @@ function parseTemplate(raw: string): string {
     names.add((double ?? single).toLowerCase());
     return PLACEHOLDER;
   });
-  if (names.size === 0) {
+  const only = [...names];
+  if (only.length === 0) throw new FrameError(`Put ${PLACEHOLDER} where the video's Drive file ID goes in the src.`);
+  if (only.length > 1 || only[0] !== "file_id") {
     throw new FrameError(
-      `Put ${PLACEHOLDER} where the video's ID goes in the src, or ${FILE_PLACEHOLDER} for its Drive file ID.`,
+      `The src can only have ${PLACEHOLDER}, the video's Drive file ID, so that every video can be tried in it. It has ${only.join(", ")}.`,
     );
   }
-  if (names.size > 1) {
-    throw new FrameError(`The src has more than one placeholder (${[...names].join(", ")}); it can have only one.`);
-  }
-  const placeholder = names.has("file_id") ? FILE_PLACEHOLDER : PLACEHOLDER;
   // Straight after the host it would run into its name.
-  address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{media_id\}\})(?=$|[/?#])/i, "$1/$2");
+  address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{file_id\}\})(?=$|[/?#])/i, "$1/$2");
   const probe = address.replaceAll(PLACEHOLDER, PROBE);
   if (!URL.canParse(probe)) {
     throw new FrameError(`The src isn't a full address, such as https://player.example.com/${PLACEHOLDER}.`);
@@ -110,7 +106,7 @@ function parseTemplate(raw: string): string {
   if (url.host.includes(PROBE)) throw new FrameError(`${PLACEHOLDER} can't be part of the site's name.`);
   // Framed here, Campfire's own pages could reach the viewer's sign-in.
   if (url.host === new URL(env.frontendUrl).host) throw new FrameError("The src can't be Campfire itself.");
-  return url.toString().replaceAll(PROBE, placeholder);
+  return url.toString().replaceAll(PROBE, PLACEHOLDER);
 }
 
 function parseRadius(style: string): number | null {
@@ -169,42 +165,14 @@ export function parseFrameCode(raw: unknown): { config: FrameConfig; ignored: st
 
 /** The name a source gets when the admin doesn't type one. */
 export function frameSiteName(config: FrameConfig): string {
-  return new URL(config.template.replace(/\{\{\w+\}\}/g, PROBE)).hostname.replace(/^www\./, "");
+  return new URL(config.template.replaceAll(PLACEHOLDER, PROBE)).hostname.replace(/^www\./, "");
 }
 
-/** Whether the player goes by Drive file ids, and so has every video. */
-export const playsEveryFile = (config: FrameConfig) => config.template.includes(FILE_PLACEHOLDER);
-
-/** A video's id on the site, as typed: one word, and nothing that climbs out of its path. */
-function parseMediaId(raw: string): string | null {
-  const id = raw.replace(/^\/+/, "");
-  if (!id || id.length > MAX_MEDIA_ID || /[\s\\\p{Cc}\p{Cs}]/u.test(id)) return null;
-  return id.split("/").some((part) => part === "." || part === "..") ? null : id;
-}
-
-/** The address a video plays from. Everything in the id but "/" is escaped, so it stays an id. */
-export function frameUrl(config: FrameConfig, id: string): string {
-  return config.template.replace(/\{\{(media|file)_id\}\}/g, () => id.split("/").map(encodeURIComponent).join("/"));
+/** The address a video plays from. */
+export function frameUrl(config: FrameConfig, fileId: string): string {
+  return config.template.replaceAll(PLACEHOLDER, () => encodeURIComponent(fileId));
 }
 
 export function frameOf({ allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio }: FrameConfig): Frame {
   return { allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio };
-}
-
-/** Stands where the id goes in a listed title that still needs one; such lines aren't added. */
-export const NO_ID = "?";
-
-/** "abc123" or "abc123 The Matrix {tmdb-603}", one video per line: the id, then a name to know it by. */
-export function parseVideoLines(raw: unknown): { videos: { videoId: string; name: string }[]; bad: string[] } {
-  const lines = typeof raw === "string" ? raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
-  const videos = new Map<string, { videoId: string; name: string }>();
-  const bad: string[] = [];
-  for (const line of lines) {
-    const [first, ...rest] = line.split(/\s+/);
-    if (first === NO_ID) continue;
-    const videoId = parseMediaId(first);
-    if (videoId) videos.set(videoId, { videoId, name: rest.join(" ").slice(0, 200) || videoId });
-    else bad.push(line);
-  }
-  return { videos: [...videos.values()], bad };
 }

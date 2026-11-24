@@ -2,20 +2,13 @@ import { useState } from "react";
 import AdminShell from "../../components/admin/AdminShell";
 import SourceForm from "../../components/admin/SourceForm";
 import { ErrorCard, Skeleton } from "../../components/ui/States";
-import { useEmbedVideoSearch } from "../../lib/embeds";
 import {
   FEATURE_LABELS,
-  useAddFrameVideos,
   useDeleteSource,
-  useLinkSourceVideo,
-  useMissingFrameTitles,
   useOrderSources,
-  useRemoveFrameVideo,
   useSources,
-  useSourceVideos,
   useSyncSource,
   useUpdateSource,
-  type SourceVideo,
   type VideoSource,
 } from "../../lib/sources";
 import type { PlayerFeature } from "../../lib/types";
@@ -40,7 +33,7 @@ export default function AdminSourcesPage() {
     <AdminShell
       section="sources"
       title="Sources"
-      description="Where every title plays from, tried from the top down. Put a title's TMDb id in the video's name, such as tmdb-603 for a film or tmdb-1396-s1e2 for an episode, and it's matched by itself. Any other site's player can be added with its embed code."
+      description="Every title is tried in every source, from the top down, until one plays it. There's nothing to select: on Bunny and Cloudflare, put the title's TMDb id in the video's name, such as tmdb-603 for a film or tmdb-1396-s1e2 for an episode."
       actions={
         !adding && (
           <button
@@ -99,7 +92,6 @@ function SourceCard({
   moving: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const [showVideos, setShowVideos] = useState(false);
   const update = useUpdateSource();
   const remove = useDeleteSource();
   const sync = useSyncSource();
@@ -118,9 +110,11 @@ function SourceCard({
           <p className="text-xs text-text-tertiary">
             {KIND_LABELS[source.kind]}
             {!source.enabled && " · off"}
-            {source.playsEveryFile
-              ? " · every video"
-              : source.sync && ` · ${source.sync.videos} videos, ${source.sync.matched} matched`}
+            {hosted && source.sync && ` · ${source.sync.videos} videos`}
+            {hosted && source.sync && source.sync.videos > source.sync.matched && (
+              <span className="text-amber"> · {source.sync.videos - source.sync.matched} without a TMDb id in the name, so never found</span>
+            )}
+            {isFrame && " · every video in your library"}
           </p>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">
@@ -140,11 +134,6 @@ function SourceCard({
                   {sync.isPending ? "Checking…" : "Check for new videos"}
                 </button>
               )}
-              {!source.playsEveryFile && (
-                <button type="button" className={BUTTON} aria-expanded={showVideos} onClick={() => setShowVideos((v) => !v)}>
-                  {showVideos ? "Hide videos" : "Videos"}
-                </button>
-              )}
               <button type="button" className={BUTTON} aria-expanded={editing} onClick={() => setEditing((v) => !v)}>
                 {isFrame ? "Player" : "Connection"}
               </button>
@@ -154,9 +143,7 @@ function SourceCard({
                 disabled={remove.isPending}
                 onClick={() => {
                   if (window.confirm(
-                    isFrame
-                      ? `Remove ${source.name}? The videos you listed for it and their links are lost.`
-                      : `Remove ${source.name}? Its videos stay on ${KIND_LABELS[source.kind]}; links you made by hand are lost.`,
+                    isFrame ? `Remove ${source.name}?` : `Remove ${source.name}? Its videos stay on ${KIND_LABELS[source.kind]}.`,
                   )) {
                     remove.mutate(source.id);
                   }
@@ -202,160 +189,6 @@ function SourceCard({
       {editing && (
         <div className="mt-4 border-t border-divider pt-4">
           <SourceForm source={source} onDone={() => setEditing(false)} />
-        </div>
-      )}
-      {showVideos && !source.playsEveryFile && (
-        <>
-          {isFrame && <AddFrameVideos sourceId={source.id} />}
-          <Videos sourceId={source.id} isFrame={isFrame} />
-        </>
-      )}
-    </li>
-  );
-}
-
-function AddFrameVideos({ sourceId }: { sourceId: string }) {
-  const [lines, setLines] = useState("");
-  const add = useAddFrameVideos();
-  const missing = useMissingFrameTitles();
-  const rows = lines.split("\n").filter((line) => line.trim());
-  // Listed, but its id isn't filled in yet.
-  const isBlank = (line: string) => /^\s*\?(\s|$)/.test(line);
-  const ready = rows.filter((line) => !isBlank(line)).length;
-  const listAll = () =>
-    missing.mutate(sourceId, {
-      // What's been typed stays on top.
-      onSuccess: (all) => setLines([...rows.filter((line) => !isBlank(line)), ...all].join("\n")),
-    });
-  return (
-    <form
-      className="mt-4 grid gap-2 border-t border-divider pt-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        add.mutate({ id: sourceId, lines }, { onSuccess: () => setLines(rows.filter(isBlank).join("\n")) });
-      }}
-    >
-      <label className="grid gap-1.5">
-        <span className="text-xs font-semibold tracking-wide text-text-secondary uppercase">Add videos</span>
-        <textarea
-          value={lines}
-          onChange={(event) => setLines(event.target.value)}
-          placeholder={"a1b2c3 Holiday film\nd4e5f6 The Matrix tmdb-603"}
-          rows={Math.min(Math.max(rows.length + 1, 3), 16)}
-          autoComplete="off"
-          spellCheck={false}
-          className="w-full rounded-lg border border-divider-strong bg-background px-3 py-2.5 font-mono text-sm text-white outline-none focus:border-accent"
-        />
-        <span className="text-xs text-text-tertiary">
-          One per line: the video's ID on that site, then a name. A TMDb id in the name matches it by itself; link the rest below.
-          "Add all videos" lists every library video this source doesn't have: put its ID in place of each "?". Lines left with a "?" are kept for later.
-        </span>
-      </label>
-      <div className="flex flex-wrap items-center gap-2.5">
-        <button type="submit" className={BUTTON} disabled={add.isPending || ready === 0}>
-          {add.isPending ? "Adding…" : ready > 1 ? `Add ${ready}` : "Add"}
-        </button>
-        <button type="button" className={BUTTON} disabled={missing.isPending || add.isPending} onClick={listAll}>
-          {missing.isPending ? "Listing…" : "Add all videos"}
-        </button>
-        {missing.data?.length === 0 && <span className="text-sm text-text-tertiary">It already has every video.</span>}
-        {(add.error ?? missing.error) && (
-          <span role="alert" className="text-sm text-danger">
-            {(add.error ?? missing.error)!.message}
-          </span>
-        )}
-      </div>
-    </form>
-  );
-}
-
-function Videos({ sourceId, isFrame }: { sourceId: string; isFrame: boolean }) {
-  const { data, error } = useSourceVideos(sourceId, true);
-  if (error) return <p className="mt-4 text-sm text-danger">The videos did not load.</p>;
-  if (!data) return <Skeleton className="mt-4 h-24" />;
-  if (data.length === 0) {
-    return <p className="mt-4 text-sm text-text-tertiary">{isFrame ? "No videos yet." : "Nothing uploaded there yet."}</p>;
-  }
-  return (
-    <ul className="mt-4 grid gap-x-6 border-t border-divider pt-3 xl:grid-cols-2">
-      {data.map((video) => (
-        <VideoRow key={video.videoId} sourceId={sourceId} video={video} removable={isFrame} />
-      ))}
-    </ul>
-  );
-}
-
-function matchText(video: SourceVideo): string {
-  if (!video.ready) return "Still processing";
-  if (video.title) return `${video.title}${video.linkedByHand ? " (linked by hand)" : ""}`;
-  return video.key ? `${video.key}: not in the library` : "No TMDb id in its name";
-}
-
-function VideoRow({ sourceId, video, removable }: { sourceId: string; video: SourceVideo; removable: boolean }) {
-  const [linking, setLinking] = useState(false);
-  const [search, setSearch] = useState("");
-  const results = useEmbedVideoSearch(linking ? search : "");
-  const link = useLinkSourceVideo();
-  const remove = useRemoveFrameVideo();
-  const set = (fileId: string | null) =>
-    link.mutate({ id: sourceId, videoId: video.videoId, fileId }, { onSuccess: () => setLinking(false) });
-
-  return (
-    <li className="min-w-0 border-b border-divider py-2.5">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm text-white">{video.name}</p>
-          <p className={`truncate text-xs ${video.title ? "text-live" : "text-amber"}`}>
-            {matchText(video)}
-            {video.height ? ` · ${video.height}p` : ""}
-            {removable && video.name !== video.videoId ? ` · ${video.videoId}` : ""}
-          </p>
-        </div>
-        {video.linkedByHand && (
-          <button type="button" className={BUTTON} disabled={link.isPending} onClick={() => set(null)}>
-            Unlink
-          </button>
-        )}
-        <button type="button" className={BUTTON} aria-expanded={linking} onClick={() => setLinking((v) => !v)}>
-          {linking ? "Cancel" : "Link"}
-        </button>
-        {removable && (
-          <button
-            type="button"
-            className={BUTTON}
-            aria-label={`Remove ${video.name}`}
-            disabled={remove.isPending}
-            onClick={() => remove.mutate({ id: sourceId, videoId: video.videoId })}
-          >
-            Remove
-          </button>
-        )}
-      </div>
-      {remove.error && <p className="mt-1 text-sm text-danger">{remove.error.message}</p>}
-      {linking && (
-        <div className="mt-2">
-          <input
-            type="search"
-            autoFocus
-            aria-label={`Find the title for ${video.name}`}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search films and episodes"
-            className="min-h-11 w-full rounded-lg border border-divider-strong bg-background px-3 text-sm text-white"
-          />
-          {results.data?.map((r) => (
-            <button
-              key={r.fileId}
-              type="button"
-              disabled={link.isPending}
-              onClick={() => set(r.fileId)}
-              className="mt-1 block w-full truncate rounded-lg px-3 py-2 text-left text-sm text-white transition hover:bg-surface-hover"
-            >
-              {r.title} <span className="text-xs text-text-tertiary">{r.driveName}</span>
-            </button>
-          ))}
-          {results.data?.length === 0 && <p className="px-3 py-2 text-sm text-text-tertiary">Nothing matches.</p>}
-          {link.error && <p className="px-3 py-2 text-sm text-danger">{link.error.message}</p>}
         </div>
       )}
     </li>

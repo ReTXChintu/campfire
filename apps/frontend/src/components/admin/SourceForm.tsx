@@ -50,7 +50,7 @@ const KINDS: { kind: SourceKind; label: string; name: string }[] = [
 ];
 
 const CODE_EXAMPLE = `<iframe
-  src="https://player.example.com/embed/{{media_id}}"
+  src="https://player.example.com/embed/{{file_id}}"
   allow="autoplay; fullscreen; picture-in-picture"
   allowfullscreen
 ></iframe>`;
@@ -66,7 +66,7 @@ const list = (values: string, strip = "") =>
 function FrameSummary({ preview: { config, ignored } }: { preview: FramePreview }) {
   const rows: [string, string][] = [
     ["Plays from", config.template],
-    ["Videos", config.template.includes("{{file_id}}") ? "Every one, by its Drive file ID" : "The ones you list"],
+    ["Videos", "Every one in your library, by its Drive file ID"],
     ["May use", list(config.allow)],
     ["Sandbox allows", list(config.sandbox, "allow-")],
     ["Full screen", config.allowFullscreen ? "Yes" : "No"],
@@ -107,9 +107,8 @@ function FrameFields({ code, onChange, preview, error }: {
           className={`${FIELD} font-mono`}
         />
         <span className="text-xs text-text-tertiary">
-          Put {"{{file_id}}"} where the ID goes if the player holds your own Drive files: every video then plays from it, in
-          the sources' order, with nothing to list. For a site with its own IDs use {"{{media_id}}"} and list its videos. Only
-          add players you may show here.
+          Put {"{{file_id}}"} where the video's Drive file ID goes. Every video in your library is tried in it, in the sources'
+          order. Only add a player that holds your own files.
         </span>
       </label>
       <div className="grid content-start gap-1.5" aria-live="polite">
