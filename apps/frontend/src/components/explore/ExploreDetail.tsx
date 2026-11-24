@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { exploreMetaLine, libraryHref, useExploreTitle, type ExploreDetail as Detail, type ExploreOffer } from "../../lib/explore";
 import { useCreateRequest, useToggleUpvote } from "../../hooks/useRequests";
 import { Skeleton } from "../ui/States";
+import Trailer from "../Trailer";
 import { Star } from "./ExploreRow";
 
 /** One title opened: what it is, where it streams in India, and — when it isn't in Campfire — a
@@ -254,6 +255,8 @@ function DetailBody({ d }: { d: Detail }) {
             </Link>
           </div>
         )}
+
+        <Trailer tmdb={{ type: d.tmdbType, id: d.tmdbId }} />
 
         <section aria-labelledby="explore-watch-heading" className="grid gap-3">
           <h3 id="explore-watch-heading" className="text-[13px] font-bold tracking-[0.1em] text-text-secondary">

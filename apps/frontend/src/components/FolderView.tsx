@@ -3,6 +3,7 @@ import type { CatalogListItem, CatalogVideoListItem } from "../lib/catalogListIt
 import type { TitleLanguages, TitleMeta, WatchProgress } from "../lib/types";
 import { languageFacts } from "../lib/titleLanguages";
 import CastRow from "./CastRow";
+import Trailer from "./Trailer";
 import DetailHeader from "./DetailHeader";
 import EpisodeRow from "./EpisodeRow";
 import VideoGrid from "./VideoGrid";
@@ -70,6 +71,7 @@ export default function FolderView({
       />
 
       <CastRow cast={meta.cast} />
+      <Trailer tmdb={meta.tmdb} className={`${PAGE_X} pt-8`} />
 
       <section className={`${PAGE_X} pt-8`}>
         {folders.length > 0 && (

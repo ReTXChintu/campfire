@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/title_meta.dart';
+import 'trailer_button.dart';
 import '../models/explore.dart';
 import '../services/api_client.dart';
 import '../services/explore_service.dart';
@@ -184,6 +186,10 @@ class _ExploreDetailViewState extends State<ExploreDetailView> {
                     const SizedBox(height: 12),
                     Text(d.overview!, style: const TextStyle(color: Color(0xFFD8D1C6), fontSize: 14, height: 1.55)),
                   ],
+                  TrailerButton(
+                    tmdb: TmdbRef(type: d.tmdbType, id: d.tmdbId),
+                    padding: const EdgeInsets.only(top: 14),
+                  ),
                   if (d.libraryRoute != null) ...[const SizedBox(height: 18), _inLibrary(d)],
                   const SizedBox(height: 22),
                   _where(d),

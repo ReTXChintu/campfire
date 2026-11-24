@@ -5,6 +5,8 @@ import { ConnectionState, Room, RoomEvent, type Participant } from "livekit-clie
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import VideoPlayer from "../components/VideoPlayer";
 import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
+import EmbedPlayer from "../components/EmbedPlayer";
+import Trailer from "../components/Trailer";
 import ReactionOverlay, { type FloatingReaction } from "../components/ReactionOverlay";
 import WatchPartyChat from "../components/WatchPartyChat";
 import WatchPartyVideoGrid from "../components/WatchPartyVideoGrid";
@@ -121,6 +123,14 @@ export default function WatchPage() {
   }, [partyId]);
 
   const { data: video, isLoading, error } = useVideo(fileId!);
+  // The video the viewer (or a failed player) has switched to the library's own file for.
+  const [libraryFor, setLibraryFor] = useState<string | null>(null);
+  useEffect(() => {
+    // Leaving a party mid-film carries on with the file it was playing.
+    if (partyId && fileId) setLibraryFor(fileId);
+  }, [partyId, fileId]);
+  // A watch party always plays the file: an embedded player can't be kept in sync.
+  const embeds = !partyId && libraryFor !== fileId ? (video?.embeds ?? []) : [];
   const watchParty = useWatchParty(partyId);
   const createWatchParty = useCreateWatchParty();
   const joinWatchPartyToken = useJoinWatchPartyToken(partyId, {
@@ -523,7 +533,15 @@ export default function WatchPage() {
             {/* Only browser-native formats play here; everything else (MKV, or anything that would
                 need the live ffmpeg remux) is handed off to the apps, which play any container
                 directly via libmpv. */}
-            {video.seekMode !== "native" ? (
+            {embeds.length > 0 ? (
+              <EmbedPlayer
+                key={video.fileId}
+                embeds={embeds}
+                title={video.title ?? "Video"}
+                nextFileId={video.nextFileId}
+                onUseLibrary={() => setLibraryFor(video.fileId)}
+              />
+            ) : video.seekMode !== "native" ? (
               <DesktopAppRequiredNotice
                 title={video.title ?? "This video"}
                 fileId={video.fileId}
@@ -595,8 +613,13 @@ export default function WatchPage() {
       </PartyRoomProvider>
 
       <NowPlayingInfo video={video} />
+      {/* A series' trailer is on its own page, not under every episode. */}
+      {!video.episode && <Trailer tmdb={video.tmdb} className="mt-6" />}
 
-      <section className="mt-6 rounded-2xl border border-divider bg-surface p-4">
+      <section
+        hidden={embeds.length > 0}
+        className="mt-6 rounded-2xl border border-divider bg-surface p-4"
+      >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-2xl">
             <p className="text-xs uppercase tracking-[0.25em] text-white/45">Watch Party</p>

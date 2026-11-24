@@ -94,6 +94,14 @@ export default function AdminCatalogPage() {
             videos={data.unpublishedVideos}
           />
 
+          {/* TMDb is what identifies a title; an unmatched one has no facts, trailer or stable link. */}
+          <Worklist
+            title="Needs a TMDb match"
+            badge="Unmatched"
+            folders={data.rootFolders.filter((f) => f.status !== "pending" && !f.artwork)}
+            videos={data.rootVideos.filter((v) => v.status !== "pending" && !v.artwork)}
+          />
+
           <h2 className="mb-1 font-display text-xl tracking-wide text-white">Library</h2>
           <CatalogChildrenList folders={data.rootFolders} videos={data.rootVideos} />
         </>

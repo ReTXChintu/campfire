@@ -1,3 +1,5 @@
+import type { TmdbRef } from "./types";
+
 // Structurally identical to the backend's lib/catalogListItem.ts — the backend already returns
 // items pre-sorted (naturalSort runs server-side), so only the type shapes are duplicated here.
 /** The TMDb facts a list item carries: a year and a score for the card, and the genres and lead
@@ -5,6 +7,7 @@
  * lib/discovery.ts). Optional throughout: an older backend doesn't send them, and an unmatched
  * title has none. */
 type CardFacts = {
+  tmdb?: TmdbRef | null;
   year?: number | null;
   rating?: { average: number; count: number } | null;
   genres?: string[];

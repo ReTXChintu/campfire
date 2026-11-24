@@ -1,10 +1,13 @@
 import type { ArtworkKind, CatalogArtwork, CatalogEpisodeArtwork } from "./artwork";
+import { tmdbRefOf, type TmdbRef } from "./tmdbRef";
 
 /** The TMDb facts a viewer-facing page shows, flattened out of the stored artwork so clients
  * never have to know about TMDb ids, image paths or which fields a given match happened to fill.
  * Every field is nullable or empty by default, so a title with no match (or one matched by an
  * older build) renders the same page with fewer facts on it. */
 export type TitleMeta = {
+  /** The title's identity; null when it isn't matched. */
+  tmdb: TmdbRef | null;
   year: number | null;
   overview: string | null;
   tagline: string | null;
@@ -23,6 +26,7 @@ export type TitleMeta = {
 };
 
 export const emptyTitleMeta: TitleMeta = {
+  tmdb: null,
   year: null,
   overview: null,
   tagline: null,
@@ -45,6 +49,7 @@ export function titleMeta(
 ): TitleMeta {
   if (!artwork) return emptyTitleMeta;
   return {
+    tmdb: tmdbRefOf({ artwork }),
     year: artwork.year ?? null,
     overview: artwork.overview ?? null,
     tagline: artwork.tagline ?? null,

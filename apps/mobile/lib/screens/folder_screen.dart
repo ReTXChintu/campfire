@@ -9,6 +9,7 @@ import '../widgets/authed_network_image.dart';
 import '../widgets/title_meta_views.dart';
 import '../models/title_meta.dart';
 import '../widgets/media_card.dart';
+import '../widgets/trailer_button.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/ui_kit.dart';
 
@@ -179,6 +180,12 @@ class _FolderScreenState extends State<FolderScreen> {
                           ),
                       ],
                     ),
+                    if (data.meta.tmdb != null)
+                      TrailerButton(
+                        key: ValueKey('trailer-${data.folderId}'),
+                        tmdb: data.meta.tmdb!,
+                        padding: const EdgeInsets.only(top: 10),
+                      ),
                     if (data.isSeries && data.seasons.length > 1) ...[
                       const SizedBox(height: 18),
                       _SeasonPicker(

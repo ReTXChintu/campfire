@@ -22,6 +22,7 @@ import appVersionRoutes from "./routes/appVersion";
 import watchPartyRoutes from "./routes/watchParties";
 import requestRoutes, { requestImageRouter } from "./routes/requests";
 import exploreRoutes from "./routes/explore";
+import titleRoutes from "./routes/title";
 
 import adminScanRoutes from "./routes/admin/scan";
 import adminOverviewRoutes from "./routes/admin/overview";
@@ -31,6 +32,7 @@ import adminSubtitleSetRoutes from "./routes/admin/subtitleSets";
 import adminRequestRoutes from "./routes/admin/requests";
 import adminArtworkRoutes from "./routes/admin/artwork";
 import adminTrackRoutes from "./routes/admin/tracks";
+import adminEmbedRoutes from "./routes/admin/embeds";
 import { queueStaleTrackReads } from "./lib/mediaTracks";
 import { matchCatalog } from "./lib/episodeArtwork";
 
@@ -58,6 +60,7 @@ app.use("/api/watch-parties", watchPartyRoutes);
 app.use("/api/requests", requestRoutes);
 app.use("/api/request-image", requestImageRouter);
 app.use("/api/explore", exploreRoutes);
+app.use("/api/title", titleRoutes);
 
 app.use("/api/admin/scan", adminScanRoutes);
 app.use("/api/admin/catalog/overview", adminOverviewRoutes);
@@ -67,6 +70,7 @@ app.use("/api/admin/subtitle-sets", adminSubtitleSetRoutes);
 app.use("/api/admin/requests", adminRequestRoutes);
 app.use("/api/admin/catalog/artwork", adminArtworkRoutes);
 app.use("/api/admin/catalog/tracks", adminTrackRoutes);
+app.use("/api/admin/embeds", adminEmbedRoutes);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

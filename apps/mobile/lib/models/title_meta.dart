@@ -21,6 +21,22 @@ class TmdbRating {
   String get label => average.toStringAsFixed(1);
 }
 
+/// Which TMDb title something is — a title's identity (backend lib/tmdbRef.ts).
+class TmdbRef {
+  final String type; // "movie" | "tv"
+  final String id;
+
+  const TmdbRef({required this.type, required this.id});
+
+  static TmdbRef? tryParse(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final type = json['type'];
+    final id = json['id'];
+    if ((type != 'movie' && type != 'tv') || id is! String) return null;
+    return TmdbRef(type: type as String, id: id);
+  }
+}
+
 class CastMember {
   final String name;
   final String? character;
@@ -38,6 +54,8 @@ class CastMember {
 }
 
 class TitleMeta {
+  /// Null when the title isn't matched, or from an older backend.
+  final TmdbRef? tmdb;
   final int? year;
   final String? overview;
   final String? tagline;
@@ -57,6 +75,7 @@ class TitleMeta {
   final List<CastMember> cast;
 
   const TitleMeta({
+    this.tmdb,
     this.year,
     this.overview,
     this.tagline,
@@ -73,6 +92,7 @@ class TitleMeta {
   /// Reads the facts straight off a detail response, which carries them flattened rather than
   /// nested — so this takes the whole response body.
   factory TitleMeta.fromJson(Map<String, dynamic> json) => TitleMeta(
+    tmdb: TmdbRef.tryParse(json['tmdb']),
     year: (json['year'] as num?)?.toInt(),
     overview: json['overview'] as String?,
     tagline: json['tagline'] as String?,

@@ -1,4 +1,5 @@
 import '../models/catalog.dart';
+import '../models/title_meta.dart';
 import 'api_client.dart';
 
 // Sentinel distinguishing "caller didn't pass this argument at all" from "caller explicitly
@@ -24,6 +25,14 @@ class CatalogService {
   static Future<VideoResponse> fetchVideo(String fileId) async {
     final data = await ApiClient.get('/api/video/$fileId') as Map<String, dynamic>;
     return VideoResponse.fromJson(data);
+  }
+
+  /// The YouTube id of the title's official trailer, or null when there isn't one.
+  static Future<String?> fetchTrailer(TmdbRef tmdb) async {
+    final data = await ApiClient.get('/api/title/${tmdb.type}/${tmdb.id}/trailer') as Map<String, dynamic>;
+    final trailer = data['trailer'];
+    final id = trailer is Map<String, dynamic> ? trailer['youtubeId'] : null;
+    return id is String ? id : null;
   }
 
   static Future<ProbeResult> fetchProbe(String fileId) async {

@@ -494,6 +494,22 @@ class UpNextItem {
   }
 }
 
+/// A hosting service's own player for this title (backend lib/embed.ts).
+class VideoEmbed {
+  final String provider;
+  final String url;
+
+  const VideoEmbed({required this.provider, required this.url});
+
+  static VideoEmbed? tryParse(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    final provider = json['provider'];
+    final url = json['url'];
+    if (provider is! String || url is! String) return null;
+    return VideoEmbed(provider: provider, url: url);
+  }
+}
+
 class VideoResponse {
   final String fileId;
   final String title;
@@ -505,6 +521,8 @@ class VideoResponse {
   final Map<String, EpisodeProgress> progressByFileId;
   final double initialPositionSeconds;
   final bool initialCompleted;
+  /// Players to offer, in order, before the file itself. Empty from an older backend.
+  final List<VideoEmbed> embeds;
   final String seekMode; // "native" | "restart" | "raw" (MKV — see MkvVideoPlayer)
   final double? durationSeconds;
   final List<ConvertedSubtitle> subtitles;
@@ -573,6 +591,7 @@ class VideoResponse {
     required this.initialPositionSeconds,
     required this.initialCompleted,
     required this.seekMode,
+    this.embeds = const [],
     this.durationSeconds,
     required this.subtitles,
     this.introStart,
@@ -620,6 +639,7 @@ class VideoResponse {
     initialPositionSeconds: (json['initialPositionSeconds'] as num).toDouble(),
     initialCompleted: json['initialCompleted'] as bool,
     seekMode: json['seekMode'] as String,
+    embeds: [for (final e in (json['embeds'] as List?) ?? const []) ?VideoEmbed.tryParse(e)],
     durationSeconds: (json['durationSeconds'] as num?)?.toDouble(),
     subtitles: (json['subtitles'] as List).map((e) => ConvertedSubtitle.fromJson(e)).toList(),
     introStart: (json['introStart'] as num?)?.toDouble(),

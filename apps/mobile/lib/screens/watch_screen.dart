@@ -4,6 +4,7 @@ import '../models/catalog.dart';
 import '../services/catalog_service.dart';
 import '../services/watch_events.dart';
 import '../services/watch_party_sync_controller.dart';
+import '../widgets/embed_player.dart';
 import '../widgets/media_kit_video_player.dart';
 import '../widgets/watch_party_overlay.dart';
 
@@ -23,6 +24,9 @@ class _WatchScreenState extends State<WatchScreen> {
   // Mirrors widget.partyId but lets WatchPartyOverlay change it locally (join/leave/create) without
   // waiting on a full route round-trip — pushed back into the URL so it survives a rebuild/rotation.
   String? _partyId;
+  // Playing the library's own file rather than offering the title's embedded players. A party always
+  // does: an embedded player can't be kept in sync.
+  late bool _useLibrary = widget.partyId != null;
   // Owned here (not by WatchPartyOverlay or the player) since it's the only channel through which
   // those two otherwise-unrelated widgets talk to each other — see watch_party_sync_controller.dart.
   final _syncController = WatchPartySyncController();
@@ -76,6 +80,16 @@ class _WatchScreenState extends State<WatchScreen> {
             );
           }
           final video = snapshot.data!;
+
+          if (video.embeds.isNotEmpty && !_useLibrary) {
+            return EmbedPlayer(
+              key: ValueKey(widget.fileId),
+              video: video,
+              onUseLibrary: () {
+                if (mounted) setState(() => _useLibrary = true);
+              },
+            );
+          }
 
           // Wraps the player rather than sitting beside it in a Stack — keeps Watch Party
           // deliberately isolated from MediaKitVideoPlayer's own internals (the two only ever talk

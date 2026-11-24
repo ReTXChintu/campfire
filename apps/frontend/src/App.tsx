@@ -21,10 +21,12 @@ const RequestsPage = lazyRoute(() => import("./routes/RequestsPage"));
 const ExplorePage = lazyRoute(() => import("./routes/ExplorePage"));
 const SettingsPage = lazyRoute(() => import("./routes/SettingsPage"));
 const LinkDevicePage = lazyRoute(() => import("./routes/LinkDevicePage"));
+const TitlePage = lazyRoute(() => import("./routes/TitlePage"));
 const ResetPasswordPage = lazyRoute(() => import("./routes/ResetPasswordPage"));
 const AdminOverviewPage = lazyRoute(() => import("./routes/admin/AdminOverviewPage"));
 const AdminCatalogPage = lazyRoute(() => import("./routes/admin/AdminCatalogPage"));
 const AdminRequestsPage = lazyRoute(() => import("./routes/admin/AdminRequestsPage"));
+const AdminEmbedsPage = lazyRoute(() => import("./routes/admin/AdminEmbedsPage"));
 const AdminCatalogFolderPage = lazyRoute(() => import("./routes/admin/AdminCatalogFolderPage"));
 const AdminCatalogVideoPage = lazyRoute(() => import("./routes/admin/AdminCatalogVideoPage"));
 
@@ -82,6 +84,14 @@ export default function App() {
             }
           />
           <Route
+            path="/title/:type/:tmdbId"
+            element={
+              <ProtectedRoute>
+                <TitlePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/explore"
             element={
               <ProtectedRoute>
@@ -134,6 +144,14 @@ export default function App() {
             element={
               <AdminRoute>
                 <AdminRequestsPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/embeds"
+            element={
+              <AdminRoute>
+                <AdminEmbedsPage />
               </AdminRoute>
             }
           />

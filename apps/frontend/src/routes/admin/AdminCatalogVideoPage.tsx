@@ -4,6 +4,7 @@ import { ApiError } from "../../lib/api";
 import AdminShell from "../../components/admin/AdminShell";
 import VideoCurationForm from "../../components/admin/VideoCurationForm";
 import ArtworkPanel from "../../components/admin/ArtworkPanel";
+import EmbedEditor from "../../components/admin/EmbedEditor";
 import { VideoTracksPanel } from "../../components/admin/TracksPanel";
 import NotFoundPage from "../NotFoundPage";
 
@@ -81,6 +82,11 @@ export default function AdminCatalogVideoPage() {
           />
         </div>
       )}
+
+      <section className="mt-8 rounded-xl border border-divider bg-surface p-4">
+        <h2 className="mb-2 text-sm font-semibold text-white">Embedded players</h2>
+        <EmbedEditor fileId={fileId!} />
+      </section>
 
       <VideoTracksPanel fileId={fileId!} />
 

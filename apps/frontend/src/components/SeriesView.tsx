@@ -6,6 +6,7 @@ import { EmptyState } from "./ui/States";
 import { formatLabel } from "../lib/mediaFormat";
 import { PAGE_X } from "../lib/layout";
 import CastRow from "./CastRow";
+import Trailer from "./Trailer";
 import type { TitleLanguages, TitleMeta, WatchProgress } from "../lib/types";
 import { languageFacts } from "../lib/titleLanguages";
 import type { CatalogListItem, CatalogVideoListItem } from "../lib/catalogListItem";
@@ -105,6 +106,7 @@ export default function SeriesView({
       />
 
       <CastRow cast={meta.cast} />
+      <Trailer tmdb={meta.tmdb} className={`${PAGE_X} pt-8`} />
 
       <section className={`${PAGE_X} pt-8`}>
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">

@@ -56,6 +56,9 @@ export type CatalogArtwork = {
   cast?: { name: string; character: string | null; profilePath: string | null }[];
 };
 
+/** Which TMDb title — or episode of one — something is: a title's identity (backend lib/tmdbRef.ts). */
+export type TmdbRef = { type: "movie" | "tv"; id: string; season?: number; episode?: number };
+
 /** TMDb's own user score (not IMDb's — TMDb doesn't publish those). */
 export type TmdbRating = { average: number; count: number };
 
@@ -77,6 +80,8 @@ export type CatalogEpisodeArtwork = {
  * `titleMeta`. `year` and `overview` kept their old names, so code that only reads those is
  * unaffected; everything else is optional because an older backend doesn't send it. */
 export type TitleMeta = {
+  /** Null when the title isn't matched; absent from an older backend. */
+  tmdb?: TmdbRef | null;
   year?: number | null;
   overview?: string | null;
   tagline?: string | null;
@@ -320,6 +325,8 @@ export type VideoResponse = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
+  /** Players to try, in order, before the file itself; absent from an older backend. */
+  embeds?: { provider: string; url: string }[];
   /** The up-next card's choice and the end screen's "more like this" (see lib/upNext.ts); absent
    * from an older backend. */
   upNext?: UpNextItem | null;

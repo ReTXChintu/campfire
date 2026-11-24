@@ -30,6 +30,8 @@ import {
   titleLanguages,
 } from "../lib/mediaTracks";
 import { getUserById } from "../lib/users";
+import { playableEmbeds } from "../lib/embed";
+import { tmdbRefOf } from "../lib/tmdbRef";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
@@ -109,6 +111,7 @@ const LIST_CAST_NAMES = 6;
  * ignored by clients that predate them. */
 function cardFacts(doc: { artwork?: CatalogArtwork | null }) {
   return {
+    tmdb: tmdbRefOf(doc),
     year: doc.artwork?.year ?? null,
     rating: doc.artwork?.rating ?? null,
     genres: doc.artwork?.genres ?? [],
@@ -493,9 +496,10 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   // Audio and subtitle tracks under the names an admin gave them, and which ones to start on —
   // the viewer's own picks first, then their profile's languages, then the admin's default (see
   // startTracks in lib/mediaTracks.ts). Older apps keep using the initial* fields above.
-  const [{ merged: naming, folders }, user] = await Promise.all([
+  const [{ merged: naming, folders }, user, embeds] = await Promise.all([
     namingForVideo(video),
     getUserById(req.authUser!.userId),
+    playableEmbeds(video),
   ]);
   const tracks = video.tracks && !video.tracks.error ? video.tracks : null;
   const viewerTracks = effectiveTracks(tracks, naming);
@@ -524,6 +528,8 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     // an older client is unaffected); `episode` is the other case — a series episode, whose
     // synopsis and number come from its series' season listing instead.
     ...titleMeta(video.artwork, "video", fileId),
+    // An episode's too, which titleMeta (the film's own match) leaves null.
+    tmdb: tmdbRefOf(video),
     episode: episodeMeta(video.episodeArtwork),
     upNext,
     suggestions,
@@ -556,6 +562,8 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     introStart: video.introStart,
     introEnd: video.introEnd,
     outroStart: video.outroStart,
+    // Players to try, in order, before the file itself (lib/embed.ts).
+    embeds,
   });
 });
 

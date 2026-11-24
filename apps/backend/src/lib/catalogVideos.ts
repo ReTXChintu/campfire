@@ -2,6 +2,7 @@ import { getDb } from "./mongodb";
 import type { RenditionHeight } from "./qualityLadder";
 import type { ArtworkFields } from "./artwork";
 import type { FileTracks, TrackNaming } from "./mediaTracks";
+import { deleteFileEmbeds } from "./embed";
 
 export type CatalogVideoStatus = "pending" | "curated" | "published";
 
@@ -104,6 +105,7 @@ export async function deleteVideosByIds(fileIds: string[]): Promise<number> {
   if (fileIds.length === 0) return 0;
   const col = await collection();
   const res = await col.deleteMany({ _id: { $in: fileIds } });
+  await deleteFileEmbeds(fileIds);
   return res.deletedCount;
 }
 
