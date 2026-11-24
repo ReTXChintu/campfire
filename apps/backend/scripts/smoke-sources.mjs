@@ -394,6 +394,17 @@ try {
   const framePlayer = async (id) => (await api(`/api/video/${id}`, { token: viewer })).body.players.find((p) => p.id === frameId);
   check("a matched one plays, as the code said", (await framePlayer("ep"))?.url === "https://player.example/ep-1" && (await framePlayer("ep")).frame.radius === 12 && !("template" in (await framePlayer("ep")).frame), await framePlayer("ep"));
   check("a title without one doesn't", (await framePlayer("film")) === undefined && (await framePlayer("home")) === undefined);
+  const missing = async (id = frameId) => asAdmin(`/${id}/missing`, "GET");
+  check(
+    "lists every title it lacks, published and matched, without an ID",
+    JSON.stringify((await missing()).body.lines) === JSON.stringify(["? tmdb-603 The Matrix", "? tmdb-10331 Night of the Living Dead"]),
+    (await missing()).body,
+  );
+  check("for its own kind only, and admins", (await missing(cfId)).status === 404 && (await api(`${A}/${frameId}/missing`, { token: viewer })).status === 403);
+  check("lines without an ID add nothing", (await addVideos("? tmdb-603 The Matrix")).status === 400);
+  check("filled in, they're matched", (await addVideos("m1 tmdb-603 The Matrix\n? tmdb-10331 Night")).body.added === 1 && (await framePlayer("mkv"))?.url === "https://player.example/m1");
+  check("and no longer listed", (await missing()).body.lines.length === 1);
+  await asAdmin(`/${frameId}/videos/m1`, "DELETE");
   const odd = encodeURIComponent("lib/a?b#c");
   check("linking by hand", (await asAdmin(`/${frameId}/videos/${odd}`, "PUT", { fileId: "home" })).status === 200);
   check("an ID can't change the address around it", (await framePlayer("home"))?.url === "https://player.example/lib/a%3Fb%23c", await framePlayer("home"));

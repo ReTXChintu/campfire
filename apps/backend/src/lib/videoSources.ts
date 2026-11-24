@@ -22,6 +22,7 @@ import {
   frameOf,
   frameSiteName,
   frameUrl,
+  NO_ID,
   parseFrameCode,
   parseVideoLines,
   type Frame,
@@ -475,6 +476,40 @@ export async function addFrameVideos(sourceId: string, lines: unknown): Promise<
   );
   await recount(sourceId);
   return videos.length;
+}
+
+/** Every published title an "any player" source has no video of, as lines for addFrameVideos that
+ * only lack the id: "? tmdb-603 The Matrix". Null when there's no such source. */
+export async function missingFrameTitles(sourceId: string): Promise<string[] | null> {
+  if (!(await isFrame(sourceId))) return null;
+  const db = await getDb();
+  const [taken, catalog] = await Promise.all([
+    (await sourceVideos()).distinct("key", { sourceId }),
+    db
+      .collection<NamedVideo & { status: string }>("catalogVideos")
+      .find(
+        { status: "published" },
+        {
+          projection: {
+            title: 1, driveName: 1, "artwork.tmdbType": 1, "artwork.tmdbId": 1,
+            "episodeArtwork.seriesTmdbId": 1, "episodeArtwork.season": 1, "episodeArtwork.episode": 1,
+          },
+        },
+      )
+      .toArray(),
+  ]);
+  const has = new Set(taken);
+  const lines = new Map<string, string>();
+  for (const video of catalog) {
+    const ref = tmdbRefOf(video);
+    if (!ref || keysOf(video).some((key) => has.has(key))) continue;
+    const isEpisode = ref.season != null && ref.episode != null;
+    // A name can only say a film or an episode.
+    if (ref.type === "tv" && !isEpisode) continue;
+    const tag = `tmdb-${ref.id}${isEpisode ? `-s${ref.season}e${ref.episode}` : ""}`;
+    lines.set(tag, `${NO_ID} ${tag} ${(video.title ?? video.driveName).replace(/\s+/g, " ")}`);
+  }
+  return [...lines.values()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
 /** Takes a video off an "any player" source; a hosted one's list is its host's. */

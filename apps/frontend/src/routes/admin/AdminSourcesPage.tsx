@@ -8,6 +8,7 @@ import {
   useAddFrameVideos,
   useDeleteSource,
   useLinkSourceVideo,
+  useMissingFrameTitles,
   useOrderSources,
   useRemoveFrameVideo,
   useSources,
@@ -208,12 +209,22 @@ function SourceCard({
 function AddFrameVideos({ sourceId }: { sourceId: string }) {
   const [lines, setLines] = useState("");
   const add = useAddFrameVideos();
+  const missing = useMissingFrameTitles();
+  const rows = lines.split("\n").filter((line) => line.trim());
+  // Listed, but its id isn't filled in yet.
+  const isBlank = (line: string) => /^\s*\?(\s|$)/.test(line);
+  const ready = rows.filter((line) => !isBlank(line)).length;
+  const listAll = () =>
+    missing.mutate(sourceId, {
+      // What's been typed stays on top.
+      onSuccess: (all) => setLines([...rows.filter((line) => !isBlank(line)), ...all].join("\n")),
+    });
   return (
     <form
       className="mt-4 grid gap-2 border-t border-divider pt-4"
       onSubmit={(event) => {
         event.preventDefault();
-        add.mutate({ id: sourceId, lines }, { onSuccess: () => setLines("") });
+        add.mutate({ id: sourceId, lines }, { onSuccess: () => setLines(rows.filter(isBlank).join("\n")) });
       }}
     >
       <label className="grid gap-1.5">
@@ -222,22 +233,27 @@ function AddFrameVideos({ sourceId }: { sourceId: string }) {
           value={lines}
           onChange={(event) => setLines(event.target.value)}
           placeholder={"a1b2c3 Holiday film\nd4e5f6 The Matrix tmdb-603"}
-          rows={3}
+          rows={Math.min(Math.max(rows.length + 1, 3), 16)}
           autoComplete="off"
           spellCheck={false}
           className="w-full rounded-lg border border-divider-strong bg-background px-3 py-2.5 font-mono text-sm text-white outline-none focus:border-accent"
         />
         <span className="text-xs text-text-tertiary">
           One per line: the video's ID on that site, then a name. A TMDb id in the name matches it by itself; link the rest below.
+          "Add all videos" lists every library title this source doesn't have: put its ID in place of each "?". Lines left with a "?" are kept for later.
         </span>
       </label>
       <div className="flex flex-wrap items-center gap-2.5">
-        <button type="submit" className={BUTTON} disabled={add.isPending || !lines.trim()}>
-          {add.isPending ? "Adding…" : "Add"}
+        <button type="submit" className={BUTTON} disabled={add.isPending || ready === 0}>
+          {add.isPending ? "Adding…" : ready > 1 ? `Add ${ready}` : "Add"}
         </button>
-        {add.error && (
+        <button type="button" className={BUTTON} disabled={missing.isPending || add.isPending} onClick={listAll}>
+          {missing.isPending ? "Listing…" : "Add all videos"}
+        </button>
+        {missing.data?.length === 0 && <span className="text-sm text-text-tertiary">It already has every matched title.</span>}
+        {(add.error ?? missing.error) && (
           <span role="alert" className="text-sm text-danger">
-            {add.error.message}
+            {(add.error ?? missing.error)!.message}
           </span>
         )}
       </div>

@@ -117,6 +117,12 @@ export const useAddFrameVideos = () =>
     apiPost<{ added: number }>(`/api/admin/sources/${id}/videos`, { lines }),
   );
 
+/** Every library title the source has no video of, as lines that only lack the id. */
+export const useMissingFrameTitles = () =>
+  useMutation({
+    mutationFn: (id: string) => apiGet<{ lines: string[] }>(`/api/admin/sources/${id}/missing`).then((r) => r.lines),
+  });
+
 export const useRemoveFrameVideo = () =>
   useSourceMutation(({ id, videoId }: { id: string; videoId: string }) =>
     apiDelete(`/api/admin/sources/${id}/videos/${encodeURIComponent(videoId)}`),

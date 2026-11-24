@@ -180,6 +180,9 @@ export function frameOf({ allow, allowFullscreen, sandbox, referrerPolicy, radiu
   return { allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio };
 }
 
+/** Stands where the id goes in a listed title that still needs one; such lines aren't added. */
+export const NO_ID = "?";
+
 /** "abc123" or "abc123 The Matrix {tmdb-603}", one video per line: the id, then a name to know it by. */
 export function parseVideoLines(raw: unknown): { videos: { videoId: string; name: string }[]; bad: string[] } {
   const lines = typeof raw === "string" ? raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
@@ -187,6 +190,7 @@ export function parseVideoLines(raw: unknown): { videos: { videoId: string; name
   const bad: string[] = [];
   for (const line of lines) {
     const [first, ...rest] = line.split(/\s+/);
+    if (first === NO_ID) continue;
     const videoId = parseMediaId(first);
     if (videoId) videos.set(videoId, { videoId, name: rest.join(" ").slice(0, 200) || videoId });
     else bad.push(line);

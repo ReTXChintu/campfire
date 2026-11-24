@@ -10,6 +10,7 @@ import {
   linkVideo,
   listSources,
   listSourceVideos,
+  missingFrameTitles,
   previewFrame,
   removeFrameVideo,
   setOrder,
@@ -85,6 +86,12 @@ router.post("/:id/videos", requireAdmin, handle(async (req, res) => {
   const added = await addFrameVideos(req.params.id, (req.body as { lines?: unknown })?.lines);
   if (added === null) notFound(res);
   else res.status(201).json({ added });
+}));
+
+router.get("/:id/missing", requireAdmin, handle(async (req, res) => {
+  const lines = await missingFrameTitles(req.params.id);
+  if (lines) res.json({ lines });
+  else notFound(res);
 }));
 
 router.delete("/:id/videos/:videoId", requireAdmin, handle(async (req, res) => {
