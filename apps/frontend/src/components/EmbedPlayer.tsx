@@ -1,11 +1,29 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import type { PlayerFrame } from "../lib/types";
 
 /** Nothing at all after this long means the provider can't be reached from here. */
 const LOAD_TIMEOUT_MS = 12_000;
 const YOUTUBE_HOST = /^www\.youtube(-nocookie)?\.com$/;
 // Vimeo also reports harmless things as errors, such as a browser refusing autoplay.
 const VIMEO_FATAL = ["NotFoundError", "PrivacyError"];
+
+/** The listed services' players. */
+const DEFAULT_FRAME: PlayerFrame = {
+  allow: "autoplay; fullscreen; encrypted-media; picture-in-picture",
+  allowFullscreen: true,
+  sandbox: "allow-scripts allow-same-origin allow-presentation",
+  referrerPolicy: "strict-origin-when-cross-origin",
+  radius: null,
+  ratio: null,
+};
+
+/** A frame of this site's own pages must not share its origin: the sign-in is kept there. The server
+ * refuses such an address too. */
+function safeSandbox(url: string, sandbox: string): string {
+  if (new URL(url).host !== window.location.host) return sandbox;
+  return sandbox.split(" ").filter((flag) => flag !== "allow-same-origin").join(" ");
+}
 
 function withApi(url: string): string {
   const u = new URL(url);
@@ -27,11 +45,12 @@ function saysFailed(host: string, raw: unknown): boolean {
   }
 }
 
-/** Plays a title in a hosting service's own player, calling `onFailed` when that says it can't. The
+/** Plays a title in another site's own player, calling `onFailed` when that says it can't. The
  * server has already dropped ones their provider says are gone; the buttons are for a failure the
  * player doesn't report. No watch party, resume or tracks here. */
 export default function EmbedPlayer({
   url,
+  frame: look = DEFAULT_FRAME,
   name,
   title,
   nextFileId,
@@ -40,6 +59,8 @@ export default function EmbedPlayer({
   onFailed,
 }: {
   url: string;
+  /** How a player added by its embed code is drawn. */
+  frame?: PlayerFrame;
   name: string;
   title: string;
   nextFileId: string | null;
@@ -93,10 +114,11 @@ export default function EmbedPlayer({
         title={title}
         onLoad={handleLoad}
         className="aspect-video w-full rounded-2xl border-0 bg-black"
-        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-        allowFullScreen
-        referrerPolicy="strict-origin-when-cross-origin"
-        sandbox="allow-scripts allow-same-origin allow-presentation"
+        style={{ aspectRatio: look.ratio ?? undefined, borderRadius: look.radius ?? undefined }}
+        allow={look.allow}
+        allowFullScreen={look.allowFullscreen}
+        referrerPolicy={look.referrerPolicy as ReferrerPolicy}
+        sandbox={safeSandbox(url, look.sandbox)}
       />
       <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm text-text-secondary">
         <span role="status" className="mr-auto">

@@ -17,14 +17,26 @@ import {
   type CloudflareConfig,
   type HostVideo,
 } from "./videoHosts";
+import {
+  FrameError,
+  frameOf,
+  frameSiteName,
+  frameUrl,
+  parseFrameCode,
+  parseVideoLines,
+  type Frame,
+  type FrameConfig,
+} from "./frameSource";
 
 /** Video sources: the libraries a title can play from, in one global order an admin sets — Bunny
- * Stream libraries, Cloudflare Stream accounts, and Drive itself. A source's videos are listed
- * through the account's own API key every half hour and belong to a title by the TMDb id in their
- * name ("tmdb-603", "tmdb-1396-s1e2"), or because an admin linked them. Players try the sources in
- * order and fall to the next when one fails. */
+ * Stream libraries, Cloudflare Stream accounts, any other site's player by its embed code
+ * (lib/frameSource.ts), and Drive itself. A hosted source's videos are listed through the account's
+ * own API key every half hour; an embed code's are added by an admin, by their ids on that site. They
+ * belong to a title by the TMDb id in their name ("tmdb-603", "tmdb-1396-s1e2"), or because an admin
+ * linked them. Players try the sources in order and fall to the next when one fails. */
 
 export const DRIVE_ID = "drive";
+const MAX_ADD = 1000;
 const SYNC_EVERY_MS = 30 * 60_000;
 
 export const FEATURES = [
@@ -45,12 +57,12 @@ type SyncState = { at: Date; error: string | null; videos: number; matched: numb
 
 type SourceDoc = {
   _id: string;
-  kind: "bunny" | "cloudflare" | "drive";
+  kind: "bunny" | "cloudflare" | "frame" | "drive";
   name: string;
   enabled: boolean;
   order: number;
   features: Features;
-  config: BunnyConfig | CloudflareConfig | null;
+  config: BunnyConfig | CloudflareConfig | FrameConfig | null;
   /** Sealed (lib/secretBox.ts); never sent to a client. */
   apiKey: string | null;
   /** Bunny only: the pull zone's token authentication key, when it's switched on there. */
@@ -177,14 +189,23 @@ async function store(sourceId: string, videos: HostVideo[]): Promise<void> {
 
 async function recount(sourceId: string): Promise<void> {
   const col = await sourceVideos();
-  const matched = await col.countDocuments({ sourceId, key: { $ne: null } });
-  await (await sources()).updateOne({ _id: sourceId, sync: { $ne: null } }, { $set: { "sync.matched": matched } });
+  const [videos, matched] = await Promise.all([
+    col.countDocuments({ sourceId }),
+    col.countDocuments({ sourceId, key: { $ne: null } }),
+  ]);
+  await (await sources()).updateOne(
+    { _id: sourceId, sync: { $ne: null } },
+    { $set: { "sync.videos": videos, "sync.matched": matched } },
+  );
 }
+
+/** Whether the source has an API its videos are listed through. */
+const isHosted = (source: SourceDoc) => source.kind === "bunny" || source.kind === "cloudflare";
 
 /** Lists the source's videos again. A failure keeps the videos already known and is shown in admin. */
 export async function syncSource(id: string): Promise<boolean> {
   const source = await (await sources()).findOne({ _id: id });
-  if (!source || source.kind === "drive") return false;
+  if (!source || !isHosted(source)) return false;
   try {
     const videos = await listVideos(source, apiKeyOf(source));
     await store(id, videos);
@@ -202,7 +223,7 @@ export async function syncSource(id: string): Promise<boolean> {
 
 async function syncAll(): Promise<void> {
   for (const source of await ordered()) {
-    if (source.kind !== "drive" && source.enabled) await syncSource(source._id);
+    if (isHosted(source) && source.enabled) await syncSource(source._id);
   }
 }
 
@@ -251,6 +272,17 @@ function parseConfig(kind: "bunny" | "cloudflare", raw: unknown): BunnyConfig | 
   return { accountId };
 }
 
+/** What an embed code is read as, for the admin form to show before saving. */
+export function previewFrame(code: unknown) {
+  try {
+    const { config, ignored } = parseFrameCode(code);
+    return { config, siteName: frameSiteName(config), ignored };
+  } catch (error) {
+    if (error instanceof FrameError) throw new SourceInputError(error.message);
+    throw error;
+  }
+}
+
 type SourceInput = {
   name?: unknown;
   enabled?: unknown;
@@ -258,6 +290,8 @@ type SourceInput = {
   config?: unknown;
   apiKey?: unknown;
   tokenKey?: unknown;
+  /** An "any player" source's embed code. */
+  code?: unknown;
 };
 
 function parseSecret(value: unknown, what: string): string {
@@ -266,15 +300,43 @@ function parseSecret(value: unknown, what: string): string {
   return secret;
 }
 
-/** Adds a source, after its host has accepted the key and listed its videos. */
+/** Saves a new source: before Drive, after everything already put before it. */
+async function insertSource(doc: SourceDoc): Promise<void> {
+  const ids = (await ordered()).map((s) => s._id);
+  await (await sources()).insertOne(doc);
+  ids.splice(ids.indexOf(DRIVE_ID), 0, doc._id);
+  await setOrder(ids);
+}
+
+async function createFrameSource(input: SourceInput): Promise<string> {
+  const { config, siteName } = previewFrame(input.code);
+  const doc: SourceDoc = {
+    _id: randomUUID(),
+    kind: "frame",
+    name: text(input.name).slice(0, 60) || siteName,
+    enabled: true,
+    order: 0,
+    features: allFeatures(),
+    config,
+    apiKey: null,
+    tokenKey: null,
+    sync: { at: new Date(), error: null, videos: 0, matched: 0 },
+  };
+  await insertSource(doc);
+  return doc._id;
+}
+
+/** Adds a source: a hosted one after its host has accepted the key and listed its videos. */
 export async function createSource(kind: unknown, input: SourceInput): Promise<string> {
-  if (kind !== "bunny" && kind !== "cloudflare") throw new SourceInputError("Pick Bunny Stream or Cloudflare Stream.");
+  if (kind === "frame") return createFrameSource(input);
+  if (kind !== "bunny" && kind !== "cloudflare") {
+    throw new SourceInputError("Pick Bunny Stream, Cloudflare Stream or any player.");
+  }
   const name = text(input.name).slice(0, 60);
   if (!name) throw new SourceInputError("Give it a name.");
   const apiKey = parseSecret(input.apiKey, "an API key");
   if (!apiKey) throw new SourceInputError("Enter the API key.");
   const tokenKey = kind === "bunny" ? parseSecret(input.tokenKey, "a token authentication key") : "";
-  const existing = await ordered();
   const doc: SourceDoc = {
     _id: randomUUID(),
     kind,
@@ -289,11 +351,7 @@ export async function createSource(kind: unknown, input: SourceInput): Promise<s
   };
   const videos = await listVideos(doc, apiKey);
   if (kind === "bunny") await checkBunnyCdn(doc.config as BunnyConfig, videos, tokenKey || null);
-  await (await sources()).insertOne(doc);
-  // Before Drive, after everything already put before it.
-  const ids = existing.map((s) => s._id);
-  ids.splice(ids.indexOf(DRIVE_ID), 0, doc._id);
-  await setOrder(ids);
+  await insertSource(doc);
   await store(doc._id, videos);
   return doc._id;
 }
@@ -310,6 +368,9 @@ export async function updateSource(id: string, input: SourceInput): Promise<bool
       if (!set.name) throw new SourceInputError("Give it a name.");
     }
     if (typeof input.enabled === "boolean") set.enabled = input.enabled;
+  }
+  if (source.kind === "frame" && input.code !== undefined) set.config = previewFrame(input.code).config;
+  if (source.kind === "bunny" || source.kind === "cloudflare") {
     const apiKey = parseSecret(input.apiKey, "an API key");
     if (apiKey) set.apiKey = seal(apiKey);
     if (source.kind === "bunny" && input.tokenKey !== undefined) {
@@ -382,6 +443,48 @@ async function checkBunnyCdn(config: BunnyConfig, videos: HostVideo[], tokenKey:
   }
 }
 
+async function isFrame(sourceId: string): Promise<boolean> {
+  return (await (await sources()).countDocuments({ _id: sourceId, kind: "frame" })) > 0;
+}
+
+/** Adds videos to an "any player" source, one per line (parseVideoLines). One it already has is
+ * renamed, keeping its link. Null when there's no such source. */
+export async function addFrameVideos(sourceId: string, lines: unknown): Promise<number | null> {
+  if (!(await isFrame(sourceId))) return null;
+  const { videos, bad } = parseVideoLines(lines);
+  if (bad.length) throw new SourceInputError(`That isn't a video ID: ${bad[0].slice(0, 80)}`);
+  if (videos.length === 0) throw new SourceInputError("Enter at least one video ID.");
+  if (videos.length > MAX_ADD) throw new SourceInputError(`Add up to ${MAX_ADD} videos at a time.`);
+  const col = await sourceVideos();
+  const ids = videos.map((v) => `${sourceId}:${v.videoId}`);
+  const links = new Map(
+    (await col.find({ _id: { $in: ids } }, { projection: { manualKey: 1 } }).toArray()).map((d) => [d._id, d.manualKey ?? null]),
+  );
+  await col.bulkWrite(
+    videos.map(({ videoId, name }) => {
+      const _id = `${sourceId}:${videoId}`;
+      const manualKey = links.get(_id) ?? null;
+      const autoKey = keyFromName(name);
+      const replacement: SourceVideoDoc = {
+        _id, sourceId, videoId, name, ready: true, durationSeconds: null, height: null, captions: [], hls: null,
+        signed: false, autoKey, manualKey, key: manualKey ?? autoKey,
+      };
+      return { replaceOne: { filter: { _id }, replacement, upsert: true } };
+    }),
+    { ordered: false },
+  );
+  await recount(sourceId);
+  return videos.length;
+}
+
+/** Takes a video off an "any player" source; a hosted one's list is its host's. */
+export async function removeFrameVideo(sourceId: string, videoId: string): Promise<boolean> {
+  if (!(await isFrame(sourceId))) return false;
+  const { deletedCount } = await (await sourceVideos()).deleteOne({ _id: `${sourceId}:${videoId}` });
+  await recount(sourceId);
+  return deletedCount > 0;
+}
+
 type NamedVideo = VideoDoc & { title: string | null; driveName: string };
 
 /** A source's videos, unmatched first, each with the catalog title it belongs to. */
@@ -435,6 +538,7 @@ export async function linkVideo(sourceId: string, videoId: string, video: VideoD
 /** One way to play a title. `id` is what a client asks for it by. */
 export type PlayerOption =
   | { id: string; kind: "embed"; name: string; url: string }
+  | { id: string; kind: "frame"; name: string; url: string; frame: Frame }
   | { id: string; kind: "stream"; name: string; features: Features }
   | { id: string; kind: "drive"; name: string; features: Features };
 
@@ -453,24 +557,29 @@ export async function playersFor(video: VideoDoc): Promise<PlayerOption[]> {
   const [embeds, all] = await Promise.all([playableEmbeds(video), ordered()]);
   const enabled = all.filter((s) => s.enabled || s.kind === "drive");
   const hosted = enabled.filter((s) => s.kind !== "drive").map((s) => s._id);
-  const have = new Set(hosted.length ? (await matching(video, hosted)).map((v) => v.sourceId) : []);
+  // The best match of each source.
+  const have = new Map<string, SourceVideoDoc>();
+  for (const v of hosted.length ? await matching(video, hosted) : []) {
+    if (!have.has(v.sourceId)) have.set(v.sourceId, v);
+  }
   return [
     ...embeds.map((e, i) => ({ id: `embed-${i}`, kind: "embed" as const, name: e.provider, url: e.url })),
-    ...enabled
-      .filter((s) => s.kind === "drive" || have.has(s._id))
-      .map((s) => ({
-        id: s._id,
-        kind: s.kind === "drive" ? ("drive" as const) : ("stream" as const),
-        name: s.kind === "drive" ? "Library" : s.name,
-        features: parseFeatures(s.features, allFeatures()),
-      })),
+    ...enabled.flatMap((s): PlayerOption[] => {
+      const features = parseFeatures(s.features, allFeatures());
+      if (s.kind === "drive") return [{ id: s._id, kind: "drive", name: "Library", features }];
+      const found = have.get(s._id);
+      if (!found) return [];
+      if (s.kind !== "frame") return [{ id: s._id, kind: "stream", name: s.name, features }];
+      const config = s.config as FrameConfig;
+      return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, found.videoId), frame: frameOf(config) }];
+    }),
   ];
 }
 
 /** Where a title streams from in one source, with addresses that expire; null when it isn't there. */
 export async function streamFor(sourceId: string, video: VideoDoc) {
   const source = await (await sources()).findOne({ _id: sourceId, enabled: true });
-  if (!source || source.kind === "drive") return null;
+  if (!source || !isHosted(source)) return null;
   const [found] = await matching(video, [sourceId]);
   if (!found) return null;
   let stream;

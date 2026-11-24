@@ -593,10 +593,11 @@ export default function WatchPage() {
             {/* Only browser-native formats play here; everything else (MKV, or anything that would
                 need the live ffmpeg remux) is handed off to the apps, which play any container
                 directly via libmpv. */}
-            {player?.kind === "embed" ? (
+            {player?.kind === "embed" || player?.kind === "frame" ? (
               <EmbedPlayer
                 key={`${video.fileId}-${player.id}`}
                 url={player.url}
+                frame={player.kind === "frame" ? player.frame : undefined}
                 name={player.name}
                 title={video.title ?? "Video"}
                 nextFileId={video.nextFileId}

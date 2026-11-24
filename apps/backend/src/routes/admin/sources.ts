@@ -3,12 +3,15 @@ import { requireAdmin } from "../../middleware/auth";
 import { getCatalogVideo } from "../../lib/catalogVideos";
 import { HostError } from "../../lib/videoHosts";
 import {
+  addFrameVideos,
   createSource,
   deleteSource,
   FEATURES,
   linkVideo,
   listSources,
   listSourceVideos,
+  previewFrame,
+  removeFrameVideo,
   setOrder,
   SourceInputError,
   syncSource,
@@ -43,6 +46,11 @@ router.post("/", requireAdmin, handle(async (req, res) => {
   res.status(201).json({ id: await createSource(body.kind, body) });
 }));
 
+/** What a pasted embed code is read as; nothing is saved. */
+router.post("/read-code", requireAdmin, handle(async (req, res) => {
+  res.json(previewFrame((req.body as { code?: unknown })?.code));
+}));
+
 router.put("/order", requireAdmin, handle(async (req, res) => {
   const ids = (req.body as { ids?: unknown })?.ids;
   if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
@@ -70,6 +78,18 @@ router.post("/:id/sync", requireAdmin, handle(async (req, res) => {
 
 router.get("/:id/videos", requireAdmin, handle(async (req, res) => {
   res.json({ videos: await listSourceVideos(req.params.id) });
+}));
+
+/** An "any player" source's videos, one per line: the id on that site, then an optional name. */
+router.post("/:id/videos", requireAdmin, handle(async (req, res) => {
+  const added = await addFrameVideos(req.params.id, (req.body as { lines?: unknown })?.lines);
+  if (added === null) notFound(res);
+  else res.status(201).json({ added });
+}));
+
+router.delete("/:id/videos/:videoId", requireAdmin, handle(async (req, res) => {
+  if (await removeFrameVideo(req.params.id, req.params.videoId)) res.json({ ok: true });
+  else notFound(res);
 }));
 
 /** `fileId` links the video to that catalog video's title; null goes back to matching by name. */

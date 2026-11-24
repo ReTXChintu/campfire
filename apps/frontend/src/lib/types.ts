@@ -288,9 +288,21 @@ export type PlayerFeature =
   | "settings";
 export type PlayerFeatures = Record<PlayerFeature, boolean>;
 
-/** One way to play a title: another service's player, a stream from a video host, or Drive. */
+/** How an "any player" source's frame is drawn (backend lib/frameSource.ts). */
+export type PlayerFrame = {
+  allow: string;
+  allowFullscreen: boolean;
+  sandbox: string;
+  referrerPolicy: string;
+  radius: number | null;
+  ratio: number | null;
+};
+
+/** One way to play a title: another service's player, a player added by its embed code, a stream
+ * from a video host, or Drive. */
 export type PlayerOption =
   | { id: string; kind: "embed"; name: string; url: string }
+  | { id: string; kind: "frame"; name: string; url: string; frame: PlayerFrame }
   | { id: string; kind: "stream" | "drive"; name: string; features: PlayerFeatures };
 
 export type FolderFlatResponse = {

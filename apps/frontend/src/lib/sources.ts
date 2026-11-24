@@ -1,11 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./api";
-import type { PlayerFeature, PlayerFeatures } from "./types";
+import type { PlayerFeature, PlayerFeatures, PlayerFrame } from "./types";
 
 /** Video sources, as the admin page manages them (backend lib/videoSources.ts). Keys are only ever
  * sent, never read back. */
 
-export type SourceKind = "bunny" | "cloudflare";
+/** "frame" is any other site's player, added by its embed code. */
+export type SourceKind = "bunny" | "cloudflare" | "frame";
+
+export type FrameConfig = PlayerFrame & { template: string };
+export type FramePreview = { config: FrameConfig; siteName: string; ignored: string[] };
 
 export type VideoSource = {
   id: string;
@@ -13,7 +17,7 @@ export type VideoSource = {
   name: string;
   enabled: boolean;
   features: PlayerFeatures;
-  config: { libraryId?: string; cdnHostname?: string; accountId?: string } | null;
+  config: ({ libraryId?: string; cdnHostname?: string; accountId?: string } & Partial<FrameConfig>) | null;
   hasApiKey: boolean;
   hasTokenKey: boolean;
   sync: { at: string; error: string | null; videos: number; matched: number } | null;
@@ -35,6 +39,7 @@ export type SourceInput = {
   enabled?: boolean;
   features?: PlayerFeatures;
   config?: VideoSource["config"];
+  code?: string;
   apiKey?: string;
   tokenKey?: string | null;
 };
@@ -93,5 +98,44 @@ export const useSyncSource = () => useSourceMutation((id: string) => apiPost(`/a
 
 export const useLinkSourceVideo = () =>
   useSourceMutation(({ id, videoId, fileId }: { id: string; videoId: string; fileId: string | null }) =>
-    apiPut(`/api/admin/sources/${id}/videos/${videoId}`, { fileId }),
+    apiPut(`/api/admin/sources/${id}/videos/${encodeURIComponent(videoId)}`, { fileId }),
   );
+
+/** What the server reads an embed code as. */
+export function useFramePreview(code: string) {
+  return useQuery({
+    queryKey: ["admin-source-code", code],
+    queryFn: () => apiPost<FramePreview>("/api/admin/sources/read-code", { code }),
+    enabled: code !== "",
+    retry: false,
+    staleTime: Infinity,
+  });
+}
+
+export const useAddFrameVideos = () =>
+  useSourceMutation(({ id, lines }: { id: string; lines: string }) =>
+    apiPost<{ added: number }>(`/api/admin/sources/${id}/videos`, { lines }),
+  );
+
+export const useRemoveFrameVideo = () =>
+  useSourceMutation(({ id, videoId }: { id: string; videoId: string }) =>
+    apiDelete(`/api/admin/sources/${id}/videos/${encodeURIComponent(videoId)}`),
+  );
+
+/** A saved player's embed code again, for changing it. */
+export function frameCode(config: VideoSource["config"]): string {
+  if (!config?.template) return "";
+  const { template, allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio } = config;
+  const quoted = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return [
+    "<iframe",
+    `  src="${quoted(template)}"`,
+    ...(ratio ? [`  width="${Math.round(ratio * 1080)}"`, '  height="1080"'] : ['  width="100%"', '  height="100%"']),
+    ...(radius !== null ? [`  style="border: 0; border-radius: ${radius}px;"`] : []),
+    `  allow="${quoted(allow ?? "")}"`,
+    ...(allowFullscreen ? ["  allowfullscreen"] : []),
+    `  sandbox="${quoted(sandbox ?? "")}"`,
+    `  referrerpolicy="${quoted(referrerPolicy ?? "")}"`,
+    "></iframe>",
+  ].join("\n");
+}
