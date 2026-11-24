@@ -470,7 +470,6 @@ export default function ExplorePage() {
               items={items}
               imageBase={wall.data.imageBase}
               libOnly={libOnly}
-              panelOpen={Boolean(opened)}
               glide={glide}
               onOpen={openItem}
               onFail={() => setWallFailed(true)}

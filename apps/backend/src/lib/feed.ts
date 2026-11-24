@@ -1,4 +1,3 @@
-import { env } from "../config/env";
 import { getDb } from "./mongodb";
 import {
   both,
@@ -6,12 +5,14 @@ import {
   discover,
   EXPLORE_SERVICES,
   genreNames,
+  logoFrom,
   streamingIn,
   tmdbCached,
   type ExploreItem,
   type ExploreKind,
   type RowSource,
   type RowSpec,
+  type TmdbLogo,
   type TmdbType,
 } from "./explore";
 import { libraryMatches } from "./tmdbSearch";
@@ -234,16 +235,13 @@ async function hero(kind: ExploreKind): Promise<StoredPage["hero"]> {
   return picks.map((item, i) => ({ ...item, logoUrl: logos[i] }));
 }
 
-/** The title's wordmark in English, or the one TMDb has without a language. */
 async function logoOf(type: TmdbType, id: string): Promise<string | null> {
-  const found = await tmdbCached<{ logos?: { file_path?: string; iso_639_1?: string | null }[] }>(
+  const found = await tmdbCached<{ logos?: TmdbLogo[] }>(
     `/${type}/${id}/images`,
     { include_image_language: "en,null" },
     IMAGES_TTL_MS,
   );
-  const usable = (found?.logos ?? []).filter((l) => l.file_path?.endsWith(".png"));
-  const best = usable.find((l) => l.iso_639_1 === "en") ?? usable[0];
-  return best ? `${env.tmdbImageBase}/w500${best.file_path}` : null;
+  return logoFrom(found?.logos);
 }
 
 type Item = Omit<ExploreItem, "inLibrary">;

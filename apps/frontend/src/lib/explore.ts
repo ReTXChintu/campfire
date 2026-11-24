@@ -27,6 +27,8 @@ export type ExploreService = { id: number; name: string; logoUrl: string | null 
 export type ExploreOffer = { id: number; name: string; logoUrl: string | null; url: string };
 
 export type ExploreDetail = Omit<ExploreItem, "services"> & {
+  /** Absent from an older backend. */
+  logoUrl?: string | null;
   tagline: string | null;
   runtime: number | null;
   seasons: number | null;

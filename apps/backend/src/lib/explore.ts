@@ -74,6 +74,8 @@ export type ExploreService = { id: number; name: string; logoUrl: string | null 
 export type ExploreOffer = { id: number; name: string; logoUrl: string | null; url: string };
 
 export type ExploreDetail = Omit<ExploreItem, "services"> & {
+  /** The title's wordmark. */
+  logoUrl: string | null;
   tagline: string | null;
   runtime: number | null;
   seasons: number | null;
@@ -144,6 +146,7 @@ type TmdbListResult = {
   adult?: boolean;
 };
 type TmdbList = { results?: TmdbListResult[] };
+export type TmdbLogo = { file_path?: string; iso_639_1?: string | null };
 
 type TmdbOffer = { provider_id: number; provider_name: string; logo_path?: string | null; display_priority?: number };
 type TmdbDetail = TmdbListResult & {
@@ -153,6 +156,7 @@ type TmdbDetail = TmdbListResult & {
   number_of_seasons?: number | null;
   number_of_episodes?: number | null;
   genres?: { id: number; name: string }[];
+  images?: { logos?: TmdbLogo[] };
   credits?: { cast?: { name: string; character?: string | null; profile_path?: string | null; order?: number }[] };
   "watch/providers"?: {
     results?: Record<string, { link?: string; flatrate?: TmdbOffer[]; free?: TmdbOffer[]; ads?: TmdbOffer[]; rent?: TmdbOffer[]; buy?: TmdbOffer[] }>;
@@ -160,6 +164,11 @@ type TmdbDetail = TmdbListResult & {
 };
 
 const image = (size: string, path: string | null | undefined) => (path ? `${env.tmdbImageBase}/${size}${path}` : null);
+/** The wordmark in English, or the one TMDb has without a language. */
+export function logoFrom(logos: TmdbLogo[] | undefined): string | null {
+  const usable = (logos ?? []).filter((l) => l.file_path?.endsWith(".png"));
+  return image("w500", (usable.find((l) => l.iso_639_1 === "en") ?? usable[0])?.file_path);
+}
 const yearOf = (date: string | undefined) => (date && /^\d{4}/.test(date) ? Number(date.slice(0, 4)) : null);
 const ratingOf = (r: TmdbListResult) =>
   typeof r.vote_average === "number" && r.vote_average > 0 && (r.vote_count ?? 0) >= 5 ? Math.round(r.vote_average * 10) / 10 : null;
@@ -540,7 +549,7 @@ export function isTmdbId(value: string): boolean {
 function rawDetail(type: TmdbType, tmdbId: string) {
   return tmdbCached<TmdbDetail>(
     `/${type}/${tmdbId}`,
-    { language: "en-US", append_to_response: "credits,watch/providers" },
+    { language: "en-US", append_to_response: "credits,watch/providers,images", include_image_language: "en,null" },
     DETAIL_TTL_MS,
   );
 }
@@ -605,6 +614,7 @@ export async function exploreDetail(type: TmdbType, tmdbId: string, viewerId: st
     overview: raw.overview?.trim() || null,
     posterUrl: image("w342", raw.poster_path),
     backdropUrl: image("w1280", raw.backdrop_path),
+    logoUrl: logoFrom(raw.images?.logos),
     tagline: raw.tagline?.trim() || null,
     runtime: raw.runtime || raw.episode_run_time?.[0] || null,
     seasons: type === "tv" ? (raw.number_of_seasons ?? null) : null,

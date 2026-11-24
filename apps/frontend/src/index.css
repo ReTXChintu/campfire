@@ -149,3 +149,16 @@ body {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
+
+/* A title's details coming up over the page. See components/explore/ExploreDetail.tsx. */
+@media (prefers-reduced-motion: no-preference) {
+  .detail-in {
+    animation: detail-in 0.22s ease-out;
+  }
+}
+@keyframes detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+}

@@ -1,22 +1,12 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "../lib/api";
+import { trailerSrc, useTrailer } from "../lib/trailer";
 import type { TmdbRef } from "../lib/types";
 
 /** The title's official trailer, looked up by TMDb id. Renders nothing when there isn't one. The
  * still loads by itself; YouTube's player only once it's pressed, so it never talks over the film. */
 export default function Trailer({ tmdb, className }: { tmdb: TmdbRef | null | undefined; className?: string }) {
   const [playing, setPlaying] = useState<string | null>(null);
-  const { data: trailer } = useQuery({
-    queryKey: ["trailer", tmdb?.type, tmdb?.id],
-    queryFn: () =>
-      apiGet<{ trailer: { name: string; youtubeId: string } | null }>(
-        `/api/title/${tmdb!.type}/${tmdb!.id}/trailer`,
-      ).then((r) => r.trailer),
-    enabled: !!tmdb,
-    staleTime: 60 * 60_000,
-    retry: false,
-  });
+  const { data: trailer } = useTrailer(tmdb);
   if (!trailer) return null;
 
   return (
@@ -25,7 +15,7 @@ export default function Trailer({ tmdb, className }: { tmdb: TmdbRef | null | un
       <div className="aspect-video w-full max-w-full overflow-hidden rounded-xl border border-divider bg-black sm:w-[480px]">
         {playing === trailer.youtubeId ? (
           <iframe
-            src={`https://www.youtube-nocookie.com/embed/${trailer.youtubeId}?autoplay=1&rel=0`}
+            src={trailerSrc(trailer)}
             title={trailer.name}
             className="h-full w-full border-0"
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"

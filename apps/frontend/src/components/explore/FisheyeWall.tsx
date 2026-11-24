@@ -25,7 +25,6 @@ export default function FisheyeWall({
   items,
   imageBase,
   libOnly,
-  panelOpen,
   glide,
   onOpen,
   onFail,
@@ -33,7 +32,6 @@ export default function FisheyeWall({
   items: WallItem[];
   imageBase: string;
   libOnly: boolean;
-  panelOpen: boolean;
   glide: GlideRequest | null;
   onOpen: (item: WallItem) => void;
   onFail: () => void;
@@ -75,11 +73,9 @@ export default function FisheyeWall({
     viaKeyboard: false,
     css: { w: 1, h: 1 },
     dpr: Math.min(window.devicePixelRatio || 1, 1.5),
-    panelOpen,
     libOnly,
     reduced: prefersReducedMotion(),
   });
-  state.current.panelOpen = panelOpen;
   state.current.libOnly = libOnly;
 
   const onOpenRef = useRef(onOpen);
@@ -89,12 +85,10 @@ export default function FisheyeWall({
   const shownRef = useRef(shown);
   shownRef.current = shown;
 
-  /** The lens centre in CSS px from the left and bottom: pushed left while the panel is open on a
-   * wide screen, so the poster you opened stays in view beside it. */
+  /** The lens centre in CSS px from the left and bottom. */
   const lensCentre = () => {
     const s = state.current;
-    const shift = s.panelOpen && s.css.w >= 900 ? Math.min(270, s.css.w * 0.2) : 0;
-    return [s.css.w / 2 - shift, s.css.h / 2] as const;
+    return [s.css.w / 2, s.css.h / 2] as const;
   };
   const halfOf = () => 0.5 * Math.min(state.current.css.w, state.current.css.h);
   /** Zoom 1 makes the middle poster about 40% of the height (more of the width on a phone). */
