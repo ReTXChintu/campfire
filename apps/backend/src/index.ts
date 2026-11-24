@@ -6,6 +6,7 @@ import { env } from "./config/env";
 import { seedAdminUser } from "./lib/users";
 import { ensureIndexes as ensureDevicePairingIndexes } from "./lib/devicePairings";
 import { ensureIndexes as ensureMediaRequestIndexes } from "./lib/mediaRequests";
+import { ensureIndexes as ensureSourceIndexes, startSourceSync } from "./lib/videoSources";
 import { startRenditionQueue } from "./lib/renditionQueue";
 
 import authRoutes from "./routes/auth";
@@ -23,6 +24,7 @@ import watchPartyRoutes from "./routes/watchParties";
 import requestRoutes, { requestImageRouter } from "./routes/requests";
 import exploreRoutes from "./routes/explore";
 import titleRoutes from "./routes/title";
+import sourceStreamRoutes from "./routes/sourceStream";
 
 import adminScanRoutes from "./routes/admin/scan";
 import adminOverviewRoutes from "./routes/admin/overview";
@@ -33,6 +35,7 @@ import adminRequestRoutes from "./routes/admin/requests";
 import adminArtworkRoutes from "./routes/admin/artwork";
 import adminTrackRoutes from "./routes/admin/tracks";
 import adminEmbedRoutes from "./routes/admin/embeds";
+import adminSourceRoutes from "./routes/admin/sources";
 import { queueStaleTrackReads } from "./lib/mediaTracks";
 import { matchCatalog } from "./lib/episodeArtwork";
 
@@ -61,6 +64,7 @@ app.use("/api/requests", requestRoutes);
 app.use("/api/request-image", requestImageRouter);
 app.use("/api/explore", exploreRoutes);
 app.use("/api/title", titleRoutes);
+app.use("/api/source-stream", sourceStreamRoutes);
 
 app.use("/api/admin/scan", adminScanRoutes);
 app.use("/api/admin/catalog/overview", adminOverviewRoutes);
@@ -71,6 +75,7 @@ app.use("/api/admin/requests", adminRequestRoutes);
 app.use("/api/admin/catalog/artwork", adminArtworkRoutes);
 app.use("/api/admin/catalog/tracks", adminTrackRoutes);
 app.use("/api/admin/embeds", adminEmbedRoutes);
+app.use("/api/admin/sources", adminSourceRoutes);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
@@ -83,9 +88,11 @@ Promise.all([
   seedAdminUser(env.adminEmail, env.adminPassword),
   ensureDevicePairingIndexes(),
   ensureMediaRequestIndexes(),
+  ensureSourceIndexes(),
 ])
   .then(() => {
     startRenditionQueue();
+    startSourceSync();
     server.listen(env.port, () => {
       console.log(`Campfire backend listening on http://0.0.0.0:${env.port}`);
     });

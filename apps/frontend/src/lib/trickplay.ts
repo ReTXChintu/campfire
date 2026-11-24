@@ -28,15 +28,16 @@ export function tileAt(m: TrickplayManifest, seconds: number): { sheet: number; 
 const RETRY_MS = 90_000;
 const MAX_TRIES = 8;
 
-/** The ready manifest, or null. The first ask queues the previews on the backend, so while
+/** The ready manifest, or null (always null without a file). The first ask queues the previews on the backend, so while
  * they're being made (a video's first play) this asks again every 90 s. */
-export function useTrickplay(fileId: string): TrickplayManifest | null {
+export function useTrickplay(fileId: string | null): TrickplayManifest | null {
   const [manifest, setManifest] = useState<TrickplayManifest | null>(null);
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
     let tries = 0;
     setManifest(null);
+    if (!fileId) return;
     const load = () => {
       tries++;
       apiGet<TrickplayResponse>(`/api/trickplay/${encodeURIComponent(fileId)}`)

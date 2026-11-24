@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 
 /** Nothing at all after this long means the provider can't be reached from here. */
@@ -27,54 +27,54 @@ function saysFailed(host: string, raw: unknown): boolean {
   }
 }
 
-/** Plays a title in a hosting service's own player, moving to the next one when a player fails and
- * to the library's own file (`onUseLibrary`) after the last. The server has already dropped players
- * their provider says are gone; the buttons are for a failure the player doesn't report. No watch
- * party, resume or tracks here. */
+/** Plays a title in a hosting service's own player, calling `onFailed` when that says it can't. The
+ * server has already dropped ones their provider says are gone; the buttons are for a failure the
+ * player doesn't report. No watch party, resume or tracks here. */
 export default function EmbedPlayer({
-  embeds,
+  url,
+  name,
   title,
   nextFileId,
-  onUseLibrary,
+  others,
+  onSelect,
+  onFailed,
 }: {
-  embeds: { provider: string; url: string }[];
+  url: string;
+  name: string;
   title: string;
   nextFileId: string | null;
-  onUseLibrary: () => void;
+  /** The other ways to play it. */
+  others: { id: string; name: string }[];
+  onSelect: (id: string) => void;
+  onFailed: () => void;
 }) {
-  // Kept as first given: a background refetch must not swap the player under the viewer.
-  const [list] = useState(embeds);
-  const [index, setIndex] = useState(0);
   const frame = useRef<HTMLIFrameElement>(null);
   const loaded = useRef(false);
-  const current = list[index];
-  const next = list[index + 1];
-
-  const advance = useRef(() => {});
+  const failed = useRef(onFailed);
   useEffect(() => {
-    advance.current = () => (next ? setIndex(index + 1) : onUseLibrary());
+    failed.current = onFailed;
   });
 
   useEffect(() => {
     loaded.current = false;
-    const { origin, hostname } = new URL(current.url);
+    const { origin, hostname } = new URL(url);
     const timer = window.setTimeout(() => {
-      if (!loaded.current) advance.current();
+      if (!loaded.current) failed.current();
     }, LOAD_TIMEOUT_MS);
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== origin) return;
-      if (saysFailed(hostname, event.data)) advance.current();
+      if (saysFailed(hostname, event.data)) failed.current();
     };
     window.addEventListener("message", onMessage);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("message", onMessage);
     };
-  }, [current.url]);
+  }, [url]);
 
   const handleLoad = () => {
     loaded.current = true;
-    const { origin, hostname } = new URL(current.url);
+    const { origin, hostname } = new URL(url);
     const send = (message: object) => frame.current?.contentWindow?.postMessage(JSON.stringify(message), origin);
     if (YOUTUBE_HOST.test(hostname)) {
       send({ event: "listening", id: 1, channel: "widget" });
@@ -84,14 +84,12 @@ export default function EmbedPlayer({
     }
   };
 
-  const button =
-    "min-h-11 rounded-lg border border-divider-strong px-4 font-semibold text-white transition hover:bg-surface-hover";
   return (
     <div>
       <iframe
-        key={current.url}
+        key={url}
         ref={frame}
-        src={withApi(current.url)}
+        src={withApi(url)}
         title={title}
         onLoad={handleLoad}
         className="aspect-video w-full rounded-2xl border-0 bg-black"
@@ -102,17 +100,18 @@ export default function EmbedPlayer({
       />
       <div className="mt-3 flex flex-wrap items-center gap-2.5 text-sm text-text-secondary">
         <span role="status" className="mr-auto">
-          Playing from {current.provider}
-          {list.length > 1 && ` (${index + 1} of ${list.length})`}. Not working?
+          Playing from {name}.{others.length > 0 && " Not working?"}
         </span>
-        {next && (
-          <button type="button" onClick={() => setIndex(index + 1)} className={button}>
-            Try {next.provider}
+        {others.map((other) => (
+          <button
+            key={other.id}
+            type="button"
+            onClick={() => onSelect(other.id)}
+            className="min-h-11 rounded-lg border border-divider-strong px-4 font-semibold text-white transition hover:bg-surface-hover"
+          >
+            Play from {other.name}
           </button>
-        )}
-        <button type="button" onClick={onUseLibrary} className={button}>
-          Play from the library
-        </button>
+        ))}
         {nextFileId && (
           <Link
             to={`/watch/${nextFileId}`}

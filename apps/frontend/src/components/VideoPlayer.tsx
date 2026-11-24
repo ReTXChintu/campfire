@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import throttle from "lodash.throttle";
-import type { ProbeResult, ConvertedSubtitle, StartSubtitle, WatchPartySyncState } from "../lib/types";
+import type {
+  ProbeResult,
+  ConvertedSubtitle,
+  PlayerFeatures,
+  StartSubtitle,
+  WatchPartySyncState,
+} from "../lib/types";
 import { languageName } from "../lib/languageNames";
 import { API_URL, apiGet, apiPost, apiPostKeepalive } from "../lib/api";
 import { useMediaToken } from "../lib/mediaToken";
 import EpisodesPanel from "./EpisodesPanel";
 import LockBanner from "./LockBanner";
 import TrackSettingsMenu from "./TrackSettingsMenu";
-import SubtitleMenu from "./SubtitleMenu";
+import PlayerMenu, { type MenuView, type SourceOption } from "./PlayerMenu";
 import type { QualitySelection } from "./QualitySection";
 import {
   PlayIcon,
@@ -24,10 +30,15 @@ import {
   VolumeHighIcon,
   VolumeMuteIcon,
   ChevronLeftIcon,
+  PipIcon,
+  CaptionsIcon,
+  SourceIcon,
 } from "./player-icons";
 import { UpNextCard, UpNextEndScreen } from "./UpNext";
 import TrickplayPreview from "./TrickplayPreview";
 import { useTrickplay } from "../lib/trickplay";
+import { useHls } from "../lib/useHls";
+import { ALL_FEATURES } from "../lib/players";
 import {
   type UpNextItem,
   UP_NEXT_STREAK_LIMIT,
@@ -72,6 +83,15 @@ type Props = {
    * an older backend, which keeps the plain "Next Episode" button. */
   upNext?: UpNextItem | null;
   suggestions?: UpNextItem[];
+  /** An HLS address to play instead of the Drive file (a video host — see StreamPlayer). Goes with
+   * `seekMode="native"`: it's just as directly seekable. */
+  streamUrl?: string | null;
+  /** Which controls to show; everything by default. */
+  features?: PlayerFeatures;
+  /** The ways this title can be played, for the source menu. */
+  sources?: { options: SourceOption[]; selected: string; onSelect: (id: string, positionSeconds: number) => void };
+  /** It can't start, or can't carry on. Null when it never got anywhere. */
+  onFailed?: (positionSeconds: number | null) => void;
   watchPartySync?: {
     enabled: boolean;
     // Whether *this* session currently drives playback for the party — the host's main device
@@ -89,6 +109,8 @@ const MIN_RESUME_SECONDS = 5;
 const SKIP_SECONDS = 10;
 const HIDE_CONTROLS_MS = 3000;
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+// Captions inside a hosted stream are numbered from here, clear of the uploaded ones.
+const STREAM_CAPTION_BASE = 1000;
 
 // Auto-mode quality heuristic — same constants and shape as the mobile players' (kept in sync by
 // hand, no shared code across TS/Dart): react to buffering events, not real throughput/segment
@@ -175,9 +197,14 @@ export default function VideoPlayer({
   startSubtitle = null,
   upNext = null,
   suggestions = [],
+  streamUrl = null,
+  features = ALL_FEATURES,
+  sources,
+  onFailed,
   watchPartySync,
 }: Props) {
   const isNative = seekMode === "native";
+  const isStream = streamUrl != null;
   const syncEnabled = !!watchPartySync?.enabled && isNative;
   // Anyone without playback control can't seek/skip/change speed during a synced party — those
   // actions would silently desync them until the controller's next broadcast, with no indication
@@ -202,7 +229,19 @@ export default function VideoPlayer({
   const navigate = useNavigate();
 
   const { data: mediaToken } = useMediaToken(fileId);
-  const trickplay = useTrickplay(fileId);
+  // Made from the Drive file, which a hosted stream exists to spare.
+  const trickplay = useTrickplay(isStream ? null : fileId);
+
+  const onFailedRef = useRef(onFailed);
+  useEffect(() => {
+    onFailedRef.current = onFailed;
+  });
+  const reportFailed = useCallback(() => {
+    const at = videoRef.current?.currentTime ?? 0;
+    onFailedRef.current?.(at > 0 ? at : null);
+  }, []);
+  const hls = useHls(videoRef, streamUrl, reportFailed);
+  const [streamHeight, setStreamHeight] = useState<number | null>(null);
 
   // "auto" starts unresolved (null) — see QualitySection/the Auto-mode heuristic — so it behaves
   // exactly like "original" until that adaptive logic actually seeds/adjusts it.
@@ -230,7 +269,7 @@ export default function VideoPlayer({
       : 0,
   );
   const [isBuffering, setIsBuffering] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(features.autoplay);
   const [displaySeconds, setDisplaySeconds] = useState(baseOffsetSeconds);
   // React's onChange for range inputs fires continuously while dragging (mirrors the native
   // `input` event, not `change`), so we track the live drag position separately and only commit
@@ -295,7 +334,9 @@ export default function VideoPlayer({
   const [speed, setSpeed] = useState(1);
   const [timeDisplayMode, setTimeDisplayMode] = useState<"total" | "remaining">("total");
   const [episodesOpen, setEpisodesOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menu, setMenu] = useState<MenuView | null>(null);
+  const settingsOpen = menu != null;
+  const [inPip, setInPip] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -376,7 +417,9 @@ export default function VideoPlayer({
       audioTitle?: string | null;
     } = {};
     if (subtitleTouchedRef.current) {
-      if (isNative) {
+      if (isStream) {
+        // Saved when it's picked; its numbering means nothing to another player.
+      } else if (isNative) {
         const track = nativeSubtitleIndex != null ? subtitles.find((s) => s.index === nativeSubtitleIndex) : null;
         fields.subtitleSource = nativeSubtitleIndex != null ? "external" : "off";
         fields.subtitleIndex = nativeSubtitleIndex;
@@ -397,7 +440,7 @@ export default function VideoPlayer({
       fields.audioTitle = track?.title ?? null;
     }
     return fields;
-  }, [isNative, nativeSubtitleIndex, restartSubtitleIndex, subtitles, audioIndex, probe]);
+  }, [isNative, isStream, nativeSubtitleIndex, restartSubtitleIndex, subtitles, audioIndex, probe]);
 
   const goToNext = useCallback((targetFileId?: string) => {
     const video = videoRef.current;
@@ -491,16 +534,25 @@ export default function VideoPlayer({
     if (!isNative) return;
     const video = videoRef.current;
     if (!video) return;
-    for (let i = 0; i < video.textTracks.length; i++) {
+    // Only our own <track>s, which come first: a stream's are the player library's to switch.
+    for (let i = 0; i < Math.min(video.textTracks.length, subtitleUrls.length); i++) {
       video.textTracks[i].mode = i === nativeSubtitleIndex ? "showing" : "hidden";
     }
   }, [isNative, nativeSubtitleIndex, subtitleUrls]);
+
+  const { setSubtitle: setStreamCaption, subtitles: streamCaptions } = hls;
+  useEffect(() => {
+    if (!isStream) return;
+    const index = nativeSubtitleIndex == null ? -1 : nativeSubtitleIndex - STREAM_CAPTION_BASE;
+    setStreamCaption(index >= 0 ? index : -1);
+  }, [isStream, nativeSubtitleIndex, streamCaptions, setStreamCaption]);
 
   // Probes audio/subtitle tracks (and, now, source resolution/available qualities — see
   // QualitySection) client-side so it never delays video start. Fetched for every video
   // regardless of seekMode now, not just restart-mode content, since the quality menu needs
   // sourceHeight/availableQualities either way.
   useEffect(() => {
+    if (isStream) return;
     let cancelled = false;
     apiGet<ProbeResult>(`/api/probe/${fileId}`)
       .then((data) => {
@@ -531,10 +583,11 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [fileId, isNative]);
+  }, [fileId, isNative, isStream]);
 
   const src = useMemo(() => {
-    if (!mediaToken) return undefined;
+    // useHls attaches a stream itself.
+    if (isStream || !mediaToken) return undefined;
     const params = new URLSearchParams();
     params.set("token", mediaToken);
     if (effectiveHeight != null) params.set("h", String(effectiveHeight));
@@ -546,7 +599,7 @@ export default function VideoPlayer({
       }
     }
     return `${API_URL}/api/stream/${fileId}?${params.toString()}`;
-  }, [streamIsSeekable, isNative, fileId, baseOffsetSeconds, audioIndex, audioDelayMs, effectiveHeight, mediaToken]);
+  }, [isStream, streamIsSeekable, isNative, fileId, baseOffsetSeconds, audioIndex, audioDelayMs, effectiveHeight, mediaToken]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -618,6 +671,15 @@ export default function VideoPlayer({
     };
     const handleCanPlay = () => setIsBuffering(false);
 
+    // A stream's length can arrive after its metadata.
+    const handleDurationChange = () => {
+      if (streamIsSeekable && Number.isFinite(video.duration) && video.duration > 0) setNativeDuration(video.duration);
+    };
+    // The library handles a stream's own errors (see useHls); this is a file, or a stream the browser plays itself.
+    const handleError = () => {
+      if (video.error && video.currentSrc && !video.currentSrc.startsWith("blob:")) reportFailed();
+    };
+
     // Any seekable resource (passthrough or a specific quality tier) always starts serving from
     // byte 0, so resuming means seeking forward once real metadata is available (unlike true
     // restart mode, which starts the live stream at the right offset from its very first byte via
@@ -626,12 +688,14 @@ export default function VideoPlayer({
     // a newer position mid-session.
     const handleLoadedMetadata = () => {
       if (!streamIsSeekable) return;
-      setNativeDuration(video.duration || null);
+      handleDurationChange();
       const pendingSeek = pendingSeekRef.current;
+      // A hosted copy can be a shorter cut than the one the position was saved on.
+      const pastEnd = isStream && Number.isFinite(video.duration) && initialPositionSeconds > video.duration - 5;
       if (pendingSeek != null) {
         pendingSeekRef.current = null;
         video.currentTime = pendingSeek;
-      } else if (usingPassthrough && !initialCompleted && initialPositionSeconds > MIN_RESUME_SECONDS) {
+      } else if (usingPassthrough && !initialCompleted && !pastEnd && initialPositionSeconds > MIN_RESUME_SECONDS) {
         video.currentTime = initialPositionSeconds;
       }
     };
@@ -645,6 +709,8 @@ export default function VideoPlayer({
     video.addEventListener("playing", handlePlaying);
     video.addEventListener("canplay", handleCanPlay);
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    video.addEventListener("durationchange", handleDurationChange);
+    video.addEventListener("error", handleError);
     window.addEventListener("pagehide", handlePageHide);
 
     return () => {
@@ -658,6 +724,8 @@ export default function VideoPlayer({
       video.removeEventListener("playing", handlePlaying);
       video.removeEventListener("canplay", handleCanPlay);
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      video.removeEventListener("durationchange", handleDurationChange);
+      video.removeEventListener("error", handleError);
       window.removeEventListener("pagehide", handlePageHide);
     };
   }, [
@@ -679,6 +747,8 @@ export default function VideoPlayer({
     outroStart,
     emitWatchPartyState,
     upNextEnabled,
+    reportFailed,
+    isStream,
   ]);
 
   // Browsers reset playbackRate to 1 whenever `src` changes, not just when the user picks a new
@@ -693,7 +763,7 @@ export default function VideoPlayer({
     applyRate();
     video.addEventListener("loadedmetadata", applyRate);
     return () => video.removeEventListener("loadedmetadata", applyRate);
-  }, [speed, src]);
+  }, [speed, src, streamUrl]);
 
   useEffect(() => {
     if (!syncEnabled || !watchPartySync?.inboundState || !videoRef.current) return;
@@ -773,7 +843,7 @@ export default function VideoPlayer({
   };
 
   const closePanels = () => {
-    setSettingsOpen(false);
+    setMenu(null);
     setEpisodesOpen(false);
     const video = videoRef.current;
     if (video && !video.paused) {
@@ -784,10 +854,10 @@ export default function VideoPlayer({
     }
   };
 
-  const toggleSettings = () => {
+  const openMenu = (view: MenuView) => {
     setEpisodesOpen(false);
-    const opening = !settingsOpen;
-    setSettingsOpen(opening);
+    const opening = menu !== view;
+    setMenu(opening ? view : null);
     if (opening) {
       clearHideTimer();
       setControlsVisible(true);
@@ -795,7 +865,7 @@ export default function VideoPlayer({
   };
 
   const toggleEpisodes = () => {
-    setSettingsOpen(false);
+    setMenu(null);
     const opening = !episodesOpen;
     setEpisodesOpen(opening);
     if (opening) {
@@ -811,6 +881,25 @@ export default function VideoPlayer({
     if (video.paused) video.play();
     else video.pause();
   };
+
+  const canPip = document.pictureInPictureEnabled === true;
+  const togglePip = () => {
+    const action = document.pictureInPictureElement ? document.exitPictureInPicture() : videoRef.current?.requestPictureInPicture();
+    // Refused before anything has loaded.
+    action?.catch(() => {});
+  };
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const on = () => setInPip(true);
+    const off = () => setInPip(false);
+    video.addEventListener("enterpictureinpicture", on);
+    video.addEventListener("leavepictureinpicture", off);
+    return () => {
+      video.removeEventListener("enterpictureinpicture", on);
+      video.removeEventListener("leavepictureinpicture", off);
+    };
+  }, []);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) containerRef.current?.requestFullscreen();
@@ -851,6 +940,13 @@ export default function VideoPlayer({
       setBaseOffsetSeconds(position);
     }
     setQualitySelection(value);
+  };
+
+  // A stream switches quality by itself, without a reload.
+  const changeStreamQuality = (value: QualitySelection) => {
+    const height = typeof value === "number" ? value : null;
+    setStreamHeight(height);
+    hls.setHeight(height);
   };
 
   // Auto-mode's own quality changes reuse the exact same position-preserving reload mechanics as a
@@ -972,15 +1068,16 @@ export default function VideoPlayer({
     setNativeSubtitleIndex(index);
     subtitleTouchedRef.current = true;
     const track = index != null ? subtitles.find((s) => s.index === index) : null;
+    const streamTrack = index != null ? streamCaptions[index - STREAM_CAPTION_BASE] : undefined;
     apiPost("/api/progress", {
       fileId,
       parentFolderId,
       positionSeconds: currentAbsoluteSeconds(),
       durationSeconds: effectiveDuration ?? 0,
       subtitleSource: index != null ? "external" : "off",
-      subtitleIndex: index,
-      subtitleLanguage: track?.language ?? null,
-      subtitleTitle: track?.title ?? null,
+      subtitleIndex: isStream ? null : index,
+      subtitleLanguage: track?.language ?? streamTrack?.language ?? null,
+      subtitleTitle: track?.title ?? streamTrack?.label ?? null,
     }).catch(() => {});
   };
 
@@ -1073,12 +1170,15 @@ export default function VideoPlayer({
     }
   };
 
+  const changeSpeed = (nextSpeed: number) => {
+    setSpeed(nextSpeed);
+    emitWatchPartyState({ playbackRate: nextSpeed });
+  };
+
   const cycleSpeed = () => {
     if (locked) return;
     const idx = SPEED_OPTIONS.indexOf(speed);
-    const nextSpeed = SPEED_OPTIONS[(idx + 1) % SPEED_OPTIONS.length];
-    setSpeed(nextSpeed);
-    emitWatchPartyState({ playbackRate: nextSpeed });
+    changeSpeed(SPEED_OPTIONS[(idx + 1) % SPEED_OPTIONS.length]);
   };
 
   const upNextStart = upNextEnabled ? upNextAt(outroStart, effectiveDuration ?? null) : null;
@@ -1140,7 +1240,15 @@ export default function VideoPlayer({
       ? Math.min(100, (shownSeconds / effectiveDuration) * 100)
       : 0;
 
+  const shownHeight = isStream
+    ? (streamHeight ?? hls.activeHeight)
+    : qualitySelection === "auto" || qualitySelection === "original"
+      ? (autoResolvedHeight ?? probe?.sourceHeight ?? null)
+      : qualitySelection;
+  const qualityLabel = shownHeight ? `${shownHeight}p` : "Quality";
   const iconButton = "text-white/90 transition hover:text-white";
+  // A phone has no room for these; the settings menu holds all of them.
+  const roomy = isNative && features.settings ? "hidden sm:block" : "";
 
   return (
     <div
@@ -1149,7 +1257,7 @@ export default function VideoPlayer({
       onMouseMove={showControls}
       onMouseLeave={() => isPlaying && !settingsOpen && !episodesOpen && setControlsVisible(false)}
     >
-      <video ref={videoRef} src={src} autoPlay className="h-full w-full" onClick={togglePlay}>
+      <video ref={videoRef} src={src} autoPlay={features.autoplay} className="h-full w-full" onClick={togglePlay}>
         {isNative &&
           subtitleUrls.map((s) => (
             <track key={s.index} kind="subtitles" src={s.url} srcLang={s.srcLang} label={s.label} />
@@ -1172,9 +1280,11 @@ export default function VideoPlayer({
           controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
-        <Link to={backHref} className={iconButton} aria-label="Back">
-          <ChevronLeftIcon className="h-7 w-7" />
-        </Link>
+        {features.exit && (
+          <Link to={backHref} className={iconButton} aria-label="Exit player">
+            <ChevronLeftIcon className="h-7 w-7" />
+          </Link>
+        )}
         <h1 className="truncate text-sm font-medium text-white/90">{title}</h1>
       </div>
 
@@ -1266,17 +1376,47 @@ export default function VideoPlayer({
       />
 
       {isNative ? (
-        <SubtitleMenu
-          tracks={subtitleUrls.map((s) => ({ index: s.index, label: s.label }))}
-          selectedIndex={nativeSubtitleIndex}
-          onSelect={changeNativeSubtitle}
-          open={settingsOpen}
+        <PlayerMenu
+          view={menu}
           onClose={closePanels}
-          availableQualities={probe?.availableQualities ?? []}
-          sourceHeight={probe?.sourceHeight ?? null}
-          qualitySelection={qualitySelection}
-          autoResolvedHeight={autoResolvedHeight}
-          onSelectQuality={changeQuality}
+          quality={
+            !features.quality
+              ? null
+              : isStream
+                ? {
+                    available: hls.heights.map((height) => ({ label: `${height}p`, height })),
+                    original: null,
+                    selection: streamHeight ?? "auto",
+                    autoHeight: hls.activeHeight,
+                    onSelect: changeStreamQuality,
+                  }
+                : {
+                    available: probe?.availableQualities ?? [],
+                    original: { height: probe?.sourceHeight ?? null },
+                    selection: qualitySelection,
+                    autoHeight: autoResolvedHeight,
+                    onSelect: changeQuality,
+                  }
+          }
+          captions={
+            features.captions
+              ? {
+                  tracks: [
+                    ...subtitleUrls.map((s) => ({ index: s.index, label: s.label })),
+                    ...streamCaptions.map((s) => ({ index: STREAM_CAPTION_BASE + s.index, label: s.label })),
+                  ],
+                  selected: nativeSubtitleIndex,
+                  onSelect: changeNativeSubtitle,
+                }
+              : null
+          }
+          audio={isStream ? { tracks: hls.audioTracks, selected: hls.audioIndex, onSelect: hls.setAudio } : null}
+          speed={locked ? null : { options: SPEED_OPTIONS, selected: speed, onSelect: changeSpeed }}
+          source={
+            sources && features.sourceMenu
+              ? { ...sources, onSelect: (id) => sources.onSelect(id, currentAbsoluteSeconds()) }
+              : null
+          }
         />
       ) : (
         <TrackSettingsMenu
@@ -1373,7 +1513,7 @@ export default function VideoPlayer({
         </div>
 
         <div className="flex items-center justify-between pb-1">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             <button
               type="button"
               onClick={() => previousFileId && navigate(`/watch/${previousFileId}`)}
@@ -1421,33 +1561,36 @@ export default function VideoPlayer({
               <SkipNextIcon className="h-6 w-6" />
             </button>
 
-            <div className="ml-1 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setMuted((m) => !m)}
-                aria-label={muted ? "Unmute" : "Mute"}
-                className={iconButton}
-              >
-                {muted || volume === 0 ? (
-                  <VolumeMuteIcon className="h-5 w-5" />
-                ) : (
-                  <VolumeHighIcon className="h-5 w-5" />
-                )}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={muted ? 0 : volume}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setVolume(v);
-                  setMuted(v === 0);
-                }}
-                className="hidden w-20 accent-white sm:block"
-              />
-            </div>
+            {features.volume && (
+              <div className="ml-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMuted((m) => !m)}
+                  aria-label={muted ? "Unmute" : "Mute"}
+                  className={iconButton}
+                >
+                  {muted || volume === 0 ? (
+                    <VolumeMuteIcon className="h-5 w-5" />
+                  ) : (
+                    <VolumeHighIcon className="h-5 w-5" />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={muted ? 0 : volume}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setVolume(v);
+                    setMuted(v === 0);
+                  }}
+                  aria-label="Volume"
+                  className="hidden w-20 accent-white sm:block"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -1456,26 +1599,68 @@ export default function VideoPlayer({
               onClick={cycleSpeed}
               disabled={locked}
               title={locked ? "You don't have playback control in this watch party" : undefined}
-              className="text-sm text-white/80 hover:text-white disabled:opacity-30"
+              className={`text-sm text-white/80 hover:text-white disabled:opacity-30 ${roomy}`}
             >
               {speed}x
             </button>
-            <button type="button" onClick={toggleSettings} aria-label="Settings" className={iconButton}>
-              <SettingsIcon className="h-5 w-5" />
-            </button>
+            {isNative && features.sourceMenu && sources && sources.options.length > 1 && (
+              <button type="button" onClick={() => openMenu("source")} aria-label="Source" title="Source" className={`${iconButton} ${roomy}`}>
+                <SourceIcon className="h-5 w-5" />
+              </button>
+            )}
+            {isNative && features.captions && (
+              <button
+                type="button"
+                onClick={() => openMenu("captions")}
+                aria-label="Captions"
+                title="Captions"
+                className={`${nativeSubtitleIndex != null ? "text-amber" : iconButton} ${roomy}`}
+              >
+                <CaptionsIcon className="h-5 w-5" />
+              </button>
+            )}
+            {isNative && features.quality && (
+              <button
+                type="button"
+                onClick={() => openMenu("quality")}
+                aria-label="Quality"
+                title="Quality"
+                className="hidden text-sm text-white/80 hover:text-white sm:block"
+              >
+                {qualityLabel}
+              </button>
+            )}
+            {features.settings && (
+              <button type="button" onClick={() => openMenu("settings")} aria-label="Settings" title="Settings" className={iconButton}>
+                <SettingsIcon className="h-5 w-5" />
+              </button>
+            )}
             {episodes.length > 0 && (
               <button type="button" onClick={toggleEpisodes} aria-label="Episodes" className={iconButton}>
                 <ListIcon className="h-5 w-5" />
               </button>
             )}
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-              className={iconButton}
-            >
-              {isFullscreen ? <FullscreenExitIcon className="h-5 w-5" /> : <FullscreenIcon className="h-5 w-5" />}
-            </button>
+            {features.pip && canPip && (
+              <button
+                type="button"
+                onClick={togglePip}
+                aria-label={inPip ? "Exit picture-in-picture" : "Picture-in-picture"}
+                title="Picture-in-picture"
+                className={inPip ? "text-amber" : iconButton}
+              >
+                <PipIcon className="h-5 w-5" />
+              </button>
+            )}
+            {features.fullscreen && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                className={iconButton}
+              >
+                {isFullscreen ? <FullscreenExitIcon className="h-5 w-5" /> : <FullscreenIcon className="h-5 w-5" />}
+              </button>
+            )}
           </div>
         </div>
       </div>

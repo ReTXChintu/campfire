@@ -98,4 +98,11 @@ export const env = {
   get tmdbImageBase() {
     return process.env.TMDB_IMAGE_BASE || "https://image.tmdb.org/t/p";
   },
+  // Test hooks too (scripts/smoke-sources.mjs).
+  get bunnyApiBase() {
+    return process.env.BUNNY_API_BASE || "https://video.bunnycdn.com";
+  },
+  get cloudflareApiBase() {
+    return process.env.CLOUDFLARE_API_BASE || "https://api.cloudflare.com/client/v4";
+  },
 };

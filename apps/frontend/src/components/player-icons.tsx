@@ -157,3 +157,30 @@ export function ChevronLeftIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function PipIcon({ className }: IconProps) {
+  return (
+    <svg {...svgIconProps(className)}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <rect x="12" y="11" width="6.5" height="5" rx="0.5" fill={base} stroke="none" />
+    </svg>
+  );
+}
+
+export function CaptionsIcon({ className }: IconProps) {
+  return (
+    <svg {...svgIconProps(className)}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M10.5 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3" />
+    </svg>
+  );
+}
+
+export function SourceIcon({ className }: IconProps) {
+  return (
+    <svg {...svgIconProps(className)}>
+      <path d="M12 3 3 8l9 5 9-5-9-5Z" />
+      <path d="m3 13 9 5 9-5" />
+    </svg>
+  );
+}

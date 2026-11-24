@@ -275,6 +275,24 @@ export type TrackNaming = {
   defaultSubtitleMatch?: string | null;
 };
 
+/** Which controls a source's player shows (backend lib/videoSources.ts). */
+export type PlayerFeature =
+  | "autoplay"
+  | "exit"
+  | "pip"
+  | "sourceMenu"
+  | "captions"
+  | "quality"
+  | "volume"
+  | "fullscreen"
+  | "settings";
+export type PlayerFeatures = Record<PlayerFeature, boolean>;
+
+/** One way to play a title: another service's player, a stream from a video host, or Drive. */
+export type PlayerOption =
+  | { id: string; kind: "embed"; name: string; url: string }
+  | { id: string; kind: "stream" | "drive"; name: string; features: PlayerFeatures };
+
 export type FolderFlatResponse = {
   mode: "flat";
   folderId: string;
@@ -325,7 +343,9 @@ export type VideoResponse = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
-  /** Players to try, in order, before the file itself; absent from an older backend. */
+  /** Every way to play it, in the order to try them; absent from an older backend. */
+  players?: PlayerOption[];
+  /** Just the embedded ones, as a backend before `players` sent them. */
   embeds?: { provider: string; url: string }[];
   /** The up-next card's choice and the end screen's "more like this" (see lib/upNext.ts); absent
    * from an older backend. */

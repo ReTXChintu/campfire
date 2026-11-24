@@ -6,6 +6,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import VideoPlayer from "../components/VideoPlayer";
 import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
 import EmbedPlayer from "../components/EmbedPlayer";
+import StreamPlayer from "../components/StreamPlayer";
 import Trailer from "../components/Trailer";
 import ReactionOverlay, { type FloatingReaction } from "../components/ReactionOverlay";
 import WatchPartyChat from "../components/WatchPartyChat";
@@ -26,6 +27,7 @@ import {
 import { useAuth } from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
 import type {
+  PlayerOption,
   WatchParty,
   WatchPartyJoinTokenResponse,
   WatchPartyParticipant,
@@ -33,6 +35,7 @@ import type {
 } from "../lib/types";
 import NotFoundPage from "./NotFoundPage";
 import { PAGE_X } from "../lib/layout";
+import { currentPlayer, webPlayers } from "../lib/players";
 import NowPlayingInfo from "../components/NowPlayingInfo";
 
 type PartyParticipant = {
@@ -45,6 +48,9 @@ type PartyParticipant = {
 // Quick reactions — the primary TV interaction (typed chat is secondary there); this same set is
 // offered everywhere for consistency. Mirrors apps/mobile/lib/widgets/reaction_picker.dart.
 const REACTION_EMOJIS = ["😂", "🔥", "👏", "❤️", "👍"];
+
+type PlayerPick = { fileId: string | null; failed: string[]; chosen: string | null; startAt: number | null };
+const NO_PICK: PlayerPick = { fileId: null, failed: [], chosen: null, startAt: null };
 
 function extractPartyCode(value: string): string {
   const trimmed = value.trim();
@@ -123,14 +129,31 @@ export default function WatchPage() {
   }, [partyId]);
 
   const { data: video, isLoading, error } = useVideo(fileId!);
-  // The video the viewer (or a failed player) has switched to the library's own file for.
-  const [libraryFor, setLibraryFor] = useState<string | null>(null);
+  // Which of the title's players is on: the ones that failed, what the viewer picked, and where to
+  // carry on from after a switch. Belongs to one video, so another starts afresh.
+  const [pick, setPick] = useState<PlayerPick>(NO_PICK);
+  const picked = pick.fileId === fileId ? pick : NO_PICK;
+  // As first answered: a background refetch must not change the player under the viewer.
+  const playersRef = useRef<{ fileId: string; list: PlayerOption[] } | null>(null);
+  if (video && playersRef.current?.fileId !== video.fileId) {
+    playersRef.current = { fileId: video.fileId, list: webPlayers(video) };
+  }
+  const players = playersRef.current?.list ?? [];
+  // A watch party always plays the file: nothing else can be kept in sync.
+  const player = partyId ? players.find((p) => p.kind === "drive") : currentPlayer(players, picked.failed, picked.chosen);
+  const selectPlayer = (id: string, position: number | null) =>
+    setPick({ ...picked, fileId: fileId ?? null, chosen: id, startAt: position ?? picked.startAt });
+  const playerFailed = (id: string, position: number | null) =>
+    setPick({
+      fileId: fileId ?? null,
+      failed: [...picked.failed.filter((f) => f !== id), id],
+      chosen: null,
+      startAt: position ?? picked.startAt,
+    });
   useEffect(() => {
     // Leaving a party mid-film carries on with the file it was playing.
-    if (partyId && fileId) setLibraryFor(fileId);
+    if (partyId && fileId) setPick({ ...NO_PICK, fileId, chosen: "drive" });
   }, [partyId, fileId]);
-  // A watch party always plays the file: an embedded player can't be kept in sync.
-  const embeds = !partyId && libraryFor !== fileId ? (video?.embeds ?? []) : [];
   const watchParty = useWatchParty(partyId);
   const createWatchParty = useCreateWatchParty();
   const joinWatchPartyToken = useJoinWatchPartyToken(partyId, {
@@ -523,6 +546,43 @@ export default function WatchPage() {
 
   if (error || !video) return <NotFoundPage />;
 
+  const failedNames = players.filter((p) => picked.failed.includes(p.id)).map((p) => p.name);
+  // What every one of our own players takes, whichever source it plays from.
+  const playerProps = {
+    fileId: video.fileId,
+    title: video.title!,
+    backHref: video.backHref,
+    parentFolderId: video.parentFolderId,
+    nextFileId: video.nextFileId,
+    previousFileId: video.previousFileId,
+    episodes: video.episodes,
+    progressByFileId: video.progressByFileId,
+    initialPositionSeconds: picked.startAt ?? video.initialPositionSeconds,
+    initialCompleted: picked.startAt == null && video.initialCompleted,
+    durationSeconds: video.durationSeconds,
+    subtitles: video.subtitles,
+    introStart: video.introStart,
+    introEnd: video.introEnd,
+    outroStart: video.outroStart,
+    initialSubtitleSource: video.initialSubtitleSource,
+    initialSubtitleIndex: video.initialSubtitleIndex,
+    initialSubtitleLanguage: video.initialSubtitleLanguage,
+    initialSubtitleTitle: video.initialSubtitleTitle,
+    initialAudioLanguage: video.initialAudioLanguage,
+    initialAudioTitle: video.initialAudioTitle,
+    // A watch party keeps the subtitle behaviour it always had.
+    startSubtitle: partyId ? null : (video.startSubtitle ?? null),
+    upNext: video.upNext ?? null,
+    suggestions: video.suggestions ?? [],
+    sources: partyId
+      ? undefined
+      : {
+          options: players,
+          selected: player?.id ?? "drive",
+          onSelect: (id: string, position: number) => selectPlayer(id, position),
+        },
+  };
+
   return (
     <div className={`w-full flex-1 ${PAGE_X} py-6`}>
       <WatchPartyToastStack toasts={toasts} />
@@ -533,13 +593,24 @@ export default function WatchPage() {
             {/* Only browser-native formats play here; everything else (MKV, or anything that would
                 need the live ffmpeg remux) is handed off to the apps, which play any container
                 directly via libmpv. */}
-            {embeds.length > 0 ? (
+            {player?.kind === "embed" ? (
               <EmbedPlayer
-                key={video.fileId}
-                embeds={embeds}
+                key={`${video.fileId}-${player.id}`}
+                url={player.url}
+                name={player.name}
                 title={video.title ?? "Video"}
                 nextFileId={video.nextFileId}
-                onUseLibrary={() => setLibraryFor(video.fileId)}
+                others={players.filter((p) => p.id !== player.id)}
+                onSelect={(id) => selectPlayer(id, null)}
+                onFailed={() => playerFailed(player.id, null)}
+              />
+            ) : player?.kind === "stream" ? (
+              <StreamPlayer
+                key={`${video.fileId}-${player.id}`}
+                sourceId={player.id}
+                {...playerProps}
+                features={player.features}
+                onFailed={(position) => playerFailed(player.id, position)}
               />
             ) : video.seekMode !== "native" ? (
               <DesktopAppRequiredNotice
@@ -549,32 +620,16 @@ export default function WatchPage() {
               />
             ) : (
               <VideoPlayer
-                fileId={video.fileId}
-                title={video.title!}
-                backHref={video.backHref}
-                parentFolderId={video.parentFolderId}
-                nextFileId={video.nextFileId}
-                previousFileId={video.previousFileId}
-                episodes={video.episodes}
-                progressByFileId={video.progressByFileId}
-                initialPositionSeconds={video.initialPositionSeconds}
-                initialCompleted={video.initialCompleted}
+                key={`${video.fileId}-drive`}
+                {...playerProps}
                 seekMode={video.seekMode}
-                durationSeconds={video.durationSeconds}
-                subtitles={video.subtitles}
-                introStart={video.introStart}
-                introEnd={video.introEnd}
-                outroStart={video.outroStart}
-                initialSubtitleSource={video.initialSubtitleSource}
-                initialSubtitleIndex={video.initialSubtitleIndex}
-                initialSubtitleLanguage={video.initialSubtitleLanguage}
-                initialSubtitleTitle={video.initialSubtitleTitle}
-                initialAudioLanguage={video.initialAudioLanguage}
-                initialAudioTitle={video.initialAudioTitle}
-                // A watch party keeps the subtitle behaviour it always had.
-                startSubtitle={partyId ? null : (video.startSubtitle ?? null)}
-                upNext={video.upNext ?? null}
-                suggestions={video.suggestions ?? []}
+                features={player?.kind === "drive" ? player.features : undefined}
+                // Nowhere left to go once everything has failed.
+                onFailed={
+                  !partyId && players.some((p) => p.id !== "drive" && !picked.failed.includes(p.id))
+                    ? (position) => playerFailed("drive", position)
+                    : undefined
+                }
                 watchPartySync={watchPartySyncProp}
               />
             )}
@@ -612,12 +667,18 @@ export default function WatchPage() {
         </div>
       </PartyRoomProvider>
 
+      {!partyId && failedNames.length > 0 && player && (
+        <p role="status" className="mt-3 text-sm text-text-secondary">
+          {failedNames.join(" and ")} didn&apos;t play{failedNames.includes(player.name) ? "" : `, so this is from ${player.name}`}.
+        </p>
+      )}
+
       <NowPlayingInfo video={video} />
       {/* A series' trailer is on its own page, not under every episode. */}
       {!video.episode && <Trailer tmdb={video.tmdb} className="mt-6" />}
 
       <section
-        hidden={embeds.length > 0}
+        hidden={!!player && player.kind !== "drive"}
         className="mt-6 rounded-2xl border border-divider bg-surface p-4"
       >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

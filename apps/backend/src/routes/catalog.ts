@@ -30,7 +30,7 @@ import {
   titleLanguages,
 } from "../lib/mediaTracks";
 import { getUserById } from "../lib/users";
-import { playableEmbeds } from "../lib/embed";
+import { playersFor } from "../lib/videoSources";
 import { tmdbRefOf } from "../lib/tmdbRef";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
@@ -496,10 +496,10 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   // Audio and subtitle tracks under the names an admin gave them, and which ones to start on —
   // the viewer's own picks first, then their profile's languages, then the admin's default (see
   // startTracks in lib/mediaTracks.ts). Older apps keep using the initial* fields above.
-  const [{ merged: naming, folders }, user, embeds] = await Promise.all([
+  const [{ merged: naming, folders }, user, players] = await Promise.all([
     namingForVideo(video),
     getUserById(req.authUser!.userId),
-    playableEmbeds(video),
+    playersFor(video),
   ]);
   const tracks = video.tracks && !video.tracks.error ? video.tracks : null;
   const viewerTracks = effectiveTracks(tracks, naming);
@@ -562,8 +562,10 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     introStart: video.introStart,
     introEnd: video.introEnd,
     outroStart: video.outroStart,
-    // Players to try, in order, before the file itself (lib/embed.ts).
-    embeds,
+    // Every way to play it, in the order to try them (lib/videoSources.ts).
+    players,
+    // Just the embedded ones, for the apps, which offer those before the file.
+    embeds: players.flatMap((p) => (p.kind === "embed" ? [{ provider: p.name, url: p.url }] : [])),
   });
 });
 

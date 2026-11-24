@@ -3,12 +3,14 @@ export type QualitySelection = "auto" | "original" | number;
 type Props = {
   availableQualities: { label: string; height: number }[];
   sourceHeight: number | null;
+  /** There is no untouched original to offer (a hosted stream). */
+  hideOriginal?: boolean;
   selection: QualitySelection;
   autoResolvedHeight: number | null;
   onSelect: (value: QualitySelection) => void;
 };
 
-// Shared by both SubtitleMenu (native mode) and TrackSettingsMenu (restart mode) — which quality
+// Shared by both PlayerMenu (native mode) and TrackSettingsMenu (restart mode) — which quality
 // is playing is orthogonal to which of those two panels is mounted (that split is about subtitle
 // mechanics, not streaming mechanics), so this one section is rendered inside both rather than
 // adding a third top-level settings panel. "Original" is always its own entry, separate from the
@@ -18,6 +20,7 @@ type Props = {
 export default function QualitySection({
   availableQualities,
   sourceHeight,
+  hideOriginal = false,
   selection,
   autoResolvedHeight,
   onSelect,
@@ -29,15 +32,17 @@ export default function QualitySection({
         <input type="radio" name="quality" checked={selection === "auto"} onChange={() => onSelect("auto")} />
         Auto{selection === "auto" && autoResolvedHeight != null ? ` (${autoResolvedHeight}p)` : ""}
       </label>
-      <label className="flex items-center gap-2 text-sm text-white/80">
-        <input
-          type="radio"
-          name="quality"
-          checked={selection === "original"}
-          onChange={() => onSelect("original")}
-        />
-        {sourceHeight != null ? `Original (${sourceHeight}p)` : "Original"}
-      </label>
+      {!hideOriginal && (
+        <label className="flex items-center gap-2 text-sm text-white/80">
+          <input
+            type="radio"
+            name="quality"
+            checked={selection === "original"}
+            onChange={() => onSelect("original")}
+          />
+          {sourceHeight != null ? `Original (${sourceHeight}p)` : "Original"}
+        </label>
+      )}
       {availableQualities.map((q) => (
         <label key={q.height} className="flex items-center gap-2 text-sm text-white/80">
           <input
