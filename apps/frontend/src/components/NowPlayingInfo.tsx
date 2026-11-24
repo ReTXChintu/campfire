@@ -46,6 +46,7 @@ export default function NowPlayingInfo({ video }: { video: VideoResponse }) {
     return (
       <section className="mt-6 rounded-2xl border border-divider bg-surface p-4" aria-labelledby="now-playing-heading">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-text-secondary">
+          {video.seriesTitle && <span className="font-semibold text-white">{video.seriesTitle}</span>}
           {label && <span className="font-mono text-xs tracking-wide text-amber">{label}</span>}
           <RatingChip rating={episode.rating} />
           {runtime && <span>{runtime}</span>}

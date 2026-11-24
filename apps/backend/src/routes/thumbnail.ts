@@ -2,7 +2,8 @@ import { Router, type Response } from "express";
 import { Readable } from "node:stream";
 import { getThumbnail, streamFile, readDriveHeader } from "../lib/drive";
 import { getCatalogFolder } from "../lib/catalogFolders";
-import { getCatalogVideo } from "../lib/catalogVideos";
+import { getVideoOrTitle } from "../lib/titlePlay";
+import { parseTitleId } from "../lib/tmdbRef";
 import { requireMediaAccess } from "../middleware/mediaAuth";
 import { requireAuth } from "../middleware/auth";
 import {
@@ -32,9 +33,13 @@ router.get("/:fileId", requireMediaAccess("fileId"), async (req, res) => {
   const shape = parseArtworkShape(req.query.shape);
   // A movie matched to TMDb shows its backdrop, an episode its own still from TMDb; anything
   // unmatched (or TMDb unreachable) keeps Drive's own frame grab.
-  const video = await getCatalogVideo(fileId);
+  const video = await getVideoOrTitle(fileId);
   const image = video ? videoImage(video, shape) : null;
   if (image && (await sendArtwork(res, image))) return;
+  if (parseTitleId(fileId)) {
+    res.status(404).json({ error: "No thumbnail" });
+    return;
+  }
   // A wordmark has no stand-in: the client writes the title in text instead.
   if (shape === "logo") {
     res.status(404).json({ error: "No logo" });
@@ -102,7 +107,7 @@ castImageRouter.get("/:kind/:id/:index", requireAuth, async (req, res) => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  const doc = kind === "folder" ? await getCatalogFolder(id) : await getCatalogVideo(id);
+  const doc = kind === "folder" ? await getCatalogFolder(id) : await getVideoOrTitle(id);
   const image = castImage(doc?.artwork, index);
   if (!image || !(await sendArtwork(res, image))) {
     res.status(404).json({ error: "No image" });

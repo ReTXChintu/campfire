@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "./mongodb";
 import { seal, unseal } from "./secretBox";
-import { tmdbKey, tmdbRefOf } from "./tmdbRef";
+import { parseTitleId, tmdbKey, tmdbRefOf } from "./tmdbRef";
 import { playableEmbeds } from "./embed";
 import type { ArtworkFields } from "./artwork";
 import {
@@ -15,6 +15,7 @@ import {
   listCloudflare,
   type BunnyConfig,
   type CloudflareConfig,
+  type HostSearch,
   type HostVideo,
 } from "./videoHosts";
 import {
@@ -155,16 +156,19 @@ function apiKeyOf(source: SourceDoc): string {
   return key;
 }
 
-function listVideos(source: SourceDoc, apiKey: string): Promise<HostVideo[]> {
+function listVideos(source: SourceDoc, apiKey: string, search?: HostSearch): Promise<HostVideo[]> {
   return source.kind === "bunny"
-    ? listBunny(source.config as BunnyConfig, apiKey)
-    : listCloudflare(source.config as CloudflareConfig, apiKey);
+    ? listBunny(source.config as BunnyConfig, apiKey, search)
+    : listCloudflare(source.config as CloudflareConfig, apiKey, search);
 }
 
-async function store(sourceId: string, videos: HostVideo[]): Promise<void> {
+/** Saves videos as their host lists them, keeping links made by hand. */
+async function saveVideos(sourceId: string, videos: HostVideo[]): Promise<SourceVideoDoc[]> {
   const col = await sourceVideos();
   const existing = new Map(
-    (await col.find({ sourceId }, { projection: { manualKey: 1 } }).toArray()).map((d) => [d._id, d.manualKey ?? null]),
+    (
+      await col.find({ _id: { $in: videos.map((v) => `${sourceId}:${v.videoId}`) } }, { projection: { manualKey: 1 } }).toArray()
+    ).map((d) => [d._id, d.manualKey ?? null]),
   );
   const docs = videos.map((v): SourceVideoDoc => {
     const _id = `${sourceId}:${v.videoId}`;
@@ -178,6 +182,12 @@ async function store(sourceId: string, videos: HostVideo[]): Promise<void> {
       { ordered: false },
     );
   }
+  return docs;
+}
+
+async function store(sourceId: string, videos: HostVideo[]): Promise<void> {
+  const col = await sourceVideos();
+  const docs = await saveVideos(sourceId, videos);
   await col.deleteMany({ sourceId, _id: { $nin: docs.map((d) => d._id) } });
   await (await sources()).updateOne(
     { _id: sourceId },
@@ -604,10 +614,49 @@ async function matching(video: VideoDoc, sourceIds: string[]): Promise<SourceVid
   return found.sort((a, b) => keys.indexOf(a.key!) - keys.indexOf(b.key!) || (b.height ?? 0) - (a.height ?? 0));
 }
 
+const LIVE_TIMEOUT_MS = 4000;
+/** A host that just said it hasn't got a title isn't asked again by the same click. */
+const MISS_TTL_MS = 20_000;
+const MAX_ASKED = 500;
+const asked = new Map<string, { until: number; answer: Promise<boolean> }>();
+
+/** Asks a host, there and then, whether it has a title that isn't among the videos known to be there.
+ * What it finds is saved like any other. Rejects when the host doesn't answer. */
+function askHost(source: SourceDoc, video: VideoDoc): Promise<boolean> {
+  const ref = tmdbRefOf(video);
+  if (!ref || !isHosted(source)) return Promise.resolve(false);
+  const key = tmdbKey(ref);
+  const id = `${source._id}:${key}`;
+  const hit = asked.get(id);
+  if (hit && Date.now() < hit.until) return hit.answer;
+  const answer = (async () => {
+    const listed = await listVideos(source, apiKeyOf(source), { text: ref.id, timeoutMs: LIVE_TIMEOUT_MS });
+    const found = listed.filter((v) => keyFromName(v.name) === key);
+    if (found.length === 0) return false;
+    await saveVideos(source._id, found);
+    await recount(source._id);
+    return (await matching(video, [source._id])).length > 0;
+  })();
+  asked.delete(id);
+  asked.set(id, { until: Date.now() + MISS_TTL_MS, answer });
+  answer.catch(() => asked.delete(id));
+  while (asked.size > MAX_ASKED) asked.delete(asked.keys().next().value!);
+  return answer;
+}
+
+/** What each source said about a title, for a viewer told that none has it. */
+export type Checked = { name: string; result: "found" | "none" | "unreachable" };
+
 /** Every way to play a title, in the order to try them: the players set on the title itself, then
- * the sources that have it, Drive among them. */
-export async function playersFor(video: VideoDoc): Promise<PlayerOption[]> {
+ * the sources that have it, Drive among them. With `live`, a host not known to have it is asked now;
+ * one that doesn't answer is offered all the same, to be tried in its turn. */
+export async function playersFor(
+  video: VideoDoc,
+  { live = false }: { live?: boolean } = {},
+): Promise<{ players: PlayerOption[]; checked: Checked[] }> {
   const [embeds, all] = await Promise.all([playableEmbeds(video), ordered()]);
+  // A title the library doesn't have has no file of its own to play.
+  const hasFile = !parseTitleId(video._id);
   const enabled = all.filter((s) => s.enabled || s.kind === "drive");
   const hosted = enabled.filter((s) => s.kind !== "drive").map((s) => s._id);
   // The best match of each source.
@@ -615,29 +664,49 @@ export async function playersFor(video: VideoDoc): Promise<PlayerOption[]> {
   for (const v of hosted.length ? await matching(video, hosted) : []) {
     if (!have.has(v.sourceId)) have.set(v.sourceId, v);
   }
-  return [
-    ...embeds.map((e, i) => ({ id: `embed-${i}`, kind: "embed" as const, name: e.provider, url: e.url })),
-    ...enabled.flatMap((s): PlayerOption[] => {
-      const features = parseFeatures(s.features, allFeatures());
-      if (s.kind === "drive") return [{ id: s._id, kind: "drive", name: "Library", features }];
-      if (s.kind === "frame" && playsEveryFile(s.config as FrameConfig)) {
-        const config = s.config as FrameConfig;
-        return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, video._id), frame: frameOf(config) }];
-      }
-      const found = have.get(s._id);
-      if (!found) return [];
-      if (s.kind !== "frame") return [{ id: s._id, kind: "stream", name: s.name, features }];
+  const answers = new Map<string, "found" | "none" | "unreachable">();
+  await Promise.all(
+    enabled
+      .filter((s) => live && isHosted(s) && !have.has(s._id))
+      .map(async (s) => {
+        const answer = await askHost(s, video).then(
+          (found) => (found ? ("found" as const) : ("none" as const)),
+          () => "unreachable" as const,
+        );
+        answers.set(s._id, answer);
+      }),
+  );
+
+  const optionOf = (s: SourceDoc): PlayerOption | null => {
+    const features = parseFeatures(s.features, allFeatures());
+    if (s.kind === "drive") return hasFile ? { id: s._id, kind: "drive", name: "Library", features } : null;
+    if (s.kind === "frame") {
       const config = s.config as FrameConfig;
-      return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, found.videoId), frame: frameOf(config) }];
-    }),
-  ];
+      const id = playsEveryFile(config) ? (hasFile ? video._id : null) : have.get(s._id)?.videoId;
+      return id ? { id: s._id, kind: "frame", name: s.name, url: frameUrl(config, id), frame: frameOf(config) } : null;
+    }
+    const answer = have.has(s._id) ? "found" : (answers.get(s._id) ?? "none");
+    return answer === "none" ? null : { id: s._id, kind: "stream", name: s.name, features };
+  };
+  const players: PlayerOption[] = embeds.map((e, i) => ({ id: `embed-${i}`, kind: "embed", name: e.provider, url: e.url }));
+  const checked: Checked[] = [];
+  for (const s of enabled) {
+    const option = optionOf(s);
+    if (option) players.push(option);
+    checked.push({
+      name: s.kind === "drive" ? "Library" : s.name,
+      result: answers.get(s._id) === "unreachable" ? "unreachable" : option ? "found" : "none",
+    });
+  }
+  return { players, checked };
 }
 
 /** Where a title streams from in one source, with addresses that expire; null when it isn't there. */
 export async function streamFor(sourceId: string, video: VideoDoc) {
   const source = await (await sources()).findOne({ _id: sourceId, enabled: true });
   if (!source || !isHosted(source)) return null;
-  const [found] = await matching(video, [sourceId]);
+  let [found] = await matching(video, [sourceId]);
+  if (!found && (await askHost(source, video))) [found] = await matching(video, [sourceId]);
   if (!found) return null;
   let stream;
   if (source.kind === "bunny") {

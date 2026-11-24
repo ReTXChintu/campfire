@@ -3,7 +3,7 @@ import { apiGet, apiPost } from "../lib/api";
 import type { LibraryResponse, FolderResponse, LanguageOption, VideoResponse } from "../lib/types";
 
 export function useLibrary() {
-  return useQuery({ queryKey: ["library"], queryFn: () => apiGet<LibraryResponse>("/api/library") });
+  return useQuery({ queryKey: ["library"], queryFn: () => apiGet<LibraryResponse>("/api/library?titles=1") });
 }
 
 export function useFolder(folderId: string, season: string | null) {
@@ -15,7 +15,11 @@ export function useFolder(folderId: string, season: string | null) {
 }
 
 export function useVideo(fileId: string) {
-  return useQuery({ queryKey: ["video", fileId], queryFn: () => apiGet<VideoResponse>(`/api/video/${fileId}`) });
+  return useQuery({
+    queryKey: ["video", fileId],
+    // `live`: every source is asked now, not only the ones known to have it.
+    queryFn: () => apiGet<VideoResponse>(`/api/video/${encodeURIComponent(fileId)}?live=1`),
+  });
 }
 
 /** Languages to offer in pickers: the common ones plus every language found in the library. */

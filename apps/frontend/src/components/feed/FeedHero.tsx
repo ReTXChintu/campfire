@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuthedImage } from "../../hooks/useAuthedImage";
-import { libraryHref, type ExploreItem } from "../../lib/explore";
+import type { ExploreItem } from "../../lib/explore";
 import { itemKey, type FeedHeroItem } from "../../lib/feed";
 import { PAGE_X } from "../../lib/layout";
+import { playHref } from "../../lib/play";
 import type { SpotlightSlide } from "../../lib/types";
 import { Star } from "../explore/ExploreRow";
 
@@ -71,14 +72,12 @@ function TitleSlide({ item, onOpen }: { item: FeedHeroItem; onOpen: (item: Explo
       </p>
       {item.overview && <p className="mt-3 line-clamp-3 max-w-[60ch] text-sm leading-relaxed text-white/80 sm:text-base">{item.overview}</p>}
       <div className="mt-6 flex flex-wrap gap-3">
-        {item.inLibrary && (
-          <Link to={libraryHref(item.inLibrary)} className={PRIMARY}>
-            <PlayGlyph />
-            Play
-          </Link>
-        )}
-        <button type="button" onClick={() => onOpen(item)} className={item.inLibrary ? SECONDARY : PRIMARY}>
-          {item.inLibrary ? "More info" : "Trailer and where to watch"}
+        <Link to={playHref({ type: item.tmdbType, id: item.tmdbId })} className={PRIMARY}>
+          <PlayGlyph />
+          Play
+        </Link>
+        <button type="button" onClick={() => onOpen(item)} className={SECONDARY}>
+          More info
         </button>
       </div>
     </>

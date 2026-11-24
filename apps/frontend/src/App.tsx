@@ -21,6 +21,7 @@ const RequestsPage = lazyRoute(() => import("./routes/RequestsPage"));
 const ExplorePage = lazyRoute(() => import("./routes/ExplorePage"));
 const SettingsPage = lazyRoute(() => import("./routes/SettingsPage"));
 const LinkDevicePage = lazyRoute(() => import("./routes/LinkDevicePage"));
+const PlayPage = lazyRoute(() => import("./routes/PlayPage"));
 const SectionPage = lazyRoute(() => import("./routes/SectionPage"));
 const TitlePage = lazyRoute(() => import("./routes/TitlePage"));
 const ResetPasswordPage = lazyRoute(() => import("./routes/ResetPasswordPage"));
@@ -55,6 +56,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <HomePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/play/:type/:tmdbId"
+            element={
+              <ProtectedRoute>
+                <PlayPage />
               </ProtectedRoute>
             }
           />

@@ -31,8 +31,9 @@ import {
 } from "../lib/mediaTracks";
 import { getUserById } from "../lib/users";
 import { playersFor } from "../lib/videoSources";
-import { tmdbRefOf } from "../lib/tmdbRef";
+import { findByTmdb, parseTitleId, titleId, tmdbRefOf } from "../lib/tmdbRef";
 import { markedWatched, titleKey } from "../lib/opinions";
+import { playableVideo, titleCard, titleKeyOfId, titleVideoResponse } from "../lib/titlePlay";
 import { listSubtitleSetsByIds } from "../lib/subtitleSets";
 import { naturalSort, orderEpisodes, type CatalogListItem } from "../lib/catalogListItem";
 import { listRecentlyFulfilled } from "../lib/mediaRequests";
@@ -220,6 +221,22 @@ router.get("/library", requireAuth, async (req, res) => {
   const continueWatchingItems = (
     await Promise.all(
       continueWatching.map(async (progress) => {
+        // A title played from a source without being in the library. Only a client that can play one
+        // asks for them.
+        const title = titleKeyOfId(progress.fileId);
+        if (title) {
+          const doneAt = watched.get(title);
+          if (req.query.titles !== "1" || (doneAt && doneAt >= progress.updatedAt)) return null;
+          // In the library by now: its own card, unless that's already in the row.
+          const found = await findByTmdb(parseTitleId(progress.fileId)!);
+          const own = found?.kind === "video" ? await getCatalogVideo(found.id) : null;
+          if (own) {
+            if (continueWatching.some((p) => p.fileId === own._id)) return null;
+            return { item: { kind: "video" as const, id: own._id, name: own.title!, mimeType: own.mimeType }, progress };
+          }
+          const item = await titleCard(progress.fileId);
+          return item && { item, progress };
+        }
         const video = await getCatalogVideo(progress.fileId);
         if (!video || video.status !== "published") return null; // unpublished or deleted — skip rather than break the row
         const ref = tmdbRefOf(video);
@@ -421,6 +438,12 @@ router.get("/folder/:folderId", requireAuth, async (req, res) => {
 
 router.get("/video/:fileId", requireAuth, async (req, res) => {
   const { fileId } = req.params;
+  if (parseTitleId(fileId)) {
+    const title = await playableVideo(fileId, req.authUser!.email);
+    if (title) res.json(await titleVideoResponse(req.authUser!.userId, title));
+    else res.status(404).json({ error: "Not found" });
+    return;
+  }
   const video = await getCatalogVideo(fileId);
 
   // "pending" (no title yet) is never watchable — preview happens on the curation page instead.
@@ -458,7 +481,10 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     );
   }
 
-  const progress = await getProgress(req.authUser!.userId, fileId);
+  // Where it was left when it played from a source, before the library had it, counts too.
+  const ref = tmdbRefOf(video);
+  const progress =
+    (await getProgress(req.authUser!.userId, fileId)) ?? (ref ? await getProgress(req.authUser!.userId, titleId(ref)) : null);
   // "Watch a series, the audio/subtitle pick follows every episode" — if this exact video has
   // never had a preference saved on it, fall back to whatever was most recently picked elsewhere
   // in the same series, rather than always landing on defaults for every new episode. An explicit
@@ -507,10 +533,11 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   // Audio and subtitle tracks under the names an admin gave them, and which ones to start on —
   // the viewer's own picks first, then their profile's languages, then the admin's default (see
   // startTracks in lib/mediaTracks.ts). Older apps keep using the initial* fields above.
-  const [{ merged: naming, folders }, user, players] = await Promise.all([
+  const [{ merged: naming, folders }, user, { players, checked }] = await Promise.all([
     namingForVideo(video),
     getUserById(req.authUser!.userId),
-    playersFor(video),
+    // Asking hosts that aren't known to have it takes a moment, so only for a client that plays them.
+    playersFor(video, { live: req.query.live === "1" }),
   ]);
   const tracks = video.tracks && !video.tracks.error ? video.tracks : null;
   const viewerTracks = effectiveTracks(tracks, naming);
@@ -575,6 +602,7 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     outroStart: video.outroStart,
     // Every way to play it, in the order to try them (lib/videoSources.ts).
     players,
+    checked,
     // Just the embedded ones, for the apps, which offer those before the file.
     embeds: players.flatMap((p) => (p.kind === "embed" ? [{ provider: p.name, url: p.url }] : [])),
   });

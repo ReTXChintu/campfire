@@ -23,6 +23,10 @@ export type HostVideo = {
 
 export class HostError extends Error {}
 
+/** Asks a host about one title while a viewer waits, rather than for its whole library. */
+export type HostSearch = { text: string; timeoutMs: number };
+const MAX_SEARCH_PAGES = 5;
+
 const TIMEOUT_MS = 15_000;
 const CHECK_TIMEOUT_MS = 4000;
 const MAX_PAGES = 50;
@@ -37,10 +41,10 @@ const CLOUDFLARE_HLS =
 const BUNNY_ID = /^[0-9a-f-]{36}$/i;
 const CLOUDFLARE_ID = /^[0-9a-f]{32}$/i;
 
-async function call<T>(host: string, url: string, init: RequestInit): Promise<T> {
+async function call<T>(host: string, url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     throw new HostError(`${host} didn't answer. Try again in a minute.`);
   }
@@ -69,14 +73,17 @@ type BunnyVideo = {
 /** 4 finished; 8 ready through just-in-time encoding. */
 const BUNNY_READY = [4, 8];
 
-export async function listBunny(config: BunnyConfig, apiKey: string): Promise<HostVideo[]> {
+export async function listBunny(config: BunnyConfig, apiKey: string, search?: HostSearch): Promise<HostVideo[]> {
   const videos: HostVideo[] = [];
   let seen = 0;
-  for (let page = 1; page <= MAX_PAGES; page++) {
+  for (let page = 1; page <= (search ? MAX_SEARCH_PAGES : MAX_PAGES); page++) {
     const body = await call<{ totalItems?: number; items?: BunnyVideo[] }>(
       "Bunny",
-      `${env.bunnyApiBase}/library/${encodeURIComponent(config.libraryId)}/videos?page=${page}&itemsPerPage=${BUNNY_PAGE}&orderBy=date`,
+      `${env.bunnyApiBase}/library/${encodeURIComponent(config.libraryId)}/videos?page=${page}&itemsPerPage=${BUNNY_PAGE}&orderBy=date${
+        search ? `&search=${encodeURIComponent(search.text)}` : ""
+      }`,
       { headers: { AccessKey: apiKey, accept: "application/json" } },
+      search?.timeoutMs,
     );
     const items = body.items ?? [];
     seen += items.length;
@@ -143,15 +150,27 @@ type CloudflareVideo = {
 const cloudflareUrl = (config: CloudflareConfig) =>
   `${env.cloudflareApiBase}/accounts/${encodeURIComponent(config.accountId)}/stream`;
 
-export async function listCloudflare(config: CloudflareConfig, apiToken: string): Promise<HostVideo[]> {
+export async function listCloudflare(
+  config: CloudflareConfig,
+  apiToken: string,
+  search?: HostSearch,
+): Promise<HostVideo[]> {
   const videos = new Map<string, HostVideo>();
   let start: string | null = null;
   // Cloudflare pages by moving a date window: oldest first, each page from the last one's newest.
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const query = new URLSearchParams({ asc: "true", limit: String(CLOUDFLARE_PAGE), ...(start ? { start } : {}) });
-    const body: { result?: CloudflareVideo[] } = await call("Cloudflare", `${cloudflareUrl(config)}?${query}`, {
-      headers: { authorization: `Bearer ${apiToken}` },
+  for (let page = 0; page < (search ? MAX_SEARCH_PAGES : MAX_PAGES); page++) {
+    const query = new URLSearchParams({
+      asc: "true",
+      limit: String(CLOUDFLARE_PAGE),
+      ...(start ? { start } : {}),
+      ...(search ? { search: search.text } : {}),
     });
+    const body: { result?: CloudflareVideo[] } = await call(
+      "Cloudflare",
+      `${cloudflareUrl(config)}?${query}`,
+      { headers: { authorization: `Bearer ${apiToken}` } },
+      search?.timeoutMs,
+    );
     const items = body.result ?? [];
     const before = videos.size;
     for (const v of items) {

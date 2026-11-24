@@ -2,7 +2,7 @@
  * these containers, everything else is handed off to the desktop/mobile apps. The watch page
  * learns this authoritatively from `video.seekMode`; a catalog list item only carries a mimeType,
  * which is enough to warn before the click. */
-const BROWSER_PLAYABLE = ["video/mp4", "video/webm", "video/ogg"];
+const BROWSER_PLAYABLE = ["video/mp4", "video/webm", "video/ogg", "video/stream"];
 
 export function playsInBrowser(mimeType: string): boolean {
   return BROWSER_PLAYABLE.includes(mimeType.split(";")[0].trim().toLowerCase());

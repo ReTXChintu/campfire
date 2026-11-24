@@ -335,7 +335,12 @@ export type FolderSeriesResponse = {
 
 export type FolderResponse = FolderFlatResponse | FolderSeriesResponse;
 
+/** What a source said when it was asked about a title. */
+export type SourceCheck = { name: string; result: "found" | "none" | "unreachable" };
+
 export type VideoResponse = {
+  /** Alone, in answer to a title that's watched somewhere else by now. */
+  movedTo?: string;
   fileId: string;
   title: string | null;
   /** Which episode this is, when it belongs to a matched series; null for a film. The film's own
@@ -357,6 +362,10 @@ export type VideoResponse = {
   outroStart: number | null;
   /** Every way to play it, in the order to try them; absent from an older backend. */
   players?: PlayerOption[];
+  /** Every source asked, whether it has it or not. */
+  checked?: SourceCheck[];
+  /** An episode of a series that isn't in the library. */
+  seriesTitle?: string | null;
   /** Just the embedded ones, as a backend before `players` sent them. */
   embeds?: { provider: string; url: string }[];
   /** The up-next card's choice and the end screen's "more like this" (see lib/upNext.ts); absent

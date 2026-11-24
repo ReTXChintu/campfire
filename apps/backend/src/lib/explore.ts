@@ -155,6 +155,7 @@ type TmdbDetail = TmdbListResult & {
   episode_run_time?: number[];
   number_of_seasons?: number | null;
   number_of_episodes?: number | null;
+  seasons?: { season_number: number; name?: string; episode_count?: number }[];
   genres?: { id: number; name: string }[];
   images?: { logos?: TmdbLogo[] };
   credits?: { cast?: { name: string; character?: string | null; profile_path?: string | null; order?: number }[] };
@@ -165,12 +166,13 @@ type TmdbDetail = TmdbListResult & {
 
 const image = (size: string, path: string | null | undefined) => (path ? `${env.tmdbImageBase}/${size}${path}` : null);
 /** The wordmark in English, or the one TMDb has without a language. */
-export function logoFrom(logos: TmdbLogo[] | undefined): string | null {
+export function logoPathFrom(logos: TmdbLogo[] | undefined): string | null {
   const usable = (logos ?? []).filter((l) => l.file_path?.endsWith(".png"));
-  return image("w500", (usable.find((l) => l.iso_639_1 === "en") ?? usable[0])?.file_path);
+  return (usable.find((l) => l.iso_639_1 === "en") ?? usable[0])?.file_path ?? null;
 }
-const yearOf = (date: string | undefined) => (date && /^\d{4}/.test(date) ? Number(date.slice(0, 4)) : null);
-const ratingOf = (r: TmdbListResult) =>
+export const logoFrom = (logos: TmdbLogo[] | undefined) => image("w500", logoPathFrom(logos));
+export const yearOf = (date: string | undefined) => (date && /^\d{4}/.test(date) ? Number(date.slice(0, 4)) : null);
+export const ratingOf = (r: TmdbListResult) =>
   typeof r.vote_average === "number" && r.vote_average > 0 && (r.vote_count ?? 0) >= 5 ? Math.round(r.vote_average * 10) / 10 : null;
 
 export async function genreNames(): Promise<Map<number, string>> {
@@ -546,7 +548,7 @@ export function isTmdbId(value: string): boolean {
   return /^\d{1,10}$/.test(value);
 }
 
-function rawDetail(type: TmdbType, tmdbId: string) {
+export function rawDetail(type: TmdbType, tmdbId: string) {
   return tmdbCached<TmdbDetail>(
     `/${type}/${tmdbId}`,
     { language: "en-US", append_to_response: "credits,watch/providers,images", include_image_language: "en,null" },
@@ -554,7 +556,7 @@ function rawDetail(type: TmdbType, tmdbId: string) {
   );
 }
 
-const billed = (raw: TmdbDetail) => (raw.credits?.cast ?? []).slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+export const billed = (raw: TmdbDetail) => (raw.credits?.cast ?? []).slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 
 /** What suggestions compare a title by (lib/forYou.ts); from the same cached answer as its panel. */
 export async function tmdbTitleFacts(type: TmdbType, tmdbId: string) {

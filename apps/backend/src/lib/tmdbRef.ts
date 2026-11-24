@@ -20,6 +20,18 @@ export function tmdbKey(ref: TmdbRef): string {
   return `${ref.type}:${ref.id}${episode}`;
 }
 
+/** The id a title is watched by when the library doesn't have it: "tmdb:movie:603",
+ * "tmdb:tv:1396:s1e2". A Drive file's id has no colon in it. */
+export const titleId = (ref: TmdbRef) => `tmdb:${tmdbKey(ref)}`;
+
+/** Null for a Drive file's id. A series as a whole isn't watched, so it has none. */
+export function parseTitleId(id: string): TmdbRef | null {
+  const film = id.match(/^tmdb:movie:([1-9]\d{0,9})$/);
+  if (film) return { type: "movie", id: film[1] };
+  const episode = id.match(/^tmdb:tv:([1-9]\d{0,9}):s(\d{1,3})e(\d{1,4})$/);
+  return episode ? { type: "tv", id: episode[1], season: Number(episode[2]), episode: Number(episode[3]) } : null;
+}
+
 /** The published library item that is this title, or null when the library doesn't have it. */
 export async function findByTmdb(ref: TmdbRef): Promise<{ kind: "folder" | "video"; id: string } | null> {
   if (ref.season != null && ref.episode != null) {

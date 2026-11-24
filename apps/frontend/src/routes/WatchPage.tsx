@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useQueryClient } from "@tanstack/react-query";
 import { RoomAudioRenderer, RoomContext } from "@livekit/components-react";
 import { ConnectionState, Room, RoomEvent, type Participant } from "livekit-client";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import VideoPlayer from "../components/VideoPlayer";
 import DesktopAppRequiredNotice from "../components/DesktopAppRequiredNotice";
 import EmbedPlayer from "../components/EmbedPlayer";
@@ -36,6 +36,8 @@ import type {
 import NotFoundPage from "./NotFoundPage";
 import { PAGE_X } from "../lib/layout";
 import { currentPlayer, webPlayers } from "../lib/players";
+import { isTitleId } from "../lib/play";
+import NotInAnySource from "../components/NotInAnySource";
 import NowPlayingInfo from "../components/NowPlayingInfo";
 
 type PartyParticipant = {
@@ -128,7 +130,7 @@ export default function WatchPage() {
     setJoinChosenMainDeviceId(undefined);
   }, [partyId]);
 
-  const { data: video, isLoading, error } = useVideo(fileId!);
+  const { data: video, isLoading, error, refetch: refetchVideo, isFetching: videoFetching } = useVideo(fileId!);
   // Which of the title's players is on: the ones that failed, what the viewer picked, and where to
   // carry on from after a switch. Belongs to one video, so another starts afresh.
   const [pick, setPick] = useState<PlayerPick>(NO_PICK);
@@ -139,6 +141,9 @@ export default function WatchPage() {
     playersRef.current = { fileId: video.fileId, list: webPlayers(video) };
   }
   const players = playersRef.current?.list ?? [];
+  // A title that isn't in the library, with every source tried.
+  const asTitle = isTitleId(fileId ?? "");
+  const nowhere = asTitle && players.every((p) => picked.failed.includes(p.id));
   // A watch party always plays the file: nothing else can be kept in sync.
   const player = partyId ? players.find((p) => p.kind === "drive") : currentPlayer(players, picked.failed, picked.chosen);
   const selectPlayer = (id: string, position: number | null) =>
@@ -540,11 +545,17 @@ export default function WatchPage() {
     return (
       <div className={`w-full flex-1 ${PAGE_X} py-6`}>
         <div className="skeleton aspect-video w-full rounded-2xl" />
+        {asTitle && (
+          <p role="status" className="mt-3 text-sm text-text-secondary">
+            Checking every source…
+          </p>
+        )}
       </div>
     );
   }
 
   if (error || !video) return <NotFoundPage />;
+  if (video.movedTo) return <Navigate to={video.movedTo} replace />;
 
   const failedNames = players.filter((p) => picked.failed.includes(p.id)).map((p) => p.name);
   // What every one of our own players takes, whichever source it plays from.
@@ -593,7 +604,21 @@ export default function WatchPage() {
             {/* Only browser-native formats play here; everything else (MKV, or anything that would
                 need the live ffmpeg remux) is handed off to the apps, which play any container
                 directly via libmpv. */}
-            {player?.kind === "embed" || player?.kind === "frame" ? (
+            {nowhere ? (
+              <NotInAnySource
+                fileId={video.fileId}
+                title={[video.seriesTitle, video.title].filter(Boolean).join(": ")}
+                checked={video.checked ?? []}
+                retrying={videoFetching}
+                onRetry={() => {
+                  setPick(NO_PICK);
+                  refetchVideo().then(() => {
+                    playersRef.current = null;
+                    setPick({ ...NO_PICK, fileId: fileId ?? null });
+                  });
+                }}
+              />
+            ) : player?.kind === "embed" || player?.kind === "frame" ? (
               <EmbedPlayer
                 key={`${video.fileId}-${player.id}`}
                 url={player.url}
@@ -668,7 +693,7 @@ export default function WatchPage() {
         </div>
       </PartyRoomProvider>
 
-      {!partyId && failedNames.length > 0 && player && (
+      {!partyId && !nowhere && failedNames.length > 0 && player && (
         <p role="status" className="mt-3 text-sm text-text-secondary">
           {failedNames.join(" and ")} didn&apos;t play{failedNames.includes(player.name) ? "" : `, so this is from ${player.name}`}.
         </p>
@@ -679,7 +704,7 @@ export default function WatchPage() {
       {!video.episode && <Trailer tmdb={video.tmdb} className="mt-6" />}
 
       <section
-        hidden={!!player && player.kind !== "drive"}
+        hidden={asTitle || (!!player && player.kind !== "drive")}
         className="mt-6 rounded-2xl border border-divider bg-surface p-4"
       >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

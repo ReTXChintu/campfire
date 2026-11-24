@@ -1,6 +1,6 @@
 import { getDb } from "./mongodb";
 import type { WatchProgress } from "./progress";
-import { tmdbRefOf } from "./tmdbRef";
+import { parseTitleId, tmdbRefOf } from "./tmdbRef";
 import type { ArtworkFields } from "./artwork";
 
 /** What a viewer says about a title: that they've watched it, and whether they liked it. Kept per
@@ -68,7 +68,7 @@ async function playedTitles(userId: string): Promise<Map<string, Played>> {
   const played = new Map<string, Played>();
   for (const p of progress) {
     const video = byId.get(p.fileId);
-    const ref = video ? tmdbRefOf(video) : null;
+    const ref = video ? tmdbRefOf(video) : parseTitleId(p.fileId);
     if (!ref) continue;
     const key = titleKey(ref.type, ref.id);
     // One finished episode isn't a finished series.

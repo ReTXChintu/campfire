@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { exploreMetaLine, libraryHref, titleParam, useExploreTitle, type ExploreDetail as Detail, type ExploreOffer } from "../../lib/explore";
-import { useCreateRequest, useToggleUpvote } from "../../hooks/useRequests";
+import { exploreMetaLine, libraryHref, titleParam, useExploreTitle, type ExploreDetail as Detail } from "../../lib/explore";
 import { Skeleton } from "../ui/States";
 import OpinionButtons from "../OpinionButtons";
+import EpisodeList from "./EpisodeList";
+import WhereToWatch from "./WhereToWatch";
+import { playHref, useSeriesEpisodes } from "../../lib/play";
 import { itemKey, useSimilarTitles } from "../../lib/feed";
 import { trailerSrc, useTrailer } from "../../lib/trailer";
 import { Star } from "./ExploreRow";
@@ -112,101 +114,9 @@ export default function ExploreDetail({
   );
 }
 
+const HEADING = "font-display text-2xl tracking-wide text-white";
 const HERO = "aspect-[4/3] sm:aspect-video sm:max-h-[72vh]";
 const GUTTER = "px-4 sm:px-8 lg:px-12";
-
-function OfferRow({ offer }: { offer: ExploreOffer }) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-divider bg-surface px-3 py-2.5">
-      {offer.logoUrl ? (
-        <img src={offer.logoUrl} alt="" className="h-9 w-9 rounded-lg" />
-      ) : (
-        <span className="h-9 w-9 rounded-lg bg-surface-hover" aria-hidden="true" />
-      )}
-      <span className="flex-1 text-sm font-semibold text-white">{offer.name}</span>
-      <a
-        href={offer.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Open on ${offer.name} (opens in a new tab)`}
-        className="inline-flex min-h-9 items-center rounded-lg border border-divider-strong px-3.5 text-[13px] font-semibold text-white transition hover:bg-surface-hover"
-      >
-        Open
-      </a>
-    </div>
-  );
-}
-
-function OfferChips({ offers }: { offers: ExploreOffer[] }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {offers.map((o) => (
-        <a
-          key={o.id}
-          href={o.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 rounded-full border border-divider bg-surface py-1.5 pl-1.5 pr-3 text-[13px] font-semibold text-white transition hover:bg-surface-hover"
-        >
-          {o.logoUrl && <img src={o.logoUrl} alt="" className="h-6 w-6 rounded-full" />}
-          {o.name}
-        </a>
-      ))}
-    </div>
-  );
-}
-
-function RequestBlock({ d }: { d: Detail }) {
-  const create = useCreateRequest();
-  const vote = useToggleUpvote();
-  const existing = d.existingRequest;
-  const error = create.error ?? vote.error;
-
-  if (existing?.iWantIt || create.isSuccess) {
-    const others = existing ? existing.wantCount - 1 : 0;
-    return (
-      <p role="status" className="rounded-xl border border-amber/35 bg-amber/[0.08] px-4 py-3 text-sm text-amber">
-        You've asked for this — it's on the{" "}
-        <Link to="/requests" className="font-semibold underline underline-offset-2">
-          requests board
-        </Link>
-        {others > 0 ? ` with ${others} other ${others === 1 ? "vote" : "votes"}` : ""}.
-      </p>
-    );
-  }
-  if (existing) {
-    return (
-      <div className="grid gap-2">
-        <p className="text-sm text-text-secondary">
-          {existing.wantCount} {existing.wantCount === 1 ? "person has" : "people have"} already asked for this.
-        </p>
-        <button
-          type="button"
-          disabled={vote.isPending}
-          onClick={() => vote.mutate({ id: existing.id, wantsIt: true })}
-          className="min-h-11 justify-self-start rounded-lg bg-accent px-5 text-sm font-bold text-background transition hover:brightness-110 disabled:opacity-60"
-        >
-          {vote.isPending ? "Adding…" : "Add my vote"}
-        </button>
-        {error && <p className="text-sm text-danger">{error.message}</p>}
-      </div>
-    );
-  }
-  return (
-    <div className="grid gap-2">
-      <button
-        type="button"
-        disabled={create.isPending}
-        onClick={() => create.mutate({ title: d.title, refLink: d.link })}
-        className="min-h-11 justify-self-start rounded-lg border border-accent px-5 text-sm font-bold text-[#ff8a63] transition hover:bg-accent-soft disabled:opacity-60"
-      >
-        {create.isPending ? "Requesting…" : "Request on Campfire"}
-      </button>
-      <p className="text-xs text-text-tertiary">Goes on the requests board with this title's TMDb link, so it's exactly this one.</p>
-      {error && <p className="text-sm text-danger">{error.message}</p>}
-    </div>
-  );
-}
 
 /** Opens another title in this same modal. It replaces the one open in the history, so Back still
  * closes the modal rather than walking back through every title looked at. */
@@ -246,7 +156,6 @@ function MoreLikeThis({ d }: { d: Detail }) {
   );
 }
 
-const HEADING = "font-display text-2xl tracking-wide text-white";
 const PRIMARY =
   "inline-flex min-h-12 items-center gap-2 rounded-lg bg-white px-6 text-sm font-bold text-black transition hover:bg-white/85";
 const SECONDARY =
@@ -264,6 +173,9 @@ function PlayGlyph() {
 function DetailHero({ d, playing, onPlay }: { d: Detail; playing: boolean; onPlay: () => void }) {
   const { data: trailer } = useTrailer({ type: d.tmdbType, id: d.tmdbId });
   const art = d.backdropUrl ?? d.posterUrl;
+  const { data: series } = useSeriesEpisodes(d.tmdbType === "tv" ? d.tmdbId : null, null);
+  const at = series && `S${series.resume.season} E${series.resume.episode}`;
+  const play = at ? `${series.resume.started ? "Resume" : "Play"} ${at}` : "Play";
   return (
     <div className={`relative w-full overflow-hidden bg-black ${HERO}`}>
       {playing && trailer ? (
@@ -299,15 +211,13 @@ function DetailHero({ d, playing, onPlay }: { d: Detail; playing: boolean; onPla
               )}
             </h2>
             <div className="mt-5 flex flex-wrap gap-3">
-              {d.inLibrary && (
-                <Link to={libraryHref(d.inLibrary)} className={PRIMARY}>
-                  <PlayGlyph />
-                  {d.inLibrary.kind === "folder" ? "Watch episodes" : "Play"}
-                </Link>
-              )}
+              {/* On every title: whether a source has it is only known by asking them. */}
+              <Link to={playHref({ type: d.tmdbType, id: d.tmdbId })} className={PRIMARY}>
+                <PlayGlyph />
+                {play}
+              </Link>
               {trailer && (
-                <button type="button" onClick={onPlay} className={d.inLibrary ? SECONDARY : PRIMARY}>
-                  <PlayGlyph />
+                <button type="button" onClick={onPlay} className={SECONDARY}>
                   Trailer
                 </button>
               )}
@@ -316,46 +226,6 @@ function DetailHero({ d, playing, onPlay }: { d: Detail; playing: boolean; onPla
         </>
       )}
     </div>
-  );
-}
-
-function WhereToWatch({ d }: { d: Detail }) {
-  const nowhere = !d.watch.stream.length && !d.watch.free.length && !d.watch.rentBuy.length;
-  return (
-    <section aria-labelledby="explore-watch-heading" className="grid content-start gap-3">
-      <h3 id="explore-watch-heading" className={HEADING}>
-        Where to watch in India
-      </h3>
-      {d.watch.stream.length > 0 && (
-        <div className="grid gap-2">
-          <span className="text-xs text-text-tertiary">Stream with a subscription</span>
-          {d.watch.stream.map((o) => (
-            <OfferRow key={o.id} offer={o} />
-          ))}
-        </div>
-      )}
-      {d.watch.free.length > 0 && (
-        <div className="grid gap-2">
-          <span className="text-xs text-text-tertiary">Free</span>
-          {d.watch.free.map((o) => (
-            <OfferRow key={o.id} offer={o} />
-          ))}
-        </div>
-      )}
-      {d.watch.rentBuy.length > 0 && (
-        <div className="grid gap-2">
-          <span className="text-xs text-text-tertiary">Rent or buy</span>
-          <OfferChips offers={d.watch.rentBuy} />
-        </div>
-      )}
-      {nowhere && (
-        <p className="rounded-xl border border-divider bg-surface px-4 py-3.5 text-sm leading-relaxed text-text-secondary">
-          Not streaming anywhere in India right now.
-          {!d.inLibrary && " Ask for it on Campfire and it lands on the requests board."}
-        </p>
-      )}
-      {!d.inLibrary && <RequestBlock d={d} />}
-    </section>
   );
 }
 
@@ -376,7 +246,11 @@ function DetailBody({ d }: { d: Detail }) {
               )}
               <span>{exploreMetaLine(d)}</span>
               {d.genres.length > 0 && <span>{d.genres.join(", ")}</span>}
-              {d.inLibrary && <span className="font-semibold text-live">In your library</span>}
+              {d.inLibrary && (
+                <Link to={libraryHref(d.inLibrary)} className="font-semibold text-live underline-offset-2 hover:underline">
+                  In your library
+                </Link>
+              )}
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <OpinionButtons title={{ type: d.tmdbType, id: d.tmdbId }} />
@@ -421,6 +295,8 @@ function DetailBody({ d }: { d: Detail }) {
 
           <WhereToWatch d={d} />
         </div>
+
+        {d.tmdbType === "tv" && <EpisodeList seriesId={d.tmdbId} headingClass={HEADING} />}
 
         <MoreLikeThis d={d} />
 
