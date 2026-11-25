@@ -25,6 +25,7 @@ import {
   useWatchPartyParticipants,
 } from "../hooks/useWatchParty";
 import { useAuth } from "../lib/auth";
+import { apiPost, apiPostKeepalive } from "../lib/api";
 import { getDeviceId } from "../lib/deviceId";
 import type {
   PlayerOption,
@@ -80,6 +81,18 @@ function toSyncState(party: WatchParty): WatchPartySyncState {
   };
 }
 
+function zoryvaUrlAt(url: string, positionSeconds: number): string {
+  if (!Number.isFinite(positionSeconds) || positionSeconds < 3) return url;
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "zoryva.me" && parsed.hostname !== "www.zoryva.me") return url;
+    parsed.searchParams.set("startAt", String(Math.floor(positionSeconds)));
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 function isSyncState(value: unknown): value is WatchPartySyncState {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<WatchPartySyncState>;
@@ -96,6 +109,7 @@ export default function WatchPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const { fileId } = useParams<{ fileId: string }>();
+  const zoryvaProgressRef = useRef<{ fileId: string; positionSeconds: number; durationSeconds: number } | null>(null);
   // Read from the long-lived room callbacks, which would otherwise see the fileId they mounted with.
   const fileIdRef = useRef(fileId);
   fileIdRef.current = fileId;
@@ -568,6 +582,7 @@ export default function WatchPage() {
 
   const sourceName = sources.find((source) => source.id === selected)?.name ?? "that source";
   const fullTitle = [video.seriesTitle, video.title].filter(Boolean).join(": ");
+  const frameStartAt = picked.startAt ?? video.initialPositionSeconds;
   // What every one of our own players takes, whichever source it plays from.
   const playerProps = {
     fileId: video.fileId,
@@ -625,15 +640,44 @@ export default function WatchPage() {
             ) : player?.kind === "embed" || player?.kind === "frame" ? (
               <EmbedPlayer
                 key={`${video.fileId}-${player.id}`}
-                url={player.url}
+                url={player.kind === "frame" ? zoryvaUrlAt(player.url, frameStartAt) : player.url}
                 frame={player.kind === "frame" ? player.frame : undefined}
                 name={player.name}
                 title={video.title ?? "Video"}
                 nextFileId={video.nextFileId}
                 others={sources.filter((source) => source.id !== player.id)}
-                onSelect={(id) => selectPlayer(id, null)}
+                onSelect={(id) => {
+                  const last = zoryvaProgressRef.current;
+                  selectPlayer(id, last?.fileId === video.fileId ? last.positionSeconds : null);
+                }}
                 onFailed={() => playerFailed(player.id, null)}
-                onExit={() => navigate(video.backHref)}
+                onExit={() => {
+                  const last = zoryvaProgressRef.current;
+                  if (last?.fileId === video.fileId) {
+                    apiPostKeepalive("/api/progress", {
+                      fileId: video.fileId,
+                      parentFolderId: video.parentFolderId,
+                      positionSeconds: last.positionSeconds,
+                      durationSeconds: last.durationSeconds,
+                    });
+                  }
+                  navigate(video.backHref);
+                }}
+                onProgress={(progress) => {
+                  if (!["timeupdate", "pause", "seeked", "ended"].includes(progress.event) || progress.duration <= 0) return;
+                  const payload = {
+                    fileId: video.fileId,
+                    parentFolderId: video.parentFolderId,
+                    positionSeconds: progress.currentTime,
+                    durationSeconds: progress.duration,
+                  };
+                  zoryvaProgressRef.current = {
+                    fileId: video.fileId,
+                    positionSeconds: progress.currentTime,
+                    durationSeconds: progress.duration,
+                  };
+                  apiPost("/api/progress", payload).catch(() => {});
+                }}
               />
             ) : player?.kind === "stream" ? (
               <StreamPlayer
