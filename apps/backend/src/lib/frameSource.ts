@@ -35,7 +35,7 @@ export type Frame = Omit<FrameConfig, "template">;
 
 export class FrameError extends Error {}
 
-const PLACEHOLDERS = ["tmdb_id", "season_id", "episode_id"] as const;
+const PLACEHOLDERS = ["tmdb_id", "anilist_id", "season", "episode", "season_id", "episode_id"] as const;
 const PLACEHOLDER = "{{tmdb_id}}";
 
 const MAX_CODE = 4000;
@@ -95,22 +95,25 @@ function parseTemplate(raw: string): string {
   if (address.startsWith("//")) address = `https:${address}`;
   const names = new Set<string>();
   address = address.replace(/\{\{\s*([\w.-]+)\s*\}\}|\$?\{\s*([\w.-]+)\s*\}/g, (_all, double, single) => {
-    const name = (double ?? single).toLowerCase();
+    const rawName = (double ?? single).toLowerCase();
+    const name = rawName === "season_id" ? "season" : rawName === "episode_id" ? "episode" : rawName;
     names.add(name);
     return `{{${name}}}`;
   });
   const only = [...names];
-  if (!names.has("tmdb_id")) throw new FrameError(`Put ${PLACEHOLDER} where the movie or series' TMDb ID goes in the src.`);
   const unknown = only.filter((name) => !PLACEHOLDERS.includes(name as (typeof PLACEHOLDERS)[number]));
   if (unknown.length) {
-    throw new FrameError(`The src can only use {{tmdb_id}}, {{season_id}}, and {{episode_id}}. It has ${unknown.join(", ")}.`);
+    throw new FrameError(`The src can only use {{tmdb_id}}, {{anilist_id}}, {{season}}, and {{episode}}. It has ${unknown.join(", ")}.`);
   }
-  if (names.has("season_id") !== names.has("episode_id")) {
-    throw new FrameError("Use {{season_id}} and {{episode_id}} together.");
+  if (names.has("tmdb_id") === names.has("anilist_id")) {
+    throw new FrameError("Use exactly one title ID: {{tmdb_id}} or {{anilist_id}}.");
+  }
+  if (names.has("season") !== names.has("episode")) {
+    throw new FrameError("Use {{season}} and {{episode}} together.");
   }
   // Straight after the host it would run into its name.
   address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{tmdb_id\}\})(?=$|[/?#])/i, "$1/$2");
-  const probe = address.replace(/\{\{(tmdb_id|season_id|episode_id)\}\}/g, (_all, name: string) => `campfire-${name}-probe`);
+  const probe = address.replace(/\{\{(tmdb_id|anilist_id|season|episode)\}\}/g, (_all, name: string) => `campfire-${name}-probe`);
   if (!URL.canParse(probe)) {
     throw new FrameError(`The src isn't a full address, such as https://player.example.com/${PLACEHOLDER}.`);
   }
@@ -120,7 +123,7 @@ function parseTemplate(raw: string): string {
   if (url.host.includes("campfire-") && url.host.includes("-probe")) throw new FrameError("A TMDb placeholder can't be part of the site's name.");
   // Framed here, Campfire's own pages could reach the viewer's sign-in.
   if (url.host === new URL(env.frontendUrl).host) throw new FrameError("The src can't be Campfire itself.");
-  return url.toString().replace(/campfire-(tmdb_id|season_id|episode_id)-probe/g, (_all, name: string) => `{{${name}}}`);
+  return url.toString().replace(/campfire-(tmdb_id|anilist_id|season|episode)-probe/g, (_all, name: string) => `{{${name}}}`);
 }
 
 function parseRadius(style: string): number | null {
@@ -179,19 +182,20 @@ export function parseFrameCode(raw: unknown): { config: FrameConfig; ignored: st
 
 /** The name a source gets when the admin doesn't type one. */
 export function frameSiteName(config: FrameConfig): string {
-  return new URL(config.template.replace(/\{\{(?:tmdb_id|season_id|episode_id)\}\}/g, PROBE)).hostname.replace(/^www\./, "");
+  return new URL(config.template.replace(/\{\{(?:tmdb_id|anilist_id|season|episode)\}\}/g, PROBE)).hostname.replace(/^www\./, "");
 }
 
 /** The address a video plays from. */
 export function frameUrl(config: FrameConfig, ref: { id: string; season?: number; episode?: number }): string | null {
-  if ((config.template.includes("{{season_id}}") || config.template.includes("{{episode_id}}")) &&
+  if (config.template.includes("{{anilist_id}}")) return null;
+  if ((config.template.includes("{{season}}") || config.template.includes("{{episode}}")) &&
       (ref.season == null || ref.episode == null)) return null;
   const values: Record<string, string> = {
     tmdb_id: ref.id,
-    season_id: ref.season == null ? "" : String(ref.season),
-    episode_id: ref.episode == null ? "" : String(ref.episode),
+    season: ref.season == null ? "" : String(ref.season),
+    episode: ref.episode == null ? "" : String(ref.episode),
   };
-  return config.template.replace(/\{\{(tmdb_id|season_id|episode_id)\}\}/g, (_all, name: string) => encodeURIComponent(values[name]));
+  return config.template.replace(/\{\{(tmdb_id|season|episode)\}\}/g, (_all, name: string) => encodeURIComponent(values[name]));
 }
 
 export function frameOf({ allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio }: FrameConfig): Frame {

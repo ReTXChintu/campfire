@@ -277,9 +277,9 @@ export default function SourceForm({ source, onDone }: { source?: VideoSource; o
       {isFrame && (
         <>
           <p className="text-xs text-text-tertiary">
-            Use {"{{tmdb_id}}"} for a movie or series TMDb ID. For TV episodes, add {"{{season_id}}/{{episode_id}}"}
-            too (for example, {"{{tmdb_id}}/{{season_id}}/{{episode_id}}"} becomes 1396/1/5). Campfire selects the matching
-            movie, TV series, or anime player. Only add a player that holds your own files.
+            Use {"{{tmdb_id}}"} for movies and TV. For TV episodes, add {"{{season}}/{{episode}}"} (for example,
+            {"{{tmdb_id}}/{{season}}/{{episode}}"} becomes 1396/1/5). Anime playback needs an AniList ID, which Campfire
+            does not store yet, so anime players are not offered. Only add a player that holds your own files.
           </p>
           {FRAMES.map((f) => (
             <FrameFields key={f.kind} kind={f.kind} label={f.label} hint={f.hint} state={codes[f.kind]} />

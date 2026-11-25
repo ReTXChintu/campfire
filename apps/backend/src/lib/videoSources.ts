@@ -551,6 +551,9 @@ export async function playersFor(video: VideoDoc, { all = false }: { all?: boole
     const features = parseFeatures(s.features, allFeatures());
     if (s.kind === "drive") return hasFile ? [{ id: s._id, kind: "drive", name: "Drive", features }] : [];
     if (s.kind === "frame") {
+      // Anime players need AniList IDs, which the catalog does not store yet. Never send a TMDb ID
+      // to an endpoint that expects an AniList ID.
+      if (kind?.anime) return [];
       const config = kind && frameFor(s.config as FrameConfigs, kind.type, kind.anime);
       if (!config) return [];
       const url = frameUrl(config, tmdb!);
