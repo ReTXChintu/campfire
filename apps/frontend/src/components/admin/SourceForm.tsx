@@ -277,8 +277,8 @@ export default function SourceForm({ source, onDone }: { source?: VideoSource; o
       {isFrame && (
         <>
           <p className="text-xs text-text-tertiary">
-            Put {"{{file_id}}"} where the video's Drive file ID goes. Each video plays by the code for its kind, which TMDb
-            tells. Only add a player that holds your own files.
+            Put {"{{tmdb_id}}"} where the movie or series' TMDb ID goes. Campfire selects the matching movie, TV series,
+            or anime player. Only add a player that holds your own files.
           </p>
           {FRAMES.map((f) => (
             <FrameFields key={f.kind} kind={f.kind} label={f.label} hint={f.hint} state={codes[f.kind]} />

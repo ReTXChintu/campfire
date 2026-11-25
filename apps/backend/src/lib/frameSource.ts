@@ -1,13 +1,13 @@
 import { env } from "../config/env";
 
-/** The "any player" source: an iframe's embed code, pasted by an admin, with `{{file_id}}` where the
- * video's Drive file id goes, for a player that holds the library's own files. Every one of the
- * library's videos is tried in it, in its place in the order; there's nothing to list or link.
+/** The "any player" source: an iframe's embed code, pasted by an admin, with `{{tmdb_id}}` where the
+ * movie or series' TMDb id goes. A matching title uses the code for its kind; there is nothing to
+ * list or link.
  * Everything the player needs is read out of the code; whatever could reach beyond its own frame is
  * left out. */
 
 export type FrameConfig = {
-  /** The player's address, with `{{file_id}}` in it. */
+  /** The player's address, with `{{tmdb_id}}` in it. */
   template: string;
   /** Permission policy features, ";"-separated. */
   allow: string;
@@ -36,7 +36,7 @@ export type Frame = Omit<FrameConfig, "template">;
 
 export class FrameError extends Error {}
 
-const PLACEHOLDER = "{{file_id}}";
+const PLACEHOLDER = "{{tmdb_id}}";
 
 const MAX_CODE = 4000;
 const DEFAULT_ALLOW = "autoplay; fullscreen; encrypted-media; picture-in-picture";
@@ -99,14 +99,12 @@ function parseTemplate(raw: string): string {
     return PLACEHOLDER;
   });
   const only = [...names];
-  if (only.length === 0) throw new FrameError(`Put ${PLACEHOLDER} where the video's Drive file ID goes in the src.`);
-  if (only.length > 1 || only[0] !== "file_id") {
-    throw new FrameError(
-      `The src can only have ${PLACEHOLDER}, the video's Drive file ID, so that every video can be tried in it. It has ${only.join(", ")}.`,
-    );
+  if (only.length === 0) throw new FrameError(`Put ${PLACEHOLDER} where the movie or series' TMDb ID goes in the src.`);
+  if (only.length > 1 || only[0] !== "tmdb_id") {
+    throw new FrameError(`The src can only have ${PLACEHOLDER}, the movie or series' TMDb ID. It has ${only.join(", ")}.`);
   }
   // Straight after the host it would run into its name.
-  address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{file_id\}\})(?=$|[/?#])/i, "$1/$2");
+  address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{tmdb_id\}\})(?=$|[/?#])/i, "$1/$2");
   const probe = address.replaceAll(PLACEHOLDER, PROBE);
   if (!URL.canParse(probe)) {
     throw new FrameError(`The src isn't a full address, such as https://player.example.com/${PLACEHOLDER}.`);
@@ -180,8 +178,8 @@ export function frameSiteName(config: FrameConfig): string {
 }
 
 /** The address a video plays from. */
-export function frameUrl(config: FrameConfig, fileId: string): string {
-  return config.template.replaceAll(PLACEHOLDER, () => encodeURIComponent(fileId));
+export function frameUrl(config: FrameConfig, tmdbId: string): string {
+  return config.template.replaceAll(PLACEHOLDER, () => encodeURIComponent(tmdbId));
 }
 
 export function frameOf({ allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio }: FrameConfig): Frame {

@@ -545,14 +545,15 @@ export async function playersFor(video: VideoDoc, { all = false }: { all?: boole
   const enabled = list.filter((s) => s.enabled || s.kind === "drive");
   const hosted = enabled.filter(isHosted).map((s) => s._id);
   const have = new Set(all ? hosted : hosted.length ? (await matching(video, hosted)).map((v) => v.sourceId) : []);
-  const kind = hasFile && enabled.some((s) => s.kind === "frame") ? await kindOf(video) : null;
+  const tmdb = tmdbRefOf(video);
+  const kind = hasFile && tmdb && enabled.some((s) => s.kind === "frame") ? await kindOf(video) : null;
   const options = enabled.flatMap((s): PlayerOption[] => {
     const features = parseFeatures(s.features, allFeatures());
     if (s.kind === "drive") return hasFile ? [{ id: s._id, kind: "drive", name: "Drive", features }] : [];
     if (s.kind === "frame") {
       const config = kind && frameFor(s.config as FrameConfigs, kind.type, kind.anime);
       if (!config) return [];
-      return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, video._id), frame: frameOf(config) }];
+      return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, tmdb!.id), frame: frameOf(config) }];
     }
     return have.has(s._id) ? [{ id: s._id, kind: "stream", name: s.name, features }] : [];
   });
