@@ -546,7 +546,10 @@ export async function playersFor(video: VideoDoc, { all = false }: { all?: boole
   const hosted = enabled.filter(isHosted).map((s) => s._id);
   const have = new Set(all ? hosted : hosted.length ? (await matching(video, hosted)).map((v) => v.sourceId) : []);
   const tmdb = tmdbRefOf(video);
-  const kind = hasFile && tmdb && enabled.some((s) => s.kind === "frame") ? await kindOf(video) : null;
+  const hasFrameSource = enabled.some((s) => s.kind === "frame");
+  // Any-player URLs can address a TMDb title directly, so they work for both catalog files and
+  // TMDb-only titles. Unmatched catalog files still use their folder/file kind as before.
+  const kind = hasFrameSource ? (tmdb || hasFile ? await kindOf(video) : null) : null;
   const options = enabled.flatMap((s): PlayerOption[] => {
     const features = parseFeatures(s.features, allFeatures());
     if (s.kind === "drive") return hasFile ? [{ id: s._id, kind: "drive", name: "Drive", features }] : [];
