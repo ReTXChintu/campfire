@@ -553,7 +553,9 @@ export async function playersFor(video: VideoDoc, { all = false }: { all?: boole
     if (s.kind === "frame") {
       const config = kind && frameFor(s.config as FrameConfigs, kind.type, kind.anime);
       if (!config) return [];
-      return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, tmdb!.id), frame: frameOf(config) }];
+      const url = frameUrl(config, tmdb!);
+      if (!url) return [];
+      return [{ id: s._id, kind: "frame", name: s.name, url, frame: frameOf(config) }];
     }
     return have.has(s._id) ? [{ id: s._id, kind: "stream", name: s.name, features }] : [];
   });

@@ -1,13 +1,12 @@
 import { env } from "../config/env";
 
-/** The "any player" source: an iframe's embed code, pasted by an admin, with `{{tmdb_id}}` where the
- * movie or series' TMDb id goes. A matching title uses the code for its kind; there is nothing to
- * list or link.
+/** The "any player" source: an iframe's embed code, pasted by an admin, with TMDb identity fields
+ * in its src. A matching title uses the code for its kind; there is nothing to list or link.
  * Everything the player needs is read out of the code; whatever could reach beyond its own frame is
  * left out. */
 
 export type FrameConfig = {
-  /** The player's address, with `{{tmdb_id}}` in it. */
+  /** The player's address, with `{{tmdb_id}}` and optional episode placeholders in it. */
   template: string;
   /** Permission policy features, ";"-separated. */
   allow: string;
@@ -36,6 +35,7 @@ export type Frame = Omit<FrameConfig, "template">;
 
 export class FrameError extends Error {}
 
+const PLACEHOLDERS = ["tmdb_id", "season_id", "episode_id"] as const;
 const PLACEHOLDER = "{{tmdb_id}}";
 
 const MAX_CODE = 4000;
@@ -95,27 +95,32 @@ function parseTemplate(raw: string): string {
   if (address.startsWith("//")) address = `https:${address}`;
   const names = new Set<string>();
   address = address.replace(/\{\{\s*([\w.-]+)\s*\}\}|\$?\{\s*([\w.-]+)\s*\}/g, (_all, double, single) => {
-    names.add((double ?? single).toLowerCase());
-    return PLACEHOLDER;
+    const name = (double ?? single).toLowerCase();
+    names.add(name);
+    return `{{${name}}}`;
   });
   const only = [...names];
-  if (only.length === 0) throw new FrameError(`Put ${PLACEHOLDER} where the movie or series' TMDb ID goes in the src.`);
-  if (only.length > 1 || only[0] !== "tmdb_id") {
-    throw new FrameError(`The src can only have ${PLACEHOLDER}, the movie or series' TMDb ID. It has ${only.join(", ")}.`);
+  if (!names.has("tmdb_id")) throw new FrameError(`Put ${PLACEHOLDER} where the movie or series' TMDb ID goes in the src.`);
+  const unknown = only.filter((name) => !PLACEHOLDERS.includes(name as (typeof PLACEHOLDERS)[number]));
+  if (unknown.length) {
+    throw new FrameError(`The src can only use {{tmdb_id}}, {{season_id}}, and {{episode_id}}. It has ${unknown.join(", ")}.`);
+  }
+  if (names.has("season_id") !== names.has("episode_id")) {
+    throw new FrameError("Use {{season_id}} and {{episode_id}} together.");
   }
   // Straight after the host it would run into its name.
   address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{tmdb_id\}\})(?=$|[/?#])/i, "$1/$2");
-  const probe = address.replaceAll(PLACEHOLDER, PROBE);
+  const probe = address.replace(/\{\{(tmdb_id|season_id|episode_id)\}\}/g, (_all, name: string) => `campfire-${name}-probe`);
   if (!URL.canParse(probe)) {
     throw new FrameError(`The src isn't a full address, such as https://player.example.com/${PLACEHOLDER}.`);
   }
   const url = new URL(probe);
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new FrameError("The src has to start with https:// or http://.");
   if (url.username || url.password) throw new FrameError("The src can't have a user name or password in it.");
-  if (url.host.includes(PROBE)) throw new FrameError(`${PLACEHOLDER} can't be part of the site's name.`);
+  if (url.host.includes("campfire-") && url.host.includes("-probe")) throw new FrameError("A TMDb placeholder can't be part of the site's name.");
   // Framed here, Campfire's own pages could reach the viewer's sign-in.
   if (url.host === new URL(env.frontendUrl).host) throw new FrameError("The src can't be Campfire itself.");
-  return url.toString().replaceAll(PROBE, PLACEHOLDER);
+  return url.toString().replace(/campfire-(tmdb_id|season_id|episode_id)-probe/g, (_all, name: string) => `{{${name}}}`);
 }
 
 function parseRadius(style: string): number | null {
@@ -174,12 +179,19 @@ export function parseFrameCode(raw: unknown): { config: FrameConfig; ignored: st
 
 /** The name a source gets when the admin doesn't type one. */
 export function frameSiteName(config: FrameConfig): string {
-  return new URL(config.template.replaceAll(PLACEHOLDER, PROBE)).hostname.replace(/^www\./, "");
+  return new URL(config.template.replace(/\{\{(?:tmdb_id|season_id|episode_id)\}\}/g, PROBE)).hostname.replace(/^www\./, "");
 }
 
 /** The address a video plays from. */
-export function frameUrl(config: FrameConfig, tmdbId: string): string {
-  return config.template.replaceAll(PLACEHOLDER, () => encodeURIComponent(tmdbId));
+export function frameUrl(config: FrameConfig, ref: { id: string; season?: number; episode?: number }): string | null {
+  if ((config.template.includes("{{season_id}}") || config.template.includes("{{episode_id}}")) &&
+      (ref.season == null || ref.episode == null)) return null;
+  const values: Record<string, string> = {
+    tmdb_id: ref.id,
+    season_id: ref.season == null ? "" : String(ref.season),
+    episode_id: ref.episode == null ? "" : String(ref.episode),
+  };
+  return config.template.replace(/\{\{(tmdb_id|season_id|episode_id)\}\}/g, (_all, name: string) => encodeURIComponent(values[name]));
 }
 
 export function frameOf({ allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio }: FrameConfig): Frame {
