@@ -4,11 +4,12 @@ import type { CatalogArtwork, CatalogEpisodeArtwork } from "./artwork";
 import { getCatalogVideo, type CatalogVideo } from "./catalogVideos";
 import { titleMeta, episodeMeta } from "./catalogMeta";
 import { billed, logoPathFrom, rawDetail, ratingOf, tmdbCached, yearOf } from "./explore";
+import { isNativelyPlayable } from "./drive";
 import { getDb } from "./mongodb";
 import type { WatchProgress } from "./progress";
 import { findByTmdb, parseTitleId, titleId, tmdbKey, type TmdbRef } from "./tmdbRef";
 import type { UpNextItem } from "./upNext";
-import { playersFor } from "./videoSources";
+import { DRIVE_ID, playersFor } from "./videoSources";
 
 /**
  * Playing any title on TMDb, in the library or not. One the library has plays as the library's video,
@@ -266,13 +267,41 @@ export async function seriesEpisodes(userId: string, seriesId: string, wanted: n
   };
 }
 
-/** What Play opens for a title: a series carries on where the viewer stopped. Null when TMDb has no
- * such title or isn't answering and the library doesn't have it either. */
-export async function playTarget(userId: string, ref: TmdbRef): Promise<{ href: string } | null> {
-  if (ref.type === "tv" && ref.episode == null) {
-    const { season, episode } = await resumeSpot(ref.id, await seriesProgress(userId, ref.id));
-    ref = { ...ref, season, episode };
-  }
+/** The film or episode Play means: for a series, where the viewer stopped, else its first. */
+async function whatPlays(userId: string, ref: TmdbRef): Promise<TmdbRef> {
+  if (ref.type !== "tv" || ref.episode != null) return ref;
+  const { season, episode } = await resumeSpot(ref.id, await seriesProgress(userId, ref.id));
+  return { ...ref, season, episode };
+}
+
+/** Every source in order and whether it has a title right now, asked as this is called: the players
+ * set on the title itself first. Null when there's no such title, or it isn't the viewer's to play. */
+export async function titleSources(userId: string, email: string, wanted: TmdbRef) {
+  const ref = await whatPlays(userId, wanted);
+  const found = await findByTmdb(ref);
+  const video = found?.kind === "video" ? await playableVideo(found.id, email) : await playableVideo(titleId(ref), email);
+  if (!video) return null;
+  const { players, checked } = await playersFor(video, { live: true });
+  return [
+    ...players.filter((p) => p.kind === "embed").map((p) => ({ id: p.id, name: p.name, result: "found" as const, needsApp: false })),
+    ...checked.map((c) => {
+      const isDrive = c.id === DRIVE_ID;
+      // The library can have a film as a folder of its own.
+      const result = isDrive && found ? ("found" as const) : c.result;
+      return {
+        id: c.id,
+        name: c.name,
+        result,
+        needsApp: isDrive && result === "found" && found?.kind === "video" && !isNativelyPlayable(video.mimeType),
+      };
+    }),
+  ];
+}
+
+/** What Play opens for a title. Null when TMDb has no such title or isn't answering and the library
+ * doesn't have it either. */
+export async function playTarget(userId: string, wanted: TmdbRef): Promise<{ href: string } | null> {
+  const ref = await whatPlays(userId, wanted);
   const href = await hrefOf(ref);
   return parseTitleId(href.replace(/^\/watch\//, "")) && !(await titleVideo(ref)) ? null : { href };
 }

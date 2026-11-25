@@ -4,8 +4,9 @@ import { exploreMetaLine, libraryHref, titleParam, useExploreTitle, type Explore
 import { Skeleton } from "../ui/States";
 import OpinionButtons from "../OpinionButtons";
 import EpisodeList from "./EpisodeList";
+import SourceMenu from "./SourceMenu";
 import WhereToWatch from "./WhereToWatch";
-import { playHref, useSeriesEpisodes } from "../../lib/play";
+import { useSeriesEpisodes } from "../../lib/play";
 import { itemKey, useSimilarTitles } from "../../lib/feed";
 import { trailerSrc, useTrailer } from "../../lib/trailer";
 import { Star } from "./ExploreRow";
@@ -170,7 +171,19 @@ function PlayGlyph() {
 }
 
 /** The artwork across the top, with the title and what to do about it; the trailer plays in its place. */
-function DetailHero({ d, playing, onPlay }: { d: Detail; playing: boolean; onPlay: () => void }) {
+function DetailHero({
+  d,
+  playing,
+  onPlay,
+  choosing,
+  onChoose,
+}: {
+  d: Detail;
+  playing: boolean;
+  onPlay: () => void;
+  choosing: boolean;
+  onChoose: () => void;
+}) {
   const { data: trailer } = useTrailer({ type: d.tmdbType, id: d.tmdbId });
   const art = d.backdropUrl ?? d.posterUrl;
   const { data: series } = useSeriesEpisodes(d.tmdbType === "tv" ? d.tmdbId : null, null);
@@ -212,10 +225,10 @@ function DetailHero({ d, playing, onPlay }: { d: Detail; playing: boolean; onPla
             </h2>
             <div className="mt-5 flex flex-wrap gap-3">
               {/* On every title: whether a source has it is only known by asking them. */}
-              <Link to={playHref({ type: d.tmdbType, id: d.tmdbId })} className={PRIMARY}>
+              <button type="button" onClick={onChoose} aria-expanded={choosing} aria-controls="detail-sources" className={PRIMARY}>
                 <PlayGlyph />
                 {play}
-              </Link>
+              </button>
               {trailer && (
                 <button type="button" onClick={onPlay} className={SECONDARY}>
                   Trailer
@@ -231,10 +244,18 @@ function DetailHero({ d, playing, onPlay }: { d: Detail; playing: boolean; onPla
 
 function DetailBody({ d }: { d: Detail }) {
   const [playing, setPlaying] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   return (
     <>
-      <DetailHero d={d} playing={playing} onPlay={() => setPlaying(true)} />
+      <DetailHero
+        d={d}
+        playing={playing}
+        onPlay={() => setPlaying(true)}
+        choosing={choosing}
+        onChoose={() => setChoosing((open) => !open)}
+      />
       <div className={`grid gap-10 pb-12 pt-5 ${GUTTER}`}>
+        {choosing && <SourceMenu title={{ type: d.tmdbType, id: d.tmdbId }} headingClass={HEADING} />}
         <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
           <div className="grid min-w-0 content-start gap-4">
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-text-secondary">

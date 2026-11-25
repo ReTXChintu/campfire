@@ -5,7 +5,7 @@ import { ErrorCard } from "../components/ui/States";
 import { PAGE } from "../lib/layout";
 import NotFoundPage from "./NotFoundPage";
 
-/** `/play/movie/603`, `/play/tv/1396[?season=1&episode=2]` — what every Play button opens. Goes on to
+/** `/play/movie/603`, `/play/tv/1396[?season=1&episode=2]`, `&source=…` — what every Play button opens. Goes on to
  * wherever the title is watched, leaving nothing in the history for Back to bounce off. */
 export default function PlayPage() {
   const { type, tmdbId } = useParams();
@@ -23,7 +23,8 @@ export default function PlayPage() {
     gcTime: 0,
     retry: false,
   });
-  if (data) return <Navigate to={data.href} replace />;
+  const source = params.get("source");
+  if (data) return <Navigate to={source ? `${data.href}?source=${encodeURIComponent(source)}` : data.href} replace />;
   if (error instanceof ApiError && error.status === 400) return <NotFoundPage />;
   if (error) {
     return (

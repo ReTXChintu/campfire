@@ -336,7 +336,7 @@ export type FolderSeriesResponse = {
 export type FolderResponse = FolderFlatResponse | FolderSeriesResponse;
 
 /** What a source said when it was asked about a title. */
-export type SourceCheck = { name: string; result: "found" | "none" | "unreachable" };
+export type SourceCheck = { id: string; name: string; result: "found" | "none" | "unreachable" };
 
 export type VideoResponse = {
   /** Alone, in answer to a title that's watched somewhere else by now. */

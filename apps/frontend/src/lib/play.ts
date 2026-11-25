@@ -4,20 +4,37 @@ import type { TmdbRef } from "./types";
 
 /** Playing any title on TMDb, in the library or not (backend lib/titlePlay.ts). */
 
-/** Where a Play button goes. A series carries on where the viewer stopped, else starts. */
-export function playHref(ref: Pick<TmdbRef, "type" | "id" | "season" | "episode">): string {
-  const episode = ref.season != null && ref.episode != null ? `?season=${ref.season}&episode=${ref.episode}` : "";
-  return `/play/${ref.type}/${ref.id}${episode}`;
+/** Where a Play button goes. A series carries on where the viewer stopped, else starts. `source` plays
+ * it from that one alone; without it they're all tried in order. */
+export function playHref(ref: Pick<TmdbRef, "type" | "id" | "season" | "episode">, source?: string): string {
+  return `/play/${ref.type}/${ref.id}${queryOf(ref, source)}`;
+}
+
+function queryOf(ref: Pick<TmdbRef, "season" | "episode">, source?: string): string {
+  const query = new URLSearchParams();
+  if (ref.season != null && ref.episode != null) {
+    query.set("season", String(ref.season));
+    query.set("episode", String(ref.episode));
+  }
+  if (source) query.set("source", source);
+  return query.size ? `?${query}` : "";
+}
+
+export type TitleSource = { id: string; name: string; result: "found" | "none" | "unreachable"; needsApp: boolean };
+
+/** Every source and whether it has a title, asked each time this is opened. */
+export function useTitleSources(ref: TmdbRef) {
+  return useQuery({
+    queryKey: ["title-sources", ref.type, ref.id, ref.season, ref.episode],
+    queryFn: () =>
+      apiGet<{ sources: TitleSource[] }>(`/api/title/${ref.type}/${ref.id}/sources${queryOf(ref)}`).then((r) => r.sources),
+    gcTime: 0,
+    retry: false,
+  });
 }
 
 /** Whether this is watched as a title, not as one of the library's files. */
 export const isTitleId = (id: string) => id.startsWith("tmdb:");
-
-/** The film or series behind a title's id. */
-export function titleOfId(id: string): { type: "movie" | "tv"; id: string } | null {
-  const match = id.match(/^tmdb:(movie|tv):(\d+)/);
-  return match ? { type: match[1] as "movie" | "tv", id: match[2] } : null;
-}
 
 export type SeriesEpisode = {
   number: number;

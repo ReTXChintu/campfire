@@ -1,8 +1,8 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../middleware/auth";
 import { isTmdbId } from "../lib/explore";
 import { findByTmdb, type TmdbRef } from "../lib/tmdbRef";
-import { playTarget, seriesEpisodes } from "../lib/titlePlay";
+import { playTarget, seriesEpisodes, titleSources } from "../lib/titlePlay";
 import { trailerFor } from "../lib/trailer";
 
 /**
@@ -10,6 +10,7 @@ import { trailerFor } from "../lib/trailer";
  *
  *   GET /api/title/:type/:tmdbId[?season=1&episode=2] → { kind, id } of the library item, or 404
  *   GET /api/title/tv/:tmdbId/episodes[?season=1]     → { seasons, season, episodes, resume }
+ *   GET /api/title/:type/:tmdbId/sources[?season&episode] → { sources: [{ id, name, result, needsApp }] }
  *   GET /api/title/:type/:tmdbId/play[?season&episode] → { href }
  *   GET /api/title/:type/:tmdbId/trailer              → { trailer: { name, youtubeId } | null }
  */
@@ -53,21 +54,39 @@ router.get("/tv/:tmdbId/episodes", requireAuth, (req, res, next) => {
     .catch(next);
 });
 
-/** Where Play goes: { href } of the library's page for it, or of the title's own. */
-router.get("/:type/:tmdbId/play", requireAuth, (req, res, next) => {
+/** The title a request is about, with its episode when it has one; answers it itself when it's not one. */
+function wantedTitle(req: Request, res: Response): TmdbRef | null {
   const ref = parseRef(req.params.type, req.params.tmdbId);
-  if (ref?.type === "tv" && (req.query.season !== undefined || req.query.episode !== undefined)) {
+  if (!ref) {
+    res.status(404).json({ error: "Not found" });
+    return null;
+  }
+  if (ref.type === "tv" && (req.query.season !== undefined || req.query.episode !== undefined)) {
     ref.season = Number(req.query.season);
     ref.episode = Number(req.query.episode);
     if (!Number.isInteger(ref.season) || !Number.isInteger(ref.episode)) {
       res.status(400).json({ error: "season and episode go together" });
-      return;
+      return null;
     }
   }
-  if (!ref) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  }
+  return ref;
+}
+
+/** Every source and whether it has the title right now, for playing from one of them alone. */
+router.get("/:type/:tmdbId/sources", requireAuth, (req, res, next) => {
+  const ref = wantedTitle(req, res);
+  if (!ref) return;
+  titleSources(req.authUser!.userId, req.authUser!.email, ref)
+    .then((sources) =>
+      sources ? res.json({ sources }) : res.status(404).json({ error: "TMDb has no such title, or isn't answering" }),
+    )
+    .catch(next);
+});
+
+/** Where Play goes: { href } of the library's page for it, or of the title's own. */
+router.get("/:type/:tmdbId/play", requireAuth, (req, res, next) => {
+  const ref = wantedTitle(req, res);
+  if (!ref) return;
   playTarget(req.authUser!.userId, ref)
     .then((target) => (target ? res.json(target) : res.status(404).json({ error: "TMDb has no such title, or isn't answering" })))
     .catch(next);

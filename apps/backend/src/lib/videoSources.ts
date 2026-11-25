@@ -483,8 +483,8 @@ function askHost(source: SourceDoc, video: VideoDoc): Promise<boolean> {
   return answer;
 }
 
-/** What each source said about a title, for a viewer told that none has it. */
-export type Checked = { name: string; result: "found" | "none" | "unreachable" };
+/** What each source said about a title. */
+export type Checked = { id: string; name: string; result: "found" | "none" | "unreachable" };
 
 /** Every way to play a title, in the order to try them: the players set on the title itself, then
  * the sources that have it, Drive among them. With `live`, a host not known to have it is asked now;
@@ -533,7 +533,8 @@ export async function playersFor(
     const option = optionOf(s);
     if (option) players.push(option);
     checked.push({
-      name: s.kind === "drive" ? "Library" : s.name,
+      id: s._id,
+      name: s.kind === "drive" ? "Drive" : s.name,
       result: answers.get(s._id) === "unreachable" ? "unreachable" : option ? "found" : "none",
     });
   }

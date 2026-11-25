@@ -140,10 +140,12 @@ export default function WatchPage() {
   if (video && playersRef.current?.fileId !== video.fileId) {
     playersRef.current = { fileId: video.fileId, list: webPlayers(video) };
   }
-  const players = playersRef.current?.list ?? [];
-  // A title that isn't in the library, with every source tried.
+  // Chosen in the title's details: played from that source and no other. A party plays the file.
+  const onlySource = partyId ? null : searchParams.get("source");
+  const players = (playersRef.current?.list ?? []).filter((p) => !onlySource || p.id === onlySource);
+  // With every source tried, or the one that was chosen. (A library title always has Drive to end on.)
   const asTitle = isTitleId(fileId ?? "");
-  const nowhere = asTitle && players.every((p) => picked.failed.includes(p.id));
+  const nowhere = (asTitle || onlySource !== null) && players.every((p) => picked.failed.includes(p.id));
   // A watch party always plays the file: nothing else can be kept in sync.
   const player = partyId ? players.find((p) => p.kind === "drive") : currentPlayer(players, picked.failed, picked.chosen);
   const selectPlayer = (id: string, position: number | null) =>
@@ -555,7 +557,9 @@ export default function WatchPage() {
   }
 
   if (error || !video) return <NotFoundPage />;
-  if (video.movedTo) return <Navigate to={video.movedTo} replace />;
+  if (video.movedTo) {
+    return <Navigate to={onlySource ? `${video.movedTo}?source=${encodeURIComponent(onlySource)}` : video.movedTo} replace />;
+  }
 
   const failedNames = players.filter((p) => picked.failed.includes(p.id)).map((p) => p.name);
   // What every one of our own players takes, whichever source it plays from.
@@ -606,9 +610,17 @@ export default function WatchPage() {
                 directly via libmpv. */}
             {nowhere ? (
               <NotInAnySource
-                fileId={video.fileId}
+                tmdb={video.tmdb ?? null}
                 title={[video.seriesTitle, video.title].filter(Boolean).join(": ")}
-                checked={video.checked ?? []}
+                checked={(video.checked ?? []).filter((c) => !onlySource || c.id === onlySource)}
+                only={
+                  onlySource
+                    ? {
+                        name: video.checked?.find((c) => c.id === onlySource)?.name ?? "that source",
+                        allHref: `/watch/${video.fileId}`,
+                      }
+                    : null
+                }
                 retrying={videoFetching}
                 onRetry={() => {
                   setPick(NO_PICK);
@@ -704,7 +716,7 @@ export default function WatchPage() {
       {!video.episode && <Trailer tmdb={video.tmdb} className="mt-6" />}
 
       <section
-        hidden={asTitle || (!!player && player.kind !== "drive")}
+        hidden={nowhere || asTitle || (!!player && player.kind !== "drive")}
         className="mt-6 rounded-2xl border border-divider bg-surface p-4"
       >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
