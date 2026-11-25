@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
+import { getCatalogFolder, type CatalogFolder } from "./catalogFolders";
 import { isAnime } from "./explore";
 import { getDb } from "./mongodb";
 import { seal, unseal } from "./secretBox";
@@ -515,13 +516,23 @@ export async function listViewerSources(): Promise<{ id: string; name: string }[
     .map((s) => ({ id: s._id, name: s.kind === "drive" ? "Drive" : s.name }));
 }
 
-/** Whether a video is a film or part of a series, and whether it's anime. TMDb says which; what it
- * doesn't know is a film when it's loose in the library and part of a series when it's in a folder. */
+/** Whether a video is a film or part of a series, and whether it's anime, as TMDb says. One it doesn't
+ * know goes by the series it's in; failing that, it's a film when it's loose in the library and part of
+ * a series when it's in a folder. */
 async function kindOf(video: VideoDoc): Promise<{ type: "movie" | "tv"; anime: boolean }> {
-  const ref = tmdbRefOf(video);
-  if (ref) return { type: ref.type, anime: await isAnime(ref.type, ref.id) };
-  const inFolder = video.parentFolderId !== undefined && video.parentFolderId !== env.driveRootFolderId;
-  return { type: inFolder ? "tv" : "movie", anime: false };
+  const own = tmdbRefOf(video);
+  if (own) return { type: own.type, anime: await isAnime(own.type, own.id) };
+  let folderId = video.parentFolderId;
+  if (folderId === undefined || folderId === env.driveRootFolderId) return { type: "movie", anime: false };
+  // A season's folder, then its series'.
+  for (let depth = 0; depth < 2 && folderId !== env.driveRootFolderId; depth++) {
+    const folder: CatalogFolder | null = await getCatalogFolder(folderId);
+    if (!folder) break;
+    const ref = tmdbRefOf(folder);
+    if (ref) return { type: ref.type, anime: await isAnime(ref.type, ref.id) };
+    folderId = folder.parentFolderId;
+  }
+  return { type: "tv", anime: false };
 }
 
 /** The ways to play a title, in order: the players set on the title itself, then the sources known to

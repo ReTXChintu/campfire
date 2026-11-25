@@ -119,7 +119,14 @@ await db.collection("catalogFolders").insertOne({
   _id: "show", parentFolderId: ROOT, driveName: "The Show", status: "published", title: "The Show", thumbnailFileId: null,
   artwork: artwork("tv", "1396", "The Show"), episodeArtworkOff: true, createdAt: now, curatedAt: now, curatedBy: "smoke", updatedAt: now,
 });
+const folder = (id, parentFolderId, art) => ({
+  _id: id, parentFolderId, driveName: id, status: "published", title: id, thumbnailFileId: null, artwork: art, createdAt: now, curatedAt: now, curatedBy: "smoke", updatedAt: now,
+});
+await db.collection("catalogFolders").insertMany([
+  folder("animeshow", ROOT, artwork("tv", "1429", "Anime Show")), folder("animeseason", "animeshow", null), folder("unknown", ROOT, null),
+]);
 await db.collection("catalogVideos").insertMany([
+  video("ova", "animeseason", "An episode TMDb doesn't know"), video("odd", "unknown", "A clip in a folder TMDb doesn't know"),
   video("lib", ROOT, "Library Film", { artwork: artwork("movie", "800", "Library Film") }),
   video("draft", ROOT, "Draft Film", { status: "curated", artwork: artwork("movie", "701", "Draft Film") }),
   video("home", ROOT, "Home video"),
@@ -246,7 +253,8 @@ try {
   const each = async (ids) => (await Promise.all(ids.map(goesTo))).join();
   check("a film, an episode, and anime of both", (await each(["lib", "ep1", "afilm", "aep"])) === "movie/lib,tv/ep1,anime/afilm,anime/aep", await each(["lib", "ep1", "afilm", "aep"]));
   check("animation that isn't Japanese isn't anime, nor Japanese that isn't animation", (await each(["toys", "tokyo"])) === "movie/toys,movie/tokyo", await each(["toys", "tokyo"]));
-  check("what TMDb doesn't know goes by where it is", (await each(["home", "clip"])) === "movie/home,tv/clip", await each(["home", "clip"]));
+  check("an episode TMDb doesn't know goes by its series", (await each(["clip", "ova"])) === "tv/clip,anime/ova", await each(["clip", "ova"]));
+  check("failing that, by where it is", (await each(["home", "odd"])) === "movie/home,tv/odd", await each(["home", "odd"]));
   const setCodes = (codes) => api(`/api/admin/sources/${kindsId}`, { token: admin, method: "PATCH", body: { codes } });
   await setCodes({ movie: code("movie"), tv: code("tv"), anime: "" });
   check("without a code of its own, anime is a film or a series", (await each(["afilm", "aep"])) === "movie/afilm,tv/aep", await each(["afilm", "aep"]));
