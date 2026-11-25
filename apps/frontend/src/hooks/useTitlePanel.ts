@@ -2,8 +2,8 @@ import { useCallback } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { parseTitleParam, titleParam } from "../lib/explore";
 
-/** The title open in the side panel, kept in the address (`?title=movie-603`) so it can be linked to
- * and Back closes it. */
+/** The title whose details are open, kept in the address (`?title=movie-603`) so it can be linked to
+ * and Back closes it. `play` opens them on the sources to play from. */
 export function useTitlePanel() {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
@@ -12,11 +12,13 @@ export function useTitlePanel() {
   const pushed = (location.state as { exploreOpened?: boolean } | null)?.exploreOpened === true;
 
   const open = useCallback(
-    (type: "movie" | "tv", id: string) =>
+    (type: "movie" | "tv", id: string, play = false) =>
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
           next.set("title", titleParam(type, id));
+          if (play) next.set("play", "1");
+          else next.delete("play");
           return next;
         },
         // Closing then knows that Back lands on the page without the panel.
@@ -34,6 +36,7 @@ export function useTitlePanel() {
       (prev) => {
         const next = new URLSearchParams(prev);
         next.delete("title");
+        next.delete("play");
         return next;
       },
       { replace: true },

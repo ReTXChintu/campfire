@@ -17,8 +17,8 @@ export function useFolder(folderId: string, season: string | null) {
 export function useVideo(fileId: string) {
   return useQuery({
     queryKey: ["video", fileId],
-    // `live`: every source is asked now, not only the ones known to have it.
-    queryFn: () => apiGet<VideoResponse>(`/api/video/${encodeURIComponent(fileId)}?live=1`),
+    // `all`: how to play from every source, not only the ones known to have it.
+    queryFn: () => apiGet<VideoResponse>(`/api/video/${encodeURIComponent(fileId)}?all=1`),
   });
 }
 

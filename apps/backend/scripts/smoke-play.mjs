@@ -183,9 +183,8 @@ try {
   const bunnyId = await addSource({ kind: "bunny", name: "Bunny", config: { libraryId: "759", cdnHostname: "vz-63dcc9a5-af6.b-cdn.net" }, apiKey: "key" });
   check("the order: Cloudflare, Bunny, Drive", (await api("/api/admin/sources", { token: admin })).body.sources.map((s) => s.name).join() === "Cloudflare,Bunny,Drive");
 
-  const V = (id, token = viewer, live = true) => api(`/api/video/${encodeURIComponent(id)}${live ? "?live=1" : ""}`, { token });
+  const V = (id, token = viewer, all = true) => api(`/api/video/${encodeURIComponent(id)}${all ? "?all=1" : ""}`, { token });
   const names = (r) => r.body.players?.map((p) => p.name).join();
-  const said = (r) => r.body.checked?.map((c) => `${c.name}:${c.result}`).join();
   const stream = (source, id, token = viewer) => api(`/api/source-stream/${source}/${encodeURIComponent(id)}`, { token });
   const play = async (path, token = viewer) => api(`/api/title/${path}`, { token });
   const save = (fileId, positionSeconds, parentFolderId = "tmdb") =>
@@ -203,86 +202,70 @@ try {
   check("season and episode go together", (await play("tv/1396/play?season=1")).status === 400);
   for (const bad of ["tmdb:movie:0", "tmdb:movie:abc", "tmdb:tv:1396", "tmdb:tv:1396:s1e99", "tmdb:movie:99999"]) check(`nothing at ${bad}`, (await V(bad)).status === 404);
 
-  // --- nothing has it ---
-  const ownId = await addSource({ kind: "frame", name: "Own", code: "https://own.example/{{file_id}}" });
-  check("a player of the library's own files has nothing for it", names(await V("tmdb:movie:13")) === "" && names(await V("home")) === "Own,Library");
-  await api(`/api/admin/sources/${ownId}`, { token: admin, method: "DELETE" });
+  // --- the sources to pick from ---
+  const viewerSources = async () => (await api("/api/sources", { token: viewer })).body.sources;
+  check("exactly the admin's, in order", (await viewerSources()).map((x) => `${x.name}:${x.id}`).join() === `Cloudflare:${cfId},Bunny:${bunnyId},Drive:drive`);
+  check("with nothing about them a viewer shouldn't see", (await viewerSources()).every((x) => Object.keys(x).join() === "id,name"));
+  check("signed-in only", (await api("/api/sources")).status === 401);
+  const order = (ids) => api("/api/admin/sources/order", { token: admin, method: "PUT", body: { ids } });
+  await order([bunnyId, cfId]);
+  check("as the admin orders them", (await viewerSources()).map((x) => x.name).join() === "Bunny,Cloudflare,Drive");
+  await order([cfId, bunnyId]);
+  await api(`/api/admin/sources/${cfId}`, { token: admin, method: "PATCH", body: { enabled: false } });
+  check("not one that's off", (await viewerSources()).map((x) => x.name).join() === "Bunny,Drive");
+  await api(`/api/admin/sources/${cfId}`, { token: admin, method: "PATCH", body: { enabled: true } });
+
+  // --- nothing is tried until it's picked ---
   asked = [];
   let r = await V("tmdb:movie:700");
-  check("with no source having it there's nothing to play", r.status === 200 && names(r) === "" && r.body.title === "Nowhere Film", r.body);
-  check("and it says what each one said", said(r) === "Cloudflare:none,Bunny:none,Drive:none", r.body.checked);
-  check("having asked each one", asked.sort().join() === "bunny 700,cloudflare 700", asked);
-  asked = [];
-  await V("tmdb:movie:700");
-  check("the same click doesn't ask twice", asked.length === 0, asked);
+  check("every source is on offer for any title", r.status === 200 && names(r) === "Cloudflare,Bunny" && r.body.sources.map((x) => x.name).join() === "Cloudflare,Bunny,Drive" && r.body.title === "Nowhere Film", r.body);
+  check("and none has been asked", asked.length === 0, asked);
+  check("one that hasn't got it says so when it's picked", (await stream(cfId, "tmdb:movie:700")).status === 404);
+  check("and only that one was asked", asked.join() === "cloudflare 700", asked);
+  check("Drive hasn't got what isn't in the library", !names(r).includes("Drive"));
+  const ownId = await addSource({ kind: "frame", name: "Own", code: "https://own.example/{{file_id}}" });
+  check("nor has a player of the library's own files", !names(await V("tmdb:movie:13")).includes("Own") && names(await V("home")).includes("Own"));
+  await api(`/api/admin/sources/${ownId}`, { token: admin, method: "DELETE" });
 
   // --- one appears ---
   bunnyVideos = [bunny(BUNNY_VIDEO, "The Matrix tmdb-603"), bunny("00000000-0000-0000-0000-000000000001", "tmdb-6030 another")];
-  r = await V("tmdb:movie:603");
-  check("a video added a moment ago is found without waiting for the next listing", names(r) === "Bunny" && said(r) === "Cloudflare:none,Bunny:found,Drive:none", r.body.players);
-  check("a title with a longer id isn't it", (await db.collection("sourceVideos").countDocuments({})) === 1);
-  check("it has the title's facts", r.body.year === 1999 && r.body.genres[0] === "Action" && r.body.rating.average === 8 && r.body.cast[0].name === "Lead" && r.body.backHref === "/?title=movie-603", r.body);
   const s = await stream(bunnyId, "tmdb:movie:603");
-  check("its stream", s.status === 200 && s.body.url.endsWith(`/${BUNNY_VIDEO}/playlist.m3u8`), s);
-  check("a source without it is the cue to move on", (await stream(cfId, "tmdb:movie:603")).status === 404);
-  cloudflareVideos = [cloudflare(CF_VIDEO, "tmdb-603")];
-  await sleep(21_000); // what it said a moment ago is done with
+  check("a video added a moment ago is found when it's picked", s.status === 200 && s.body.url.endsWith(`/${BUNNY_VIDEO}/playlist.m3u8`), s);
+  check("a title with a longer id isn't it", (await db.collection("sourceVideos").countDocuments({})) === 1);
   asked = [];
+  await stream(bunnyId, "tmdb:movie:603");
+  check("one known to have it isn't searched again", asked.length === 0, asked);
+  check("another source still hasn't", (await stream(cfId, "tmdb:movie:603")).status === 404);
+  cloudflareVideos = [cloudflare(CF_VIDEO, "tmdb-603")];
+  await sleep(3500); // what it said a moment ago is done with
+  check("until it has", (await stream(cfId, "tmdb:movie:603")).status === 200);
   r = await V("tmdb:movie:603");
-  check("once both have it, in order", names(r) === "Cloudflare,Bunny", r.body.players);
-  check("one known to have it isn't asked again", asked.join() === "cloudflare 603", asked);
-  await api("/api/admin/sources/order", { token: admin, method: "PUT", body: { ids: [bunnyId, cfId] } });
-  check("in the admin's order", names(await V("tmdb:movie:603")) === "Bunny,Cloudflare");
-  await api("/api/admin/sources/order", { token: admin, method: "PUT", body: { ids: [cfId, bunnyId] } });
-  check("not a source that's off", await (async () => {
-    await api(`/api/admin/sources/${cfId}`, { token: admin, method: "PATCH", body: { enabled: false } });
-    const off = names(await V("tmdb:movie:603"));
-    await api(`/api/admin/sources/${cfId}`, { token: admin, method: "PATCH", body: { enabled: true } });
-    return off === "Bunny";
-  })());
+  check("it has the title's facts", r.body.year === 1999 && r.body.genres[0] === "Action" && r.body.rating.average === 8 && r.body.cast[0].name === "Lead" && r.body.backHref === "/?title=movie-603", r.body);
 
   // --- the library's own ---
   bunnyVideos.push(bunny("00000000-0000-0000-0000-000000000002", "tmdb-800"));
-  r = await V("lib");
-  check("a library title is looked for too, before Drive", names(r) === "Bunny,Library" && said(r) === "Cloudflare:none,Bunny:found,Drive:found", r.body.players);
+  check("a library title has every source too", names(await V("lib")) === "Cloudflare,Bunny,Drive");
   asked = [];
-  check("an app isn't kept waiting for it", names(await V("home", viewer, false)) === "Library" && asked.length === 0);
-  check("a video TMDb doesn't know is only in Drive", names(await V("home")) === "Library" && asked.length === 0, asked);
+  check("an app is only sent what's known to have it", names(await V("lib", viewer, false)) === "Drive" && asked.length === 0);
+  check("a video TMDb doesn't know isn't searched for", (await stream(bunnyId, "home")).status === 404 && asked.length === 0, asked);
   check("by its title's id it says where it is", (await V("tmdb:movie:800")).body.movedTo === "/watch/lib");
-
-  // --- one source alone ---
-  const listed = async (path, token = viewer) => {
-    const { status, body } = await play(`${path}`, token);
-    return status === 200 ? body.sources.map((x) => `${x.name}:${x.result}${x.needsApp ? ":app" : ""}`).join() : status;
-  };
-  check("every source, in order, and whether it has it", (await listed("movie/603/sources")) === "Cloudflare:found,Bunny:found,Drive:none", await listed("movie/603/sources"));
-  check("a library title's", (await listed("movie/800/sources")) === "Cloudflare:none,Bunny:found,Drive:found", await listed("movie/800/sources"));
-  await db.collection("catalogVideos").updateOne({ _id: "lib" }, { $set: { mimeType: "video/x-matroska" } });
-  check("one a browser can't play says so", (await listed("movie/800/sources")).endsWith("Drive:found:app"), await listed("movie/800/sources"));
-  await db.collection("catalogVideos").updateOne({ _id: "lib" }, { $set: { mimeType: "video/mp4" } });
-  check("an episode's", (await listed("tv/1396/sources?season=1&episode=1")) === "Cloudflare:none,Bunny:none,Drive:found", await listed("tv/1396/sources?season=1&episode=1"));
-  check("a series' is the episode Play means", (await listed("tv/1396/sources")) === (await listed("tv/1396/sources?season=1&episode=1")));
-  check("not of nonsense, or signed out", (await listed("movie/99999/sources")) === 404 && (await listed("book/1/sources")) === 404 && (await api("/api/title/movie/603/sources")).status === 401);
-  check("what it's chosen by is in the answer", (await V("tmdb:movie:603")).body.checked.map((x) => x.id).join() === [cfId, bunnyId, "drive"].join());
 
   // --- hosts not answering ---
   bunnyDown = true;
-  r = await V("tmdb:movie:702");
-  check("one that doesn't answer is tried all the same", names(r) === "Bunny" && said(r) === "Cloudflare:none,Bunny:unreachable,Drive:none", r.body.checked);
-  check("and then fails", (await stream(bunnyId, "tmdb:movie:702")).status === 502);
+  check("one that doesn't answer fails", (await stream(bunnyId, "tmdb:movie:702")).status === 502);
   bunnyDown = false;
   bunnyVideos.push(bunny("00000000-0000-0000-0000-000000000003", "tmdb-702"));
-  check("its failure isn't remembered", said(await V("tmdb:movie:702")).includes("Bunny:found"));
+  asked = [];
+  await stream(bunnyId, "tmdb:movie:702");
+  check("its failure isn't remembered", asked.join() === "bunny 702" && (await db.collection("sourceVideos").countDocuments({ key: "movie:702" })) === 1, asked);
   cloudflareHangs = true;
   const t0 = Date.now();
-  r = await V("tmdb:movie:703");
-  check("one that hangs is given up on", said(r).startsWith("Cloudflare:unreachable") && Date.now() - t0 < 8000, [said(r), Date.now() - t0]);
+  check("one that hangs is given up on", (await stream(cfId, "tmdb:movie:703")).status === 502 && Date.now() - t0 < 8000, Date.now() - t0);
   cloudflareHangs = false;
 
   // --- what isn't published ---
   bunnyVideos.push(bunny("00000000-0000-0000-0000-000000000004", "tmdb-701"));
   check("what the admin held back isn't reached by its title", (await V("tmdb:movie:701")).status === 404 && (await stream(bunnyId, "tmdb:movie:701")).status === 404);
-  check("nor is who has it said", (await listed("movie/701/sources")) === 404 && typeof (await listed("movie/701/sources", admin)) === "string");
   check("except by the admin", (await V("tmdb:movie:701", admin)).status === 200);
   check("nor a draft's own id", (await stream(bunnyId, "draft")).status === 404);
 
@@ -327,9 +310,9 @@ try {
   check("one that isn't out isn't next", (await V("tmdb:tv:1396:s2e1")).body.upNext === null);
   check("by its title's id the library's is where it is", (await V("tmdb:tv:1396:s1e1")).body.movedTo === "/watch/ep1");
   bunnyVideos.push(bunny("00000000-0000-0000-0000-000000000005", "The Show tmdb-1396-s1e2"), bunny("00000000-0000-0000-0000-000000000006", "The Show tmdb-1396-s2e1"));
-  await sleep(21_000);
-  r = await V("tmdb:tv:1396:s1e2");
-  check("the right episode is found", names(r) === "Bunny" && (await stream(bunnyId, "tmdb:tv:1396:s1e2")).status !== 502, names(r));
+  asked = [];
+  await stream(bunnyId, "tmdb:tv:1396:s1e2");
+  check("the right episode is found", asked.join() === "bunny 1396" && (await db.collection("sourceVideos").countDocuments({ key: "tv:1396:s1e2" })) === 1, asked);
   check("and not another", (await db.collection("sourceVideos").countDocuments({ key: "tv:1396:s2e1" })) === 0);
   await save("tmdb:tv:1396:s2e1", 10);
   row = await carryOn();

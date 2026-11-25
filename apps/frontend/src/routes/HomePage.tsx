@@ -63,7 +63,7 @@ export default function HomePage() {
   const feed = useFeed(kind);
   const panel = useTitlePanel();
   const [requestOpen, setRequestOpen] = useState(false);
-  const openItem = (item: ExploreItem) => panel.open(item.tmdbType, item.tmdbId);
+  const openItem = (item: ExploreItem, play = false) => panel.open(item.tmdbType, item.tmdbId, play);
 
   const loadMore = useNearEnd(() => {
     if (feed.hasNextPage && !feed.isFetchingNextPage && !feed.isFetchNextPageError) feed.fetchNextPage();

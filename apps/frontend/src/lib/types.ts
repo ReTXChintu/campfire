@@ -335,8 +335,8 @@ export type FolderSeriesResponse = {
 
 export type FolderResponse = FolderFlatResponse | FolderSeriesResponse;
 
-/** What a source said when it was asked about a title. */
-export type SourceCheck = { id: string; name: string; result: "found" | "none" | "unreachable" };
+/** Somewhere a viewer can play from. */
+export type ViewerSource = { id: string; name: string };
 
 export type VideoResponse = {
   /** Alone, in answer to a title that's watched somewhere else by now. */
@@ -360,10 +360,10 @@ export type VideoResponse = {
   introStart: number | null;
   introEnd: number | null;
   outroStart: number | null;
-  /** Every way to play it, in the order to try them; absent from an older backend. */
+  /** How it plays from each of them; absent from an older backend. */
   players?: PlayerOption[];
-  /** Every source asked, whether it has it or not. */
-  checked?: SourceCheck[];
+  /** Every source there is, whether it has this or not; absent from an older backend. */
+  sources?: ViewerSource[];
   /** An episode of a series that isn't in the library. */
   seriesTitle?: string | null;
   /** Just the embedded ones, as a backend before `players` sent them. */

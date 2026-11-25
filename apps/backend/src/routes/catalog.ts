@@ -30,7 +30,7 @@ import {
   titleLanguages,
 } from "../lib/mediaTracks";
 import { getUserById } from "../lib/users";
-import { playersFor } from "../lib/videoSources";
+import { listViewerSources, playersFor } from "../lib/videoSources";
 import { findByTmdb, parseTitleId, titleId, tmdbRefOf } from "../lib/tmdbRef";
 import { markedWatched, titleKey } from "../lib/opinions";
 import { playableVideo, titleCard, titleKeyOfId, titleVideoResponse } from "../lib/titlePlay";
@@ -533,11 +533,12 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
   // Audio and subtitle tracks under the names an admin gave them, and which ones to start on —
   // the viewer's own picks first, then their profile's languages, then the admin's default (see
   // startTracks in lib/mediaTracks.ts). Older apps keep using the initial* fields above.
-  const [{ merged: naming, folders }, user, { players, checked }] = await Promise.all([
+  const [{ merged: naming, folders }, user, players, sources] = await Promise.all([
     namingForVideo(video),
     getUserById(req.authUser!.userId),
-    // Asking hosts that aren't known to have it takes a moment, so only for a client that plays them.
-    playersFor(video, { live: req.query.live === "1" }),
+    // Every source, for a client whose viewer picks one; an app is only sent what's known to have it.
+    playersFor(video, { all: req.query.all === "1" }),
+    listViewerSources(),
   ]);
   const tracks = video.tracks && !video.tracks.error ? video.tracks : null;
   const viewerTracks = effectiveTracks(tracks, naming);
@@ -602,7 +603,7 @@ router.get("/video/:fileId", requireAuth, async (req, res) => {
     outroStart: video.outroStart,
     // Every way to play it, in the order to try them (lib/videoSources.ts).
     players,
-    checked,
+    sources,
     // Just the embedded ones, for the apps, which offer those before the file.
     embeds: players.flatMap((p) => (p.kind === "embed" ? [{ provider: p.name, url: p.url }] : [])),
   });

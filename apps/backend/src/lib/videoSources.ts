@@ -30,10 +30,10 @@ import {
 
 /** Video sources: the places a title can play from, in one global order an admin sets — Bunny Stream
  * libraries, Cloudflare Stream accounts, any other player by its embed code (lib/frameSource.ts), and
- * Drive itself. The rule is that every title is tried in every source, in that order, with nothing to
- * select: a host has a title when one of its videos has the TMDb id in its name ("tmdb-603",
- * "tmdb-1396-s1e2"), which is looked up each time and listed every half hour; a player by its embed
- * code and Drive have every one of the library's files. A player that fails falls to the next. */
+ * Drive itself. Every title can be tried in every source, with nothing to select: a viewer picks one
+ * and it's looked for there and then. A host has a title when one of its videos has the TMDb id in
+ * its name ("tmdb-603", "tmdb-1396-s1e2"); a player by its embed code and Drive have every one of the
+ * library's files. */
 
 export const DRIVE_ID = "drive";
 const SYNC_EVERY_MS = 30 * 60_000;
@@ -455,7 +455,7 @@ async function matching(video: VideoDoc, sourceIds: string[]): Promise<SourceVid
 
 const LIVE_TIMEOUT_MS = 4000;
 /** A host that just said it hasn't got a title isn't asked again by the same click. */
-const MISS_TTL_MS = 20_000;
+const MISS_TTL_MS = 3000;
 const MAX_ASKED = 500;
 const asked = new Map<string, { until: number; answer: Promise<boolean> }>();
 
@@ -483,62 +483,35 @@ function askHost(source: SourceDoc, video: VideoDoc): Promise<boolean> {
   return answer;
 }
 
-/** What each source said about a title. */
-export type Checked = { id: string; name: string; result: "found" | "none" | "unreachable" };
+/** The sources a viewer can pick from, in order. */
+export async function listViewerSources(): Promise<{ id: string; name: string }[]> {
+  const all = await ordered();
+  return all
+    .filter((s) => s.enabled || s.kind === "drive")
+    .map((s) => ({ id: s._id, name: s.kind === "drive" ? "Drive" : s.name }));
+}
 
-/** Every way to play a title, in the order to try them: the players set on the title itself, then
- * the sources that have it, Drive among them. With `live`, a host not known to have it is asked now;
- * one that doesn't answer is offered all the same, to be tried in its turn. */
-export async function playersFor(
-  video: VideoDoc,
-  { live = false }: { live?: boolean } = {},
-): Promise<{ players: PlayerOption[]; checked: Checked[] }> {
-  const [embeds, all] = await Promise.all([playableEmbeds(video), ordered()]);
+/** The ways to play a title, in order: the players set on the title itself, then the sources known to
+ * have it, Drive among them. With `all`, every host, known to have it or not: it's asked when the
+ * viewer picks it (streamFor). */
+export async function playersFor(video: VideoDoc, { all = false }: { all?: boolean } = {}): Promise<PlayerOption[]> {
+  const [embeds, list] = await Promise.all([playableEmbeds(video), ordered()]);
   // A title the library doesn't have has no file of its own to play.
   const hasFile = !parseTitleId(video._id);
-  const enabled = all.filter((s) => s.enabled || s.kind === "drive");
+  const enabled = list.filter((s) => s.enabled || s.kind === "drive");
   const hosted = enabled.filter(isHosted).map((s) => s._id);
-  // The best match of each source.
-  const have = new Map<string, SourceVideoDoc>();
-  for (const v of hosted.length ? await matching(video, hosted) : []) {
-    if (!have.has(v.sourceId)) have.set(v.sourceId, v);
-  }
-  const answers = new Map<string, "found" | "none" | "unreachable">();
-  await Promise.all(
-    enabled
-      .filter((s) => live && isHosted(s) && !have.has(s._id))
-      .map(async (s) => {
-        const answer = await askHost(s, video).then(
-          (found) => (found ? ("found" as const) : ("none" as const)),
-          () => "unreachable" as const,
-        );
-        answers.set(s._id, answer);
-      }),
-  );
-
-  const optionOf = (s: SourceDoc): PlayerOption | null => {
+  const have = new Set(all ? hosted : hosted.length ? (await matching(video, hosted)).map((v) => v.sourceId) : []);
+  const options = enabled.flatMap((s): PlayerOption[] => {
     const features = parseFeatures(s.features, allFeatures());
-    if (s.kind === "drive") return hasFile ? { id: s._id, kind: "drive", name: "Library", features } : null;
+    if (s.kind === "drive") return hasFile ? [{ id: s._id, kind: "drive", name: "Drive", features }] : [];
     if (s.kind === "frame") {
-      if (!hasFile) return null;
+      if (!hasFile) return [];
       const config = s.config as FrameConfig;
-      return { id: s._id, kind: "frame", name: s.name, url: frameUrl(config, video._id), frame: frameOf(config) };
+      return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, video._id), frame: frameOf(config) }];
     }
-    const answer = have.has(s._id) ? "found" : (answers.get(s._id) ?? "none");
-    return answer === "none" ? null : { id: s._id, kind: "stream", name: s.name, features };
-  };
-  const players: PlayerOption[] = embeds.map((e, i) => ({ id: `embed-${i}`, kind: "embed", name: e.provider, url: e.url }));
-  const checked: Checked[] = [];
-  for (const s of enabled) {
-    const option = optionOf(s);
-    if (option) players.push(option);
-    checked.push({
-      id: s._id,
-      name: s.kind === "drive" ? "Drive" : s.name,
-      result: answers.get(s._id) === "unreachable" ? "unreachable" : option ? "found" : "none",
-    });
-  }
-  return { players, checked };
+    return have.has(s._id) ? [{ id: s._id, kind: "stream", name: s.name, features }] : [];
+  });
+  return [...embeds.map((e, i): PlayerOption => ({ id: `embed-${i}`, kind: "embed", name: e.provider, url: e.url })), ...options];
 }
 
 /** Where a title streams from in one source, with addresses that expire; null when it isn't there. */

@@ -4,7 +4,6 @@ import { useAuthedImage } from "../../hooks/useAuthedImage";
 import type { ExploreItem } from "../../lib/explore";
 import { itemKey, type FeedHeroItem } from "../../lib/feed";
 import { PAGE_X } from "../../lib/layout";
-import { playHref } from "../../lib/play";
 import type { SpotlightSlide } from "../../lib/types";
 import { Star } from "../explore/ExploreRow";
 
@@ -55,7 +54,10 @@ function Heading({ title, logo }: { title: string; logo: string | null }) {
   );
 }
 
-function TitleSlide({ item, onOpen }: { item: FeedHeroItem; onOpen: (item: ExploreItem) => void }) {
+/** With `play`, opened on the sources to play from. */
+type Open = (item: ExploreItem, play?: boolean) => void;
+
+function TitleSlide({ item, onOpen }: { item: FeedHeroItem; onOpen: Open }) {
   return (
     <>
       <Heading title={item.title} logo={item.logoUrl} />
@@ -72,10 +74,10 @@ function TitleSlide({ item, onOpen }: { item: FeedHeroItem; onOpen: (item: Explo
       </p>
       {item.overview && <p className="mt-3 line-clamp-3 max-w-[60ch] text-sm leading-relaxed text-white/80 sm:text-base">{item.overview}</p>}
       <div className="mt-6 flex flex-wrap gap-3">
-        <Link to={playHref({ type: item.tmdbType, id: item.tmdbId })} className={PRIMARY}>
+        <button type="button" onClick={() => onOpen(item, true)} className={PRIMARY}>
           <PlayGlyph />
           Play
-        </Link>
+        </button>
         <button type="button" onClick={() => onOpen(item)} className={SECONDARY}>
           More info
         </button>
@@ -124,7 +126,7 @@ export default function FeedHero({
 }: {
   hero: FeedHeroItem[];
   added: SpotlightSlide[];
-  onOpen: (item: ExploreItem) => void;
+  onOpen: Open;
 }) {
   const slides = toSlides(hero, added);
   const count = slides.length;

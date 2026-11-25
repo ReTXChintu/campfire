@@ -35,9 +35,9 @@ import type {
 } from "../lib/types";
 import NotFoundPage from "./NotFoundPage";
 import { PAGE_X } from "../lib/layout";
-import { currentPlayer, webPlayers } from "../lib/players";
+import { webPlayers } from "../lib/players";
 import { isTitleId } from "../lib/play";
-import NotInAnySource from "../components/NotInAnySource";
+import SourcePanel from "../components/SourcePanel";
 import NowPlayingInfo from "../components/NowPlayingInfo";
 
 type PartyParticipant = {
@@ -130,9 +130,9 @@ export default function WatchPage() {
     setJoinChosenMainDeviceId(undefined);
   }, [partyId]);
 
-  const { data: video, isLoading, error, refetch: refetchVideo, isFetching: videoFetching } = useVideo(fileId!);
-  // Which of the title's players is on: the ones that failed, what the viewer picked, and where to
-  // carry on from after a switch. Belongs to one video, so another starts afresh.
+  const { data: video, isLoading, error } = useVideo(fileId!);
+  // Which source is on, the ones that failed, and where to carry on from after a switch. Belongs to one
+  // video, so another starts afresh.
   const [pick, setPick] = useState<PlayerPick>(NO_PICK);
   const picked = pick.fileId === fileId ? pick : NO_PICK;
   // As first answered: a background refetch must not change the player under the viewer.
@@ -140,21 +140,33 @@ export default function WatchPage() {
   if (video && playersRef.current?.fileId !== video.fileId) {
     playersRef.current = { fileId: video.fileId, list: webPlayers(video) };
   }
-  // Chosen in the title's details: played from that source and no other. A party plays the file.
-  const onlySource = partyId ? null : searchParams.get("source");
-  const players = (playersRef.current?.list ?? []).filter((p) => !onlySource || p.id === onlySource);
-  // With every source tried, or the one that was chosen. (A library title always has Drive to end on.)
+  const players = playersRef.current?.list ?? [];
+  const sources = video?.sources ?? players;
   const asTitle = isTitleId(fileId ?? "");
-  const nowhere = (asTitle || onlySource !== null) && players.every((p) => picked.failed.includes(p.id));
-  // A watch party always plays the file: nothing else can be kept in sync.
-  const player = partyId ? players.find((p) => p.kind === "drive") : currentPlayer(players, picked.failed, picked.chosen);
+  // Nothing is tried by itself: it's the source picked here or in the title's details, the one the
+  // episode before played from, or the only one there is. A watch party always plays the file, since
+  // nothing else can be kept in sync.
+  const lastSource = useRef<string | null>(null);
+  const selected = partyId
+    ? "drive"
+    : (picked.chosen ?? searchParams.get("source") ?? lastSource.current ?? (sources.length === 1 ? sources[0].id : null));
+  useEffect(() => {
+    if (selected) lastSource.current = selected;
+  }, [selected]);
+  const player = players.find((p) => p.id === selected);
+  const failedHere = !partyId && selected !== null && (!player || picked.failed.includes(selected));
   const selectPlayer = (id: string, position: number | null) =>
-    setPick({ ...picked, fileId: fileId ?? null, chosen: id, startAt: position ?? picked.startAt });
+    setPick({
+      fileId: fileId ?? null,
+      failed: picked.failed.filter((f) => f !== id),
+      chosen: id,
+      startAt: position ?? picked.startAt,
+    });
   const playerFailed = (id: string, position: number | null) =>
     setPick({
       fileId: fileId ?? null,
       failed: [...picked.failed.filter((f) => f !== id), id],
-      chosen: null,
+      chosen: id,
       startAt: position ?? picked.startAt,
     });
   useEffect(() => {
@@ -547,21 +559,15 @@ export default function WatchPage() {
     return (
       <div className={`w-full flex-1 ${PAGE_X} py-6`}>
         <div className="skeleton aspect-video w-full rounded-2xl" />
-        {asTitle && (
-          <p role="status" className="mt-3 text-sm text-text-secondary">
-            Checking every source…
-          </p>
-        )}
       </div>
     );
   }
 
   if (error || !video) return <NotFoundPage />;
-  if (video.movedTo) {
-    return <Navigate to={onlySource ? `${video.movedTo}?source=${encodeURIComponent(onlySource)}` : video.movedTo} replace />;
-  }
+  if (video.movedTo) return <Navigate to={`${video.movedTo}${window.location.search}`} replace />;
 
-  const failedNames = players.filter((p) => picked.failed.includes(p.id)).map((p) => p.name);
+  const sourceName = sources.find((source) => source.id === selected)?.name ?? "that source";
+  const fullTitle = [video.seriesTitle, video.title].filter(Boolean).join(": ");
   // What every one of our own players takes, whichever source it plays from.
   const playerProps = {
     fileId: video.fileId,
@@ -592,8 +598,8 @@ export default function WatchPage() {
     sources: partyId
       ? undefined
       : {
-          options: players,
-          selected: player?.id ?? "drive",
+          options: sources,
+          selected: selected ?? "",
           onSelect: (id: string, position: number) => selectPlayer(id, position),
         },
   };
@@ -608,27 +614,13 @@ export default function WatchPage() {
             {/* Only browser-native formats play here; everything else (MKV, or anything that would
                 need the live ffmpeg remux) is handed off to the apps, which play any container
                 directly via libmpv. */}
-            {nowhere ? (
-              <NotInAnySource
+            {!partyId && (selected === null || failedHere) ? (
+              <SourcePanel
+                title={fullTitle}
                 tmdb={video.tmdb ?? null}
-                title={[video.seriesTitle, video.title].filter(Boolean).join(": ")}
-                checked={(video.checked ?? []).filter((c) => !onlySource || c.id === onlySource)}
-                only={
-                  onlySource
-                    ? {
-                        name: video.checked?.find((c) => c.id === onlySource)?.name ?? "that source",
-                        allHref: `/watch/${video.fileId}`,
-                      }
-                    : null
-                }
-                retrying={videoFetching}
-                onRetry={() => {
-                  setPick(NO_PICK);
-                  refetchVideo().then(() => {
-                    playersRef.current = null;
-                    setPick({ ...NO_PICK, fileId: fileId ?? null });
-                  });
-                }}
+                sources={sources}
+                failed={selected === null ? null : { id: selected, name: sourceName }}
+                onSelect={(id) => selectPlayer(id, null)}
               />
             ) : player?.kind === "embed" || player?.kind === "frame" ? (
               <EmbedPlayer
@@ -638,7 +630,7 @@ export default function WatchPage() {
                 name={player.name}
                 title={video.title ?? "Video"}
                 nextFileId={video.nextFileId}
-                others={players.filter((p) => p.id !== player.id)}
+                others={sources.filter((source) => source.id !== player.id)}
                 onSelect={(id) => selectPlayer(id, null)}
                 onFailed={() => playerFailed(player.id, null)}
               />
@@ -662,12 +654,8 @@ export default function WatchPage() {
                 {...playerProps}
                 seekMode={video.seekMode}
                 features={player?.kind === "drive" ? player.features : undefined}
-                // Nowhere left to go once everything has failed.
-                onFailed={
-                  !partyId && players.some((p) => p.id !== "drive" && !picked.failed.includes(p.id))
-                    ? (position) => playerFailed("drive", position)
-                    : undefined
-                }
+                // With nowhere else to go, its own message says what's wrong.
+                onFailed={!partyId && sources.length > 1 ? (position) => playerFailed("drive", position) : undefined}
                 watchPartySync={watchPartySyncProp}
               />
             )}
@@ -705,10 +693,16 @@ export default function WatchPage() {
         </div>
       </PartyRoomProvider>
 
-      {!partyId && !nowhere && failedNames.length > 0 && player && (
-        <p role="status" className="mt-3 text-sm text-text-secondary">
-          {failedNames.join(" and ")} didn&apos;t play{failedNames.includes(player.name) ? "" : `, so this is from ${player.name}`}.
-        </p>
+      {!partyId && !failedHere && player?.kind === "drive" && video.seekMode !== "native" && sources.length > 1 && (
+        <div className="mt-4">
+          <SourcePanel
+            title={fullTitle}
+            tmdb={null}
+            sources={sources.filter((source) => source.id !== "drive")}
+            failed={null}
+            onSelect={(id) => selectPlayer(id, null)}
+          />
+        </div>
       )}
 
       <NowPlayingInfo video={video} />
@@ -716,7 +710,7 @@ export default function WatchPage() {
       {!video.episode && <Trailer tmdb={video.tmdb} className="mt-6" />}
 
       <section
-        hidden={nowhere || asTitle || (!!player && player.kind !== "drive")}
+        hidden={asTitle || failedHere || player?.kind !== "drive"}
         className="mt-6 rounded-2xl border border-divider bg-surface p-4"
       >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

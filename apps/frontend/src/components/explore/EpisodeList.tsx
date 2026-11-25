@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { playHref, useSeriesEpisodes, type SeriesEpisode } from "../../lib/play";
+import { useSeriesEpisodes, type SeriesEpisode } from "../../lib/play";
 import { progressPercent } from "../../lib/progress";
 import { airDateLabel, runtimeLabel } from "../../lib/tmdbFormat";
 import { Skeleton } from "../ui/States";
+import SourceMenu from "./SourceMenu";
 
 /** How many episodes show before "Show all". */
 const FIRST = 10;
 
 function Row({ seriesId, season, episode }: { seriesId: string; season: number; episode: SeriesEpisode }) {
+  const [choosing, setChoosing] = useState(false);
   const percent = progressPercent(episode.progress ?? undefined);
   const facts = [runtimeLabel(episode.runtimeMinutes), airDateLabel(episode.airDate)].filter(Boolean).join(" · ");
   const body = (
@@ -51,15 +52,22 @@ function Row({ seriesId, season, episode }: { seriesId: string; season: number; 
   return (
     <li>
       {episode.aired ? (
-        <Link
-          to={playHref({ type: "tv", id: seriesId, season, episode: episode.number })}
+        <button
+          type="button"
+          onClick={() => setChoosing((open) => !open)}
+          aria-expanded={choosing}
           aria-label={`Play episode ${episode.number}, ${episode.name}`}
-          className={`group ${layout} transition hover:bg-surface`}
+          className={`group w-full ${layout} transition hover:bg-surface`}
         >
           {body}
-        </Link>
+        </button>
       ) : (
         <div className={`${layout} opacity-50`}>{body}</div>
+      )}
+      {choosing && (
+        <div className="px-2.5 pb-4 pt-1">
+          <SourceMenu title={{ type: "tv", id: seriesId, season, episode: episode.number }} />
+        </div>
       )}
     </li>
   );

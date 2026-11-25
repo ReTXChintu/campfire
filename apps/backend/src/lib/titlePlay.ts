@@ -4,18 +4,17 @@ import type { CatalogArtwork, CatalogEpisodeArtwork } from "./artwork";
 import { getCatalogVideo, type CatalogVideo } from "./catalogVideos";
 import { titleMeta, episodeMeta } from "./catalogMeta";
 import { billed, logoPathFrom, rawDetail, ratingOf, tmdbCached, yearOf } from "./explore";
-import { isNativelyPlayable } from "./drive";
 import { getDb } from "./mongodb";
 import type { WatchProgress } from "./progress";
 import { findByTmdb, parseTitleId, titleId, tmdbKey, type TmdbRef } from "./tmdbRef";
 import type { UpNextItem } from "./upNext";
-import { DRIVE_ID, playersFor } from "./videoSources";
+import { listViewerSources, playersFor } from "./videoSources";
 
 /**
- * Playing any title on TMDb, in the library or not. One the library has plays as the library's video,
- * which tries every source in order. One it hasn't is played by its own id ("tmdb:movie:603",
- * "tmdb:tv:1396:s1e2") from whichever sources turn out to have it; its watch progress is kept under
- * that id. Nothing is listed ahead: the hosts are asked each time (lib/videoSources.ts).
+ * Playing any title on TMDb, in the library or not, from the source the viewer picks. One the library
+ * has plays as the library's video. One it hasn't is played by its own id ("tmdb:movie:603",
+ * "tmdb:tv:1396:s1e2"); its watch progress is kept under that id. Whether the source has it is asked
+ * when it's picked (lib/videoSources.ts).
  */
 
 const SEASON_TTL_MS = 6 * 60 * 60_000;
@@ -274,30 +273,6 @@ async function whatPlays(userId: string, ref: TmdbRef): Promise<TmdbRef> {
   return { ...ref, season, episode };
 }
 
-/** Every source in order and whether it has a title right now, asked as this is called: the players
- * set on the title itself first. Null when there's no such title, or it isn't the viewer's to play. */
-export async function titleSources(userId: string, email: string, wanted: TmdbRef) {
-  const ref = await whatPlays(userId, wanted);
-  const found = await findByTmdb(ref);
-  const video = found?.kind === "video" ? await playableVideo(found.id, email) : await playableVideo(titleId(ref), email);
-  if (!video) return null;
-  const { players, checked } = await playersFor(video, { live: true });
-  return [
-    ...players.filter((p) => p.kind === "embed").map((p) => ({ id: p.id, name: p.name, result: "found" as const, needsApp: false })),
-    ...checked.map((c) => {
-      const isDrive = c.id === DRIVE_ID;
-      // The library can have a film as a folder of its own.
-      const result = isDrive && found ? ("found" as const) : c.result;
-      return {
-        id: c.id,
-        name: c.name,
-        result,
-        needsApp: isDrive && result === "found" && found?.kind === "video" && !isNativelyPlayable(video.mimeType),
-      };
-    }),
-  ];
-}
-
 /** What Play opens for a title. Null when TMDb has no such title or isn't answering and the library
  * doesn't have it either. */
 export async function playTarget(userId: string, wanted: TmdbRef): Promise<{ href: string } | null> {
@@ -317,7 +292,7 @@ export async function titleVideoResponse(userId: string, video: CatalogVideo) {
 
   const db = await getDb();
   const own = await db.collection<WatchProgress>("watchProgress").findOne({ userId, fileId: video._id });
-  const { players, checked } = await playersFor(video, { live: true });
+  const [players, sources] = await Promise.all([playersFor(video, { all: true }), listViewerSources()]);
 
   let series: CatalogArtwork | null = null;
   let upNext: UpNextItem | null = null;
@@ -395,7 +370,7 @@ export async function titleVideoResponse(userId: string, video: CatalogVideo) {
     introEnd: null,
     outroStart: null,
     players,
-    checked,
+    sources,
     embeds: [],
   };
 }

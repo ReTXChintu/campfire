@@ -28,6 +28,7 @@ import exploreRoutes from "./routes/explore";
 import feedRoutes from "./routes/feed";
 import titleRoutes from "./routes/title";
 import opinionRoutes from "./routes/opinions";
+import sourceRoutes from "./routes/sources";
 import sourceStreamRoutes from "./routes/sourceStream";
 
 import adminScanRoutes from "./routes/admin/scan";
@@ -70,6 +71,7 @@ app.use("/api/explore", exploreRoutes);
 app.use("/api/feed", feedRoutes);
 app.use("/api/title", titleRoutes);
 app.use("/api/opinions", opinionRoutes);
+app.use("/api/sources", sourceRoutes);
 app.use("/api/source-stream", sourceStreamRoutes);
 
 app.use("/api/admin/scan", adminScanRoutes);

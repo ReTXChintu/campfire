@@ -187,7 +187,7 @@ try {
   const list = async () => (await asAdmin("", "GET")).body.sources;
 
   // --- nothing set up: exactly as before ---
-  check("Drive alone to begin with", (await players("film")) === "Library");
+  check("Drive alone to begin with", (await players("film")) === "Drive");
   check("viewers can't see sources", (await api(A, { token: viewer })).status === 403);
   check("viewers can't add one", (await api(A, { token: viewer, method: "POST", body: {} })).status === 403);
   check("signed-in only", (await api("/api/source-stream/x/film")).status === 401);
@@ -226,10 +226,10 @@ try {
   check("keys aren't readable in the database", !stored.includes(API_KEY) && !stored.includes(CF_TOKEN));
 
   // --- what a title plays from ---
-  check("a film plays from both, then Drive", (await players("film")) === "Bunny,Cloudflare,Library");
-  check("one still encoding isn't offered; the other is", (await players("ep")) === "Cloudflare,Library");
-  check("an address that isn't Cloudflare's is never used", (await players("mkv")) === "Library");
-  check("an unmatched video only has Drive", (await players("home")) === "Library");
+  check("a film plays from both, then Drive", (await players("film")) === "Bunny,Cloudflare,Drive");
+  check("one still encoding isn't offered; the other is", (await players("ep")) === "Cloudflare,Drive");
+  check("an address that isn't Cloudflare's is never used", (await players("mkv")) === "Drive");
+  check("an unmatched video only has Drive", (await players("home")) === "Drive");
   const film = (await api("/api/video/film", { token: viewer })).body;
   check("a player says which controls it has", film.players[0].kind === "stream" && film.players[0].features.pip === true);
   check("apps still get embeds", Array.isArray(film.embeds) && film.embeds.length === 0);
@@ -276,12 +276,12 @@ try {
 
   // --- order, switching off, controls ---
   await asAdmin("/order", "PUT", { ids: ["drive", cfId] });
-  check("order is kept, ones left out stay", (await players("film")) === "Library,Cloudflare,Bunny");
+  check("order is kept, ones left out stay", (await players("film")) === "Drive,Cloudflare,Bunny");
   await asAdmin("/order", "PUT", { ids: [cfId, bunnyId, "drive"] });
-  check("and changed again", (await players("film")) === "Cloudflare,Bunny,Library");
+  check("and changed again", (await players("film")) === "Cloudflare,Bunny,Drive");
   check("a bad order is refused", (await asAdmin("/order", "PUT", { ids: "x" })).status === 400);
   await asAdmin(`/${cfId}`, "PATCH", { enabled: false });
-  check("a source that's off isn't offered", (await players("film")) === "Bunny,Library");
+  check("a source that's off isn't offered", (await players("film")) === "Bunny,Drive");
   check("nor streamed", (await stream(cfId, "film")).status === 404);
   await asAdmin(`/${cfId}`, "PATCH", { enabled: true });
   await asAdmin(`/${bunnyId}`, "PATCH", { features: { pip: false, bogus: true } });
@@ -295,15 +295,15 @@ try {
 
   // --- linking by hand, and syncing ---
   check("there's nothing to select", (await asAdmin(`/${bunnyId}/videos`, "GET")).status === 404 && (await asAdmin(`/${bunnyId}/videos/${guid(2)}`, "PUT", { fileId: "mkv" })).status === 404);
-  check("one without a TMDb id in its name is never found", (await players("mkv")) === "Library");
+  check("one without a TMDb id in its name is never found", (await players("mkv")) === "Drive");
   bunnyVideos = bunnyVideos.map((v) => (v.guid === guid(1) ? { ...v, status: 4 } : v)).filter((v) => v.guid !== guid(126));
   await asAdmin(`/${bunnyId}/sync`, "POST");
   all = await list();
   check("a sync finds changes", all.find((s) => s.id === bunnyId).sync.videos === 129, all.find((s) => s.id === bunnyId).sync);
-  check("one that finished encoding is offered", (await players("ep")) === "Cloudflare,Bunny,Library");
+  check("one that finished encoding is offered", (await players("ep")) === "Cloudflare,Bunny,Drive");
   bunnyVideos = bunnyVideos.map((v) => (v.guid === guid(2) ? { ...v, title: "holiday clip tmdb-603" } : v));
   await asAdmin(`/${bunnyId}/sync`, "POST");
-  check("until it's renamed with one", (await players("mkv")) === "Bunny,Library");
+  check("until it's renamed with one", (await players("mkv")) === "Bunny,Drive");
   bunnyVideos = bunnyVideos.map((v) => (v.guid === guid(2) ? { ...v, title: "holiday clip" } : v));
   down = true;
   await asAdmin(`/${bunnyId}/sync`, "POST");
@@ -315,7 +315,7 @@ try {
   // --- a stream that's gone ---
   bunnyVideos = [bunny(guid(999), "tmdb-603"), ...bunnyVideos];
   await asAdmin(`/${bunnyId}/sync`, "POST");
-  check("listed, so it's offered", (await players("mkv")) === "Bunny,Library");
+  check("listed, so it's offered", (await players("mkv")) === "Bunny,Drive");
   check("but the stream is gone, so the player is told", (await stream(bunnyId, "mkv")).status === 404);
 
   // --- names ---
@@ -394,9 +394,9 @@ try {
   check("it has no stream of its own", (await stream(frameId, "home")).status === 404);
   check("nor a list to check", (await asAdmin(`/${frameId}/sync`, "POST")).status === 404);
   await asAdmin("/order", "PUT", { ids: [cfId, frameId, bunnyId, "drive"] });
-  check("its place in the order is every video's", (await players("film")) === "Cloudflare,player.example,Bunny,Library" && (await players("home")) === "player.example,Library", await players("film"));
+  check("its place in the order is every video's", (await players("film")) === "Cloudflare,player.example,Bunny,Drive" && (await players("home")) === "player.example,Drive", await players("film"));
   await asAdmin("/order", "PUT", { ids: ["drive", frameId] });
-  check("wherever that is", (await players("home")) === "Library,player.example", await players("home"));
+  check("wherever that is", (await players("home")) === "Drive,player.example", await players("home"));
   await asAdmin(`/${frameId}`, "PATCH", { code: "https://other.example/v/{{file_id}}" });
   check("changing the code moves every video", (await framePlayer("home"))?.url === "https://other.example/v/home");
   check("a bad code changes nothing", (await asAdmin(`/${frameId}`, "PATCH", { code: "nope" })).status === 400 && (await framePlayer("home"))?.url.startsWith("https://other.example/"));

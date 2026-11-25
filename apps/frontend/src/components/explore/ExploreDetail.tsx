@@ -57,6 +57,8 @@ export default function ExploreDetail({
   }, [onClose]);
 
   const d = query.data;
+  // Opened by a Play button elsewhere.
+  const [params] = useSearchParams();
   return (
     // The whole layer scrolls, so a long title's details do too, with the page still behind it.
     <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/75 backdrop-blur-[2px]">
@@ -81,7 +83,7 @@ export default function ExploreDetail({
             </svg>
           </button>
           {d ? (
-            <DetailBody d={d} />
+            <DetailBody d={d} startChoosing={params.get("play") === "1"} />
           ) : query.isError ? (
             <div className="p-6 pt-16 sm:p-12">
               <h2 id="explore-detail-title" className="font-display text-3xl text-white">
@@ -129,6 +131,7 @@ function MoreLikeThis({ d }: { d: Detail }) {
   const hrefOf = (type: "movie" | "tv", id: string) => {
     const next = new URLSearchParams(params);
     next.set("title", titleParam(type, id));
+    next.delete("play");
     return `?${next}`;
   };
   return (
@@ -224,8 +227,8 @@ function DetailHero({
               )}
             </h2>
             <div className="mt-5 flex flex-wrap gap-3">
-              {/* On every title: whether a source has it is only known by asking them. */}
-              <button type="button" onClick={onChoose} aria-expanded={choosing} aria-controls="detail-sources" className={PRIMARY}>
+              {/* On every title: whether a source has it is only known by trying it. */}
+              <button type="button" onClick={onChoose} aria-expanded={choosing} className={PRIMARY}>
                 <PlayGlyph />
                 {play}
               </button>
@@ -242,9 +245,9 @@ function DetailHero({
   );
 }
 
-function DetailBody({ d }: { d: Detail }) {
+function DetailBody({ d, startChoosing }: { d: Detail; startChoosing: boolean }) {
   const [playing, setPlaying] = useState(false);
-  const [choosing, setChoosing] = useState(false);
+  const [choosing, setChoosing] = useState(startChoosing);
   return (
     <>
       <DetailHero
