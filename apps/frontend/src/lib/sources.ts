@@ -9,6 +9,10 @@ import type { PlayerFeature, PlayerFeatures, PlayerFrame } from "./types";
 export type SourceKind = "bunny" | "cloudflare" | "frame";
 
 export type FrameConfig = PlayerFrame & { template: string };
+/** A player can have a different address for each kind of title. */
+export const FRAME_KINDS = ["movie", "tv", "anime"] as const;
+export type FrameKind = (typeof FRAME_KINDS)[number];
+export type FrameConfigs = Record<FrameKind, FrameConfig | null>;
 export type FramePreview = { config: FrameConfig; siteName: string; ignored: string[] };
 
 export type VideoSource = {
@@ -17,7 +21,7 @@ export type VideoSource = {
   name: string;
   enabled: boolean;
   features: PlayerFeatures;
-  config: ({ libraryId?: string; cdnHostname?: string; accountId?: string } & Partial<FrameConfig>) | null;
+  config: ({ libraryId?: string; cdnHostname?: string; accountId?: string } & Partial<FrameConfigs>) | null;
   hasApiKey: boolean;
   hasTokenKey: boolean;
   sync: { at: string; error: string | null; videos: number; matched: number } | null;
@@ -28,7 +32,7 @@ export type SourceInput = {
   enabled?: boolean;
   features?: PlayerFeatures;
   config?: VideoSource["config"];
-  code?: string;
+  codes?: Record<FrameKind, string>;
   apiKey?: string;
   tokenKey?: string | null;
 };
@@ -89,8 +93,8 @@ export function useFramePreview(code: string) {
 }
 
 /** A saved player's embed code again, for changing it. */
-export function frameCode(config: VideoSource["config"]): string {
-  if (!config?.template) return "";
+export function frameCode(config: FrameConfig | null | undefined): string {
+  if (!config) return "";
   const { template, allow, allowFullscreen, sandbox, referrerPolicy, radius, ratio } = config;
   const quoted = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
   return [
@@ -98,10 +102,10 @@ export function frameCode(config: VideoSource["config"]): string {
     `  src="${quoted(template)}"`,
     ...(ratio ? [`  width="${Math.round(ratio * 1080)}"`, '  height="1080"'] : ['  width="100%"', '  height="100%"']),
     ...(radius !== null ? [`  style="border: 0; border-radius: ${radius}px;"`] : []),
-    `  allow="${quoted(allow ?? "")}"`,
+    `  allow="${quoted(allow)}"`,
     ...(allowFullscreen ? ["  allowfullscreen"] : []),
-    `  sandbox="${quoted(sandbox ?? "")}"`,
-    `  referrerpolicy="${quoted(referrerPolicy ?? "")}"`,
+    `  sandbox="${quoted(sandbox)}"`,
+    `  referrerpolicy="${quoted(referrerPolicy)}"`,
     "></iframe>",
   ].join("\n");
 }

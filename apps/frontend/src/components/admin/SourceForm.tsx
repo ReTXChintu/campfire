@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import PasswordField from "../ui/PasswordField";
 import {
   frameCode,
+  type FrameKind,
   useCreateSource,
   useFramePreview,
   useUpdateSource,
@@ -49,9 +50,19 @@ const KINDS: { kind: SourceKind; label: string; name: string }[] = [
   { kind: "frame", label: "Any player", name: "" },
 ];
 
-const CODE_EXAMPLE = `<iframe
-  src="https://player.example.com/embed/{{file_id}}"
-  allow="autoplay; fullscreen; picture-in-picture"
+const FRAMES: { kind: FrameKind; label: string; hint: string }[] = [
+  { kind: "movie", label: "Movies", hint: "Films, and loose videos TMDb doesn't know." },
+  { kind: "tv", label: "TV series", hint: "Episodes." },
+  {
+    kind: "anime",
+    label: "Anime",
+    hint: "Japanese animation, films and series alike. Leave it empty to use the two above for anime too.",
+  },
+];
+
+const codeExample = (kind: FrameKind) => `<iframe
+  src="https://player.example.com/${kind}/{{file_id}}"
+  allow="autoplay; fullscreen"
   allowfullscreen
 ></iframe>`;
 
@@ -66,7 +77,6 @@ const list = (values: string, strip = "") =>
 function FrameSummary({ preview: { config, ignored } }: { preview: FramePreview }) {
   const rows: [string, string][] = [
     ["Plays from", config.template],
-    ["Videos", "Every one in your library, by its Drive file ID"],
     ["May use", list(config.allow)],
     ["Sandbox allows", list(config.sandbox, "allow-")],
     ["Full screen", config.allowFullscreen ? "Yes" : "No"],
@@ -87,29 +97,45 @@ function FrameSummary({ preview: { config, ignored } }: { preview: FramePreview 
   );
 }
 
-function FrameFields({ code, onChange, preview, error }: {
+type CodeState = {
   code: string;
-  onChange: (code: string) => void;
+  setCode: (code: string) => void;
   preview: FramePreview | undefined;
   error: Error | null;
-}) {
+  /** Empty, or read without a problem. */
+  ready: boolean;
+};
+
+/** One embed code as it's typed, and what the server reads in it. */
+function useCode(saved: string, active: boolean): CodeState {
+  const [code, setCode] = useState(saved);
+  const [settledCode, setSettledCode] = useState(code.trim());
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSettledCode(code.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [code]);
+  const read = useFramePreview(active ? settledCode : "");
+  const settled = settledCode === code.trim() && settledCode !== "";
+  const preview = settled ? read.data : undefined;
+  return { code, setCode, preview, error: settled ? read.error : null, ready: !code.trim() || !!preview };
+}
+
+function FrameFields({ kind, label, hint, state }: { kind: FrameKind; label: string; hint: string; state: CodeState }) {
+  const { code, setCode, preview, error } = state;
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4 border-t border-divider pt-4 lg:grid-cols-2">
       <label className="grid content-start gap-1.5">
-        <span className={LABEL}>Embed code</span>
+        <span className={LABEL}>{label}</span>
         <textarea
           value={code}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={CODE_EXAMPLE}
-          rows={10}
+          onChange={(event) => setCode(event.target.value)}
+          placeholder={codeExample(kind)}
+          rows={6}
           autoComplete="off"
           spellCheck={false}
           className={`${FIELD} font-mono`}
         />
-        <span className="text-xs text-text-tertiary">
-          Put {"{{file_id}}"} where the video's Drive file ID goes. Every video in your library is tried in it, in the sources'
-          order. Only add a player that holds your own files.
-        </span>
+        <span className="text-xs text-text-tertiary">{hint}</span>
       </label>
       <div className="grid content-start gap-1.5" aria-live="polite">
         <span className={LABEL}>Recognized</span>
@@ -118,7 +144,7 @@ function FrameFields({ code, onChange, preview, error }: {
         ) : preview ? (
           <FrameSummary preview={preview} />
         ) : (
-          <p className="text-sm text-text-tertiary">{code.trim() ? "Reading…" : "Paste the code to see what's in it."}</p>
+          <p className="text-sm text-text-tertiary">{code.trim() ? "Reading…" : "Nothing here yet."}</p>
         )}
       </div>
     </div>
@@ -136,27 +162,28 @@ export default function SourceForm({ source, onDone }: { source?: VideoSource; o
   const [apiKey, setApiKey] = useState("");
   const [tokenKey, setTokenKey] = useState("");
   const [dropTokenKey, setDropTokenKey] = useState(false);
-  const [code, setCode] = useState(() => (source?.kind === "frame" ? frameCode(source.config) : ""));
-  const [settledCode, setSettledCode] = useState(code.trim());
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSettledCode(code.trim()), 300);
-    return () => window.clearTimeout(timer);
-  }, [code]);
-  const read = useFramePreview(kind === "frame" ? settledCode : "");
-  const settled = settledCode === code.trim() && settledCode !== "";
-  const preview = settled ? read.data : undefined;
+  const saved = source?.kind === "frame" ? source.config : null;
+  const isFrame = kind === "frame";
+  const codes: Record<FrameKind, CodeState> = {
+    movie: useCode(frameCode(saved?.movie), isFrame),
+    tv: useCode(frameCode(saved?.tv), isFrame),
+    anime: useCode(frameCode(saved?.anime), isFrame),
+  };
+  const all = FRAMES.map((f) => codes[f.kind]);
+  const siteName = all.find((state) => state.preview)?.preview?.siteName;
+  const framesReady = siteName !== undefined && all.every((state) => state.ready);
   const create = useCreateSource();
   const update = useUpdateSource();
   const pending = create.isPending || update.isPending;
   const error = create.error ?? update.error;
 
-  const placeholder = KINDS.find((k) => k.kind === kind)!.name || preview?.siteName || "";
+  const placeholder = KINDS.find((k) => k.kind === kind)!.name || siteName || "";
 
   const submit = () => {
     const input = {
       name: name.trim() || placeholder,
-      ...(kind === "frame"
-        ? { code }
+      ...(isFrame
+        ? { codes: { movie: codes.movie.code, tv: codes.tv.code, anime: codes.anime.code } }
         : {
             config: kind === "bunny" ? { libraryId, cdnHostname } : { accountId },
             apiKey,
@@ -247,14 +274,22 @@ export default function SourceForm({ source, onDone }: { source?: VideoSource; o
           </>
         )}
       </div>
-      {kind === "frame" && (
-        <FrameFields code={code} onChange={setCode} preview={preview} error={settled ? read.error : null} />
+      {isFrame && (
+        <>
+          <p className="text-xs text-text-tertiary">
+            Put {"{{file_id}}"} where the video's Drive file ID goes. Each video plays by the code for its kind, which TMDb
+            tells. Only add a player that holds your own files.
+          </p>
+          {FRAMES.map((f) => (
+            <FrameFields key={f.kind} kind={f.kind} label={f.label} hint={f.hint} state={codes[f.kind]} />
+          ))}
+        </>
       )}
 
       <div className="flex flex-wrap items-center gap-2.5">
         <button
           type="submit"
-          disabled={pending || (kind === "frame" && !preview)}
+          disabled={pending || (isFrame && !framesReady)}
           className="min-h-11 rounded-lg bg-accent px-5 text-sm font-bold text-black transition hover:brightness-110 disabled:opacity-50"
         >
           {pending ? (kind === "frame" ? "Saving…" : "Checking…") : !source ? "Add source" : kind === "frame" ? "Save player" : "Save connection"}

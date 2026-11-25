@@ -20,6 +20,17 @@ export type FrameConfig = {
   ratio: number | null;
 };
 
+/** A player can have a different address for each kind of title. Anime is a film or a series too, so
+ * without a code of its own it plays as that. */
+export const FRAME_KINDS = ["movie", "tv", "anime"] as const;
+export type FrameKind = (typeof FRAME_KINDS)[number];
+export type FrameConfigs = Record<FrameKind, FrameConfig | null>;
+
+/** The code a title plays by; null when the player has none for its kind. */
+export function frameFor(configs: FrameConfigs, type: "movie" | "tv", anime: boolean): FrameConfig | null {
+  return (anime ? configs.anime : null) ?? configs[type];
+}
+
 /** What a player page needs to draw the frame. */
 export type Frame = Omit<FrameConfig, "template">;
 

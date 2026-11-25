@@ -36,8 +36,13 @@ function check(name, condition, detail) {
 
 // --- TMDb, Bunny and Cloudflare -------------------------------------------------------------------
 const day = (offset) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+const ANIME = { "movie/129": "Anime Film", "tv/1429": "Anime Show" };
 const FILMS = { 603: "The Matrix", 700: "Nowhere Film", 701: "Draft Film", 702: "Late Film", 703: "Slow Film", 800: "Library Film", 13: "Thirteen" };
 const tmdb = (path) => {
+  const anime = ANIME[path.slice(1)];
+  if (anime) return { id: 1, title: anime, name: anime, original_language: "ja", genres: [{ id: 16, name: "Animation" }] };
+  if (path === "/movie/862") return { id: 862, title: "Toys", original_language: "en", genres: [{ id: 16, name: "Animation" }] };
+  if (path === "/movie/990") return { id: 990, title: "Tokyo", original_language: "ja", genres: [{ id: 18, name: "Drama" }] };
   const film = path.match(/^\/movie\/(\d+)$/);
   if (film && FILMS[film[1]]) {
     return {
@@ -118,6 +123,13 @@ await db.collection("catalogVideos").insertMany([
   video("lib", ROOT, "Library Film", { artwork: artwork("movie", "800", "Library Film") }),
   video("draft", ROOT, "Draft Film", { status: "curated", artwork: artwork("movie", "701", "Draft Film") }),
   video("home", ROOT, "Home video"),
+  video("clip", "show", "Loose clip in a series"),
+  video("afilm", ROOT, "Anime Film", { artwork: artwork("movie", "129", "Anime Film") }),
+  video("toys", ROOT, "Toys", { artwork: artwork("movie", "862", "Toys") }),
+  video("tokyo", ROOT, "Tokyo", { artwork: artwork("movie", "990", "Tokyo") }),
+  video("aep", "show", "Anime E1", {
+    episodeArtwork: { seriesTmdbId: "1429", season: 1, episode: 1, name: "E1", overview: null, stillPath: null, airDate: null, runtimeMinutes: null, rating: null, matchedAt: now },
+  }),
   video("ep1", "show", "E1", {
     episodeOrder: 1,
     episodeArtwork: { seriesTmdbId: "1396", season: 1, episode: 1, name: "E1", overview: null, stillPath: null, airDate: null, runtimeMinutes: null, rating: null, matchedAt: now },
@@ -223,9 +235,25 @@ try {
   check("one that hasn't got it says so when it's picked", (await stream(cfId, "tmdb:movie:700")).status === 404);
   check("and only that one was asked", asked.join() === "cloudflare 700", asked);
   check("Drive hasn't got what isn't in the library", !names(r).includes("Drive"));
-  const ownId = await addSource({ kind: "frame", name: "Own", code: "https://own.example/{{file_id}}" });
+  const ownId = await addSource({ kind: "frame", name: "Own", codes: { movie: "https://own.example/{{file_id}}" } });
   check("nor has a player of the library's own files", !names(await V("tmdb:movie:13")).includes("Own") && names(await V("home")).includes("Own"));
   await api(`/api/admin/sources/${ownId}`, { token: admin, method: "DELETE" });
+
+  // --- a player with a code for each kind ---
+  const code = (kind) => `https://own.example/${kind}/{{file_id}}`;
+  const kindsId = await addSource({ kind: "frame", name: "Kinds", codes: { movie: code("movie"), tv: code("tv"), anime: code("anime") } });
+  const goesTo = async (id) => (await V(id)).body.players.find((p) => p.id === kindsId)?.url.replace("https://own.example/", "");
+  const each = async (ids) => (await Promise.all(ids.map(goesTo))).join();
+  check("a film, an episode, and anime of both", (await each(["lib", "ep1", "afilm", "aep"])) === "movie/lib,tv/ep1,anime/afilm,anime/aep", await each(["lib", "ep1", "afilm", "aep"]));
+  check("animation that isn't Japanese isn't anime, nor Japanese that isn't animation", (await each(["toys", "tokyo"])) === "movie/toys,movie/tokyo", await each(["toys", "tokyo"]));
+  check("what TMDb doesn't know goes by where it is", (await each(["home", "clip"])) === "movie/home,tv/clip", await each(["home", "clip"]));
+  const setCodes = (codes) => api(`/api/admin/sources/${kindsId}`, { token: admin, method: "PATCH", body: { codes } });
+  await setCodes({ movie: code("movie"), tv: code("tv"), anime: "" });
+  check("without a code of its own, anime is a film or a series", (await each(["afilm", "aep"])) === "movie/afilm,tv/aep", await each(["afilm", "aep"]));
+  await setCodes({ anime: code("anime") });
+  check("with only anime's, nothing else plays there", (await each(["lib", "ep1", "afilm"])) === ",,anime/afilm", await each(["lib", "ep1", "afilm"]));
+  check("the details say it's anime", (await api("/api/explore/title/movie/129", { token: viewer })).body.title.anime === true && (await api("/api/explore/title/movie/862", { token: viewer })).body.title.anime === false);
+  await api(`/api/admin/sources/${kindsId}`, { token: admin, method: "DELETE" });
 
   // --- one appears ---
   bunnyVideos = [bunny(BUNNY_VIDEO, "The Matrix tmdb-603"), bunny("00000000-0000-0000-0000-000000000001", "tmdb-6030 another")];

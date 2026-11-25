@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { env } from "../config/env";
+import { isAnime } from "./explore";
 import { getDb } from "./mongodb";
 import { seal, unseal } from "./secretBox";
 import { parseTitleId, tmdbKey, tmdbRefOf } from "./tmdbRef";
@@ -19,13 +21,15 @@ import {
   type HostVideo,
 } from "./videoHosts";
 import {
+  FRAME_KINDS,
   FrameError,
+  frameFor,
   frameOf,
   frameSiteName,
   frameUrl,
   parseFrameCode,
   type Frame,
-  type FrameConfig,
+  type FrameConfigs,
 } from "./frameSource";
 
 /** Video sources: the places a title can play from, in one global order an admin sets — Bunny Stream
@@ -61,7 +65,7 @@ type SourceDoc = {
   enabled: boolean;
   order: number;
   features: Features;
-  config: BunnyConfig | CloudflareConfig | FrameConfig | null;
+  config: BunnyConfig | CloudflareConfig | FrameConfigs | null;
   /** Sealed (lib/secretBox.ts); never sent to a client. */
   apiKey: string | null;
   /** Bunny only: the pull zone's token authentication key, when it's switched on there. */
@@ -76,7 +80,7 @@ type SourceVideoDoc = HostVideo & {
   key: string | null;
 };
 
-type VideoDoc = { _id: string } & Pick<ArtworkFields, "artwork" | "episodeArtwork">;
+type VideoDoc = { _id: string; parentFolderId?: string } & Pick<ArtworkFields, "artwork" | "episodeArtwork">;
 
 /** A problem to show next to the form field it's about. */
 export class SourceInputError extends Error {}
@@ -281,8 +285,8 @@ type SourceInput = {
   config?: unknown;
   apiKey?: unknown;
   tokenKey?: unknown;
-  /** An "any player" source's embed code. */
-  code?: unknown;
+  /** An "any player" source's embed codes by kind; an empty one is none. */
+  codes?: unknown;
 };
 
 function parseSecret(value: unknown, what: string): string {
@@ -299,8 +303,28 @@ async function insertSource(doc: SourceDoc): Promise<void> {
   await setOrder(ids);
 }
 
+const FRAME_LABELS = { movie: "Movies", tv: "TV series", anime: "Anime" };
+
+function parseCodes(raw: unknown): { config: FrameConfigs; siteName: string } {
+  const codes = (raw ?? {}) as Record<string, unknown>;
+  const config: FrameConfigs = { movie: null, tv: null, anime: null };
+  let siteName = "";
+  for (const kind of FRAME_KINDS) {
+    if (!text(codes[kind])) continue;
+    try {
+      const read = previewFrame(codes[kind]);
+      config[kind] = read.config;
+      siteName ||= read.siteName;
+    } catch (error) {
+      throw error instanceof SourceInputError ? new SourceInputError(`${FRAME_LABELS[kind]}: ${error.message}`) : error;
+    }
+  }
+  if (!siteName) throw new SourceInputError("Paste at least one embed code.");
+  return { config, siteName };
+}
+
 async function createFrameSource(input: SourceInput): Promise<string> {
-  const { config, siteName } = previewFrame(input.code);
+  const { config, siteName } = parseCodes(input.codes);
   const doc: SourceDoc = {
     _id: randomUUID(),
     kind: "frame",
@@ -360,7 +384,7 @@ export async function updateSource(id: string, input: SourceInput): Promise<bool
     }
     if (typeof input.enabled === "boolean") set.enabled = input.enabled;
   }
-  if (source.kind === "frame" && input.code !== undefined) set.config = previewFrame(input.code).config;
+  if (source.kind === "frame" && input.codes !== undefined) set.config = parseCodes(input.codes).config;
   if (source.kind === "bunny" || source.kind === "cloudflare") {
     const apiKey = parseSecret(input.apiKey, "an API key");
     if (apiKey) set.apiKey = seal(apiKey);
@@ -491,6 +515,15 @@ export async function listViewerSources(): Promise<{ id: string; name: string }[
     .map((s) => ({ id: s._id, name: s.kind === "drive" ? "Drive" : s.name }));
 }
 
+/** Whether a video is a film or part of a series, and whether it's anime. TMDb says which; what it
+ * doesn't know is a film when it's loose in the library and part of a series when it's in a folder. */
+async function kindOf(video: VideoDoc): Promise<{ type: "movie" | "tv"; anime: boolean }> {
+  const ref = tmdbRefOf(video);
+  if (ref) return { type: ref.type, anime: await isAnime(ref.type, ref.id) };
+  const inFolder = video.parentFolderId !== undefined && video.parentFolderId !== env.driveRootFolderId;
+  return { type: inFolder ? "tv" : "movie", anime: false };
+}
+
 /** The ways to play a title, in order: the players set on the title itself, then the sources known to
  * have it, Drive among them. With `all`, every host, known to have it or not: it's asked when the
  * viewer picks it (streamFor). */
@@ -501,12 +534,13 @@ export async function playersFor(video: VideoDoc, { all = false }: { all?: boole
   const enabled = list.filter((s) => s.enabled || s.kind === "drive");
   const hosted = enabled.filter(isHosted).map((s) => s._id);
   const have = new Set(all ? hosted : hosted.length ? (await matching(video, hosted)).map((v) => v.sourceId) : []);
+  const kind = hasFile && enabled.some((s) => s.kind === "frame") ? await kindOf(video) : null;
   const options = enabled.flatMap((s): PlayerOption[] => {
     const features = parseFeatures(s.features, allFeatures());
     if (s.kind === "drive") return hasFile ? [{ id: s._id, kind: "drive", name: "Drive", features }] : [];
     if (s.kind === "frame") {
-      if (!hasFile) return [];
-      const config = s.config as FrameConfig;
+      const config = kind && frameFor(s.config as FrameConfigs, kind.type, kind.anime);
+      if (!config) return [];
       return [{ id: s._id, kind: "frame", name: s.name, url: frameUrl(config, video._id), frame: frameOf(config) }];
     }
     return have.has(s._id) ? [{ id: s._id, kind: "stream", name: s.name, features }] : [];

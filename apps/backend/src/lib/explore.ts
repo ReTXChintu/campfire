@@ -76,6 +76,7 @@ export type ExploreOffer = { id: number; name: string; logoUrl: string | null; u
 export type ExploreDetail = Omit<ExploreItem, "services"> & {
   /** The title's wordmark. */
   logoUrl: string | null;
+  anime: boolean;
   tagline: string | null;
   runtime: number | null;
   seasons: number | null;
@@ -155,6 +156,7 @@ type TmdbDetail = TmdbListResult & {
   episode_run_time?: number[];
   number_of_seasons?: number | null;
   number_of_episodes?: number | null;
+  original_language?: string;
   seasons?: { season_number: number; name?: string; episode_count?: number }[];
   genres?: { id: number; name: string }[];
   images?: { logos?: TmdbLogo[] };
@@ -556,6 +558,16 @@ export function rawDetail(type: TmdbType, tmdbId: string) {
   );
 }
 
+const ANIMATION = 16;
+/** TMDb knows films from series but has no anime; it's Japanese animation of either. */
+const isAnimeDetail = (raw: TmdbDetail | null) =>
+  raw?.original_language === "ja" && (raw.genres ?? []).some((g) => g.id === ANIMATION);
+
+/** False when TMDb isn't answering. */
+export async function isAnime(type: TmdbType, tmdbId: string): Promise<boolean> {
+  return isAnimeDetail(await rawDetail(type, tmdbId));
+}
+
 export const billed = (raw: TmdbDetail) => (raw.credits?.cast ?? []).slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 
 /** What suggestions compare a title by (lib/forYou.ts); from the same cached answer as its panel. */
@@ -617,6 +629,7 @@ export async function exploreDetail(type: TmdbType, tmdbId: string, viewerId: st
     posterUrl: image("w342", raw.poster_path),
     backdropUrl: image("w1280", raw.backdrop_path),
     logoUrl: logoFrom(raw.images?.logos),
+    anime: isAnimeDetail(raw),
     tagline: raw.tagline?.trim() || null,
     runtime: raw.runtime || raw.episode_run_time?.[0] || null,
     seasons: type === "tv" ? (raw.number_of_seasons ?? null) : null,

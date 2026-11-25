@@ -376,9 +376,12 @@ try {
     ["Campfire itself", `${process.env.SMOKE_FRONTEND ?? envValue("FRONTEND_URL")}/{{file_id}}`],
   ]) check(`refuses ${what}`, (await read(code)).status === 400, await read(code));
   check("viewers can't read codes", (await api(`${A}/read-code`, { token: viewer, method: "POST", body: { code: CODE } })).status === 403);
-  check("a bad code adds nothing", (await asAdmin("", "POST", { kind: "frame", code: "x" })).status === 400);
+  check("nor does none at all", (await asAdmin("", "POST", { kind: "frame", codes: {} })).status === 400 && (await asAdmin("", "POST", { kind: "frame" })).status === 400);
+  const bad = await asAdmin("", "POST", { kind: "frame", codes: { movie: CODE, anime: "https://v.example/abc" } });
+  check("a mistake says which kind it's in", bad.status === 400 && bad.body.error.startsWith("Anime: "), bad);
+  check("a bad code adds nothing", (await asAdmin("", "POST", { kind: "frame", codes: { movie: "x" } })).status === 400);
 
-  const frameId = (await asAdmin("", "POST", { kind: "frame", name: "", code: CODE })).body.id;
+  const frameId = (await asAdmin("", "POST", { kind: "frame", name: "", codes: { movie: CODE, tv: CODE } })).body.id;
   let frameSource = (await list()).find((s) => s.id === frameId);
   check("it's named after its site", frameSource.name === "player.example" && frameSource.kind === "frame", frameSource);
   check("and goes before Drive", (await list()).at(-2).id === frameId && (await list()).at(-1).id === "drive");
@@ -397,9 +400,9 @@ try {
   check("its place in the order is every video's", (await players("film")) === "Cloudflare,player.example,Bunny,Drive" && (await players("home")) === "player.example,Drive", await players("film"));
   await asAdmin("/order", "PUT", { ids: ["drive", frameId] });
   check("wherever that is", (await players("home")) === "Drive,player.example", await players("home"));
-  await asAdmin(`/${frameId}`, "PATCH", { code: "https://other.example/v/{{file_id}}" });
+  await asAdmin(`/${frameId}`, "PATCH", { codes: { movie: "https://other.example/v/{{file_id}}", tv: "https://other.example/v/{{file_id}}" } });
   check("changing the code moves every video", (await framePlayer("home"))?.url === "https://other.example/v/home");
-  check("a bad code changes nothing", (await asAdmin(`/${frameId}`, "PATCH", { code: "nope" })).status === 400 && (await framePlayer("home"))?.url.startsWith("https://other.example/"));
+  check("a bad code changes nothing", (await asAdmin(`/${frameId}`, "PATCH", { codes: { movie: "https://other.example/v/{{file_id}}", tv: "nope" } })).status === 400 && (await framePlayer("home"))?.url.startsWith("https://other.example/"));
   await asAdmin(`/${frameId}`, "PATCH", { enabled: false });
   check("switched off, it isn't offered", (await framePlayer("home")) === undefined);
   await asAdmin(`/${frameId}`, "PATCH", { enabled: true, name: "Other" });

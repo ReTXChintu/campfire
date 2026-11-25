@@ -4,6 +4,7 @@ import SourceForm from "../../components/admin/SourceForm";
 import { ErrorCard, Skeleton } from "../../components/ui/States";
 import {
   FEATURE_LABELS,
+  FRAME_KINDS,
   useDeleteSource,
   useOrderSources,
   useSources,
@@ -15,6 +16,7 @@ import type { PlayerFeature } from "../../lib/types";
 
 const BUTTON =
   "min-h-9 rounded-lg border border-divider-strong px-3 text-sm text-white transition hover:bg-surface-hover disabled:opacity-40";
+const FRAME_NAMES = { movie: "movies", tv: "TV series", anime: "anime" };
 const KIND_LABELS = { bunny: "Bunny Stream", cloudflare: "Cloudflare Stream", frame: "Any player", drive: "Google Drive" };
 
 /** Where titles play from, in the order they're tried. */
@@ -33,7 +35,7 @@ export default function AdminSourcesPage() {
     <AdminShell
       section="sources"
       title="Sources"
-      description="Every title is tried in every source, from the top down, until one plays it. There's nothing to select: on Bunny and Cloudflare, put the title's TMDb id in the video's name, such as tmdb-603 for a film or tmdb-1396-s1e2 for an episode."
+      description="Where a title can be played from. Play lists these in this order, and the viewer picks one. On Bunny and Cloudflare, put the title's TMDb id in the video's name, such as tmdb-603 for a film or tmdb-1396-s1e2 for an episode."
       actions={
         !adding && (
           <button
@@ -114,7 +116,10 @@ function SourceCard({
             {hosted && source.sync && source.sync.videos > source.sync.matched && (
               <span className="text-amber"> · {source.sync.videos - source.sync.matched} without a TMDb id in the name, so never found</span>
             )}
-            {isFrame && " · every video in your library"}
+            {isFrame &&
+              ` · ${FRAME_KINDS.filter((k) => source.config?.[k])
+                .map((k) => FRAME_NAMES[k])
+                .join(", ")} in your library`}
           </p>
         </div>
         <div className="ml-auto flex flex-wrap gap-2">

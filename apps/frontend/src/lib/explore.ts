@@ -29,6 +29,7 @@ export type ExploreOffer = { id: number; name: string; logoUrl: string | null; u
 export type ExploreDetail = Omit<ExploreItem, "services"> & {
   /** Absent from an older backend. */
   logoUrl?: string | null;
+  anime?: boolean;
   tagline: string | null;
   runtime: number | null;
   seasons: number | null;
@@ -83,10 +84,11 @@ export const libraryHref = (match: NonNullable<ExploreItem["inLibrary"]>) =>
   match.kind === "folder" ? `/folder/${match.id}` : `/watch/${match.id}`;
 
 /** "2022 · Series · 3 seasons" / "2010 · Film · 2h 28m". */
-export function exploreMetaLine(d: Pick<ExploreDetail, "year" | "tmdbType" | "runtime" | "seasons">): string {
+export function exploreMetaLine(d: Pick<ExploreDetail, "year" | "tmdbType" | "runtime" | "seasons" | "anime">): string {
   const parts: string[] = [];
   if (d.year) parts.push(String(d.year));
-  parts.push(d.tmdbType === "tv" ? "Series" : "Film");
+  if (d.anime) parts.push(d.tmdbType === "tv" ? "Anime series" : "Anime film");
+  else parts.push(d.tmdbType === "tv" ? "Series" : "Film");
   if (d.tmdbType === "tv" && d.seasons) parts.push(`${d.seasons} season${d.seasons === 1 ? "" : "s"}`);
   if (d.tmdbType === "movie" && d.runtime) {
     const h = Math.floor(d.runtime / 60);
