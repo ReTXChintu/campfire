@@ -45,6 +45,16 @@ function saysFailed(host: string, raw: unknown): boolean {
   }
 }
 
+function saysZoryvaClosed(host: string, raw: unknown): boolean {
+  if (host !== "zoryva.me" && host !== "www.zoryva.me") return false;
+  try {
+    const message = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return message?.type === "zoryva:embed-close";
+  } catch {
+    return false;
+  }
+}
+
 /** Plays a title in another site's own player, calling `onFailed` when that says it can't or the site
  * can't be reached. The server has already dropped ones their provider says are gone; the buttons are
  * for a failure the player doesn't report. No watch party, resume or tracks here. */
@@ -57,6 +67,7 @@ export default function EmbedPlayer({
   others,
   onSelect,
   onFailed,
+  onExit,
 }: {
   url: string;
   /** How a player added by its embed code is drawn. */
@@ -68,12 +79,17 @@ export default function EmbedPlayer({
   others: { id: string; name: string }[];
   onSelect: (id: string) => void;
   onFailed: () => void;
+  onExit: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const loaded = useRef(false);
   const failed = useRef(onFailed);
+  const exit = useRef(onExit);
   useEffect(() => {
     failed.current = onFailed;
+  });
+  useEffect(() => {
+    exit.current = onExit;
   });
 
   useEffect(() => {
@@ -84,6 +100,10 @@ export default function EmbedPlayer({
     }, LOAD_TIMEOUT_MS);
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || event.origin !== origin) return;
+      if (saysZoryvaClosed(hostname, event.data)) {
+        exit.current();
+        return;
+      }
       if (saysFailed(hostname, event.data)) failed.current();
     };
     window.addEventListener("message", onMessage);

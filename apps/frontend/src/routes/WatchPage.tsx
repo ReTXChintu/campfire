@@ -633,6 +633,7 @@ export default function WatchPage() {
                 others={sources.filter((source) => source.id !== player.id)}
                 onSelect={(id) => selectPlayer(id, null)}
                 onFailed={() => playerFailed(player.id, null)}
+                onExit={() => navigate(video.backHref)}
               />
             ) : player?.kind === "stream" ? (
               <StreamPlayer
