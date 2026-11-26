@@ -26,6 +26,6 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "pm2": "^5.4.3",
-    "release-it": "^21.0.2"
+    "release-it": "^21.1.3"
   }
 }
