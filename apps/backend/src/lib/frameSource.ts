@@ -108,8 +108,10 @@ function parseTemplate(raw: string): string {
   if (names.has("tmdb_id") === names.has("anilist_id")) {
     throw new FrameError("Use exactly one title ID: {{tmdb_id}} or {{anilist_id}}.");
   }
-  if (names.has("season") !== names.has("episode")) {
-    throw new FrameError("Use {{season}} and {{episode}} together.");
+  // AniList numbers each season's episodes on their own, so its players can take an episode alone.
+  if (names.has("season") && !names.has("episode")) throw new FrameError("Use {{season}} with {{episode}}.");
+  if (names.has("episode") && !names.has("season") && !names.has("anilist_id")) {
+    throw new FrameError("Use {{season}} and {{episode}} together, or {{episode}} alone with {{anilist_id}}.");
   }
   // Straight after the host it would run into its name.
   address = address.replace(/^([a-z]+:\/\/[^/?#{]*[a-z0-9])(\{\{tmdb_id\}\})(?=$|[/?#])/i, "$1/$2");
@@ -185,9 +187,19 @@ export function frameSiteName(config: FrameConfig): string {
   return new URL(config.template.replace(/\{\{(?:tmdb_id|anilist_id|season|episode)\}\}/g, PROBE)).hostname.replace(/^www\./, "");
 }
 
-/** The address a video plays from. */
-export function frameUrl(config: FrameConfig, ref: { id: string; season?: number; episode?: number }): string | null {
-  if (config.template.includes("{{anilist_id}}")) return null;
+/** The address a video plays from. A player by AniList id needs the title's AniList entry and its
+ * episode there (lib/anilistLink.ts), and is null without them: a TMDb id never goes to it. Its
+ * `{{season}}`, if it has one, is 1, since every AniList entry is a single season. */
+export function frameUrl(
+  config: FrameConfig,
+  ref: { id: string; season?: number; episode?: number },
+  anilist: { id: number; episode: number } | null = null,
+): string | null {
+  if (config.template.includes("{{anilist_id}}")) {
+    if (!anilist) return null;
+    const filled: Record<string, string> = { anilist_id: String(anilist.id), season: "1", episode: String(anilist.episode) };
+    return config.template.replace(/\{\{(anilist_id|season|episode)\}\}/g, (_all, name: string) => encodeURIComponent(filled[name]));
+  }
   if ((config.template.includes("{{season}}") || config.template.includes("{{episode}}")) &&
       (ref.season == null || ref.episode == null)) return null;
   const values: Record<string, string> = {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
 import { getCatalogFolder, type CatalogFolder } from "./catalogFolders";
+import { anilistFor } from "./anilistLink";
 import { isAnime } from "./explore";
 import { getDb } from "./mongodb";
 import { seal, unseal } from "./secretBox";
@@ -550,16 +551,21 @@ export async function playersFor(video: VideoDoc, { all = false }: { all?: boole
   // Any-player URLs can address a TMDb title directly, so they work for both catalog files and
   // TMDb-only titles. Unmatched catalog files still use their folder/file kind as before.
   const kind = hasFrameSource ? (tmdb || hasFile ? await kindOf(video) : null) : null;
+  // A player by AniList id needs the TMDb title as AniList knows it; asked once, only when one is set.
+  const anilistWanted =
+    !!tmdb &&
+    !!kind?.anime &&
+    enabled.some((s) => s.kind === "frame" && frameFor(s.config as FrameConfigs, kind.type, true)?.template.includes("{{anilist_id}}"));
+  const anilist = tmdb && anilistWanted ? await anilistFor(tmdb) : null;
   const options = enabled.flatMap((s): PlayerOption[] => {
     const features = parseFeatures(s.features, allFeatures());
     if (s.kind === "drive") return hasFile ? [{ id: s._id, kind: "drive", name: "Drive", features }] : [];
     if (s.kind === "frame") {
-      // Anime players need AniList IDs, which the catalog does not store yet. Never send a TMDb ID
-      // to an endpoint that expects an AniList ID.
-      if (kind?.anime) return [];
-      const config = kind && frameFor(s.config as FrameConfigs, kind.type, kind.anime);
+      const config = kind && tmdb && frameFor(s.config as FrameConfigs, kind.type, kind.anime);
       if (!config) return [];
-      const url = frameUrl(config, tmdb!);
+      // Null for an AniList player when the title's AniList episode isn't known for certain: a TMDb
+      // id never goes to an endpoint that expects an AniList one.
+      const url = frameUrl(config, tmdb, anilist);
       if (!url) return [];
       return [{ id: s._id, kind: "frame", name: s.name, url, frame: frameOf(config) }];
     }

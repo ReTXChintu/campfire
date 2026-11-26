@@ -9,6 +9,7 @@ import { ensureIndexes as ensureMediaRequestIndexes } from "./lib/mediaRequests"
 import { ensureIndexes as ensureSourceIndexes, startSourceSync } from "./lib/videoSources";
 import { ensureIndexes as ensureOpinionIndexes } from "./lib/opinions";
 import { ensureIndexes as ensureFeedIndexes } from "./lib/feed";
+import { ensureIndexes as ensureAnimeMapIndexes, startAnimeMapRefresh } from "./lib/animeMap";
 import { startRenditionQueue } from "./lib/renditionQueue";
 
 import authRoutes from "./routes/auth";
@@ -41,6 +42,7 @@ import adminArtworkRoutes from "./routes/admin/artwork";
 import adminTrackRoutes from "./routes/admin/tracks";
 import adminEmbedRoutes from "./routes/admin/embeds";
 import adminSourceRoutes from "./routes/admin/sources";
+import adminAnilistRoutes from "./routes/admin/anilist";
 import { queueStaleTrackReads } from "./lib/mediaTracks";
 import { matchCatalog } from "./lib/episodeArtwork";
 
@@ -84,6 +86,7 @@ app.use("/api/admin/catalog/artwork", adminArtworkRoutes);
 app.use("/api/admin/catalog/tracks", adminTrackRoutes);
 app.use("/api/admin/embeds", adminEmbedRoutes);
 app.use("/api/admin/sources", adminSourceRoutes);
+app.use("/api/admin/anilist", adminAnilistRoutes);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
@@ -99,10 +102,12 @@ Promise.all([
   ensureSourceIndexes(),
   ensureOpinionIndexes(),
   ensureFeedIndexes(),
+  ensureAnimeMapIndexes(),
 ])
   .then(() => {
     startRenditionQueue();
     startSourceSync();
+    startAnimeMapRefresh();
     server.listen(env.port, () => {
       console.log(`Campfire backend listening on http://0.0.0.0:${env.port}`);
     });

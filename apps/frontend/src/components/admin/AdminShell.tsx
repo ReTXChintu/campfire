@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { useAdminRequestCounts } from "../../hooks/useAdminRequests";
 import { PAGE_X } from "../../lib/layout";
 
-export type AdminSection = "overview" | "catalog" | "sources" | "embeds" | "requests";
+export type AdminSection = "overview" | "catalog" | "sources" | "embeds" | "anime" | "requests";
 
 /**
  * The admin shell: a left sidebar plus a content pane, instead of the two bare tabs this panel
@@ -33,6 +33,7 @@ export default function AdminShell({
     { to: "/admin/catalog", label: "Catalog", key: "catalog" },
     { to: "/admin/sources", label: "Sources", key: "sources" },
     { to: "/admin/embeds", label: "Embeds", key: "embeds" },
+    { to: "/admin/anime", label: "Anime", key: "anime" },
     { to: "/admin/requests", label: "Requests", key: "requests", badge: newCount },
   ];
 

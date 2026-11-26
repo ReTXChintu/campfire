@@ -278,8 +278,9 @@ export default function SourceForm({ source, onDone }: { source?: VideoSource; o
         <>
           <p className="text-xs text-text-tertiary">
             Use {"{{tmdb_id}}"} for movies and TV. For TV episodes, add {"{{season}}/{{episode}}"} (for example,
-            {"{{tmdb_id}}/{{season}}/{{episode}}"} becomes 1396/1/5). Anime playback needs an AniList ID, which Campfire
-            does not store yet, so anime players are not offered. Only add a player that holds your own files.
+            {"{{tmdb_id}}/{{season}}/{{episode}}"} becomes 1396/1/5). For anime, a player can take {"{{anilist_id}}"} with
+            {"{{episode}}"} instead: Campfire works out which AniList season and episode each TMDb episode is (see Anime in the
+            menu), and leaves the player out for one it can't be sure of. Only add a player that holds your own files.
           </p>
           {FRAMES.map((f) => (
             <FrameFields key={f.kind} kind={f.kind} label={f.label} hint={f.hint} state={codes[f.kind]} />

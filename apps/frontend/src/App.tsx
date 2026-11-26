@@ -30,6 +30,7 @@ const AdminCatalogPage = lazyRoute(() => import("./routes/admin/AdminCatalogPage
 const AdminRequestsPage = lazyRoute(() => import("./routes/admin/AdminRequestsPage"));
 const AdminEmbedsPage = lazyRoute(() => import("./routes/admin/AdminEmbedsPage"));
 const AdminSourcesPage = lazyRoute(() => import("./routes/admin/AdminSourcesPage"));
+const AdminAnimePage = lazyRoute(() => import("./routes/admin/AdminAnimePage"));
 const AdminCatalogFolderPage = lazyRoute(() => import("./routes/admin/AdminCatalogFolderPage"));
 const AdminCatalogVideoPage = lazyRoute(() => import("./routes/admin/AdminCatalogVideoPage"));
 
@@ -171,6 +172,14 @@ export default function App() {
             element={
               <AdminRoute>
                 <AdminSourcesPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/anime"
+            element={
+              <AdminRoute>
+                <AdminAnimePage />
               </AdminRoute>
             }
           />

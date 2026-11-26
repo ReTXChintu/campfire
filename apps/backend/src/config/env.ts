@@ -98,6 +98,13 @@ export const env = {
   get tmdbImageBase() {
     return process.env.TMDB_IMAGE_BASE || "https://image.tmdb.org/t/p";
   },
+  // Test hooks (scripts/smoke-anilist.mjs points them at a local mock); never set in prod.
+  get anilistApiBase() {
+    return process.env.ANILIST_API_BASE || "https://graphql.anilist.co";
+  },
+  get animeMapUrl() {
+    return process.env.ANIME_MAP_URL || "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json";
+  },
   // Test hooks too (scripts/smoke-sources.mjs).
   get bunnyApiBase() {
     return process.env.BUNNY_API_BASE || "https://video.bunnycdn.com";
