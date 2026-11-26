@@ -8,11 +8,17 @@ import 'api_client.dart';
 // default value at the call site.
 const Object unsetProgressField = Object();
 
+/// A title watched by its TMDb id that the library has since added: watch it there instead.
+class VideoMoved implements Exception {
+  final String href;
+  const VideoMoved(this.href);
+}
+
 class CatalogService {
   CatalogService._();
 
   static Future<LibraryResponse> fetchLibrary() async {
-    final data = await ApiClient.get('/api/library') as Map<String, dynamic>;
+    final data = await ApiClient.get('/api/library?titles=1') as Map<String, dynamic>;
     return LibraryResponse.fromJson(data);
   }
 
@@ -22,8 +28,13 @@ class CatalogService {
     return FolderResponse.fromJson(data);
   }
 
+  /// A library video, or a title by its own id ("tmdb:tv:1396:s1e2"), with a player for every
+  /// source (`all=1`): whether one has it is asked when the viewer picks it. Throws [VideoMoved]
+  /// for a title the library has added since.
   static Future<VideoResponse> fetchVideo(String fileId) async {
-    final data = await ApiClient.get('/api/video/$fileId') as Map<String, dynamic>;
+    final data = await ApiClient.get('/api/video/${Uri.encodeComponent(fileId)}?all=1') as Map<String, dynamic>;
+    final moved = data['movedTo'];
+    if (moved is String) throw VideoMoved(moved);
     return VideoResponse.fromJson(data);
   }
 

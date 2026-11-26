@@ -127,9 +127,21 @@ jobs:
           }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # flutter_inappwebview's Windows build fetches WebView2 with nuget during CMake. The runner
+      # image normally has it; fetch it when it doesn't, rather than fail mid-build.
+      - name: Ensure nuget
+        shell: pwsh
+        run: |
+          if (-not (Get-Command nuget -ErrorAction SilentlyContinue)) {
+            $dir = Join-Path $env:RUNNER_TEMP nuget
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Invoke-WebRequest https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile (Join-Path $dir nuget.exe)
+            $dir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
       - name: Build Windows release
         working-directory: apps/mobile
-        run: flutter build windows --release --dart-define=API_URL=${{ env.API_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
+        run: flutter build windows --release --dart-define=API_URL=${{ env.API_URL }} --dart-define=WEB_URL=${{ env.WEB_URL }} --dart-define=APP_VERSION=${{ env.APP_VERSION }}
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y

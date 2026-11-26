@@ -9,6 +9,7 @@ import '../widgets/authed_network_image.dart';
 import '../widgets/title_meta_views.dart';
 import '../models/title_meta.dart';
 import '../widgets/media_card.dart';
+import '../widgets/opinion_buttons.dart';
 import '../widgets/trailer_button.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/ui_kit.dart';
@@ -185,6 +186,12 @@ class _FolderScreenState extends State<FolderScreen> {
                         key: ValueKey('trailer-${data.folderId}'),
                         tmdb: data.meta.tmdb!,
                         padding: const EdgeInsets.only(top: 10),
+                      ),
+                    // Watched / liked for the whole series or film collection's title.
+                    if (data.meta.tmdb != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: OpinionButtons(type: data.meta.tmdb!.type, id: data.meta.tmdb!.id),
                       ),
                     if (data.isSeries && data.seasons.length > 1) ...[
                       const SizedBox(height: 18),

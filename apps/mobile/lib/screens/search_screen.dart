@@ -1,24 +1,30 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/catalog.dart';
+import '../models/media_request.dart';
 import '../services/library_store.dart';
+import '../services/requests_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/media_meta.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/authed_network_image.dart';
+import '../widgets/explore_detail.dart';
 import '../widgets/request_sheet.dart';
 import '../widgets/tv_focusable.dart';
 import '../widgets/ui_kit.dart';
 import '../models/discovery.dart';
 
-/// Search — the single biggest gap in the old app (there was none at all, on any screen).
+/// Search — the library first, then all of TMDb.
 ///
-/// **There is no search endpoint on the backend**, so this filters the already-fetched library
-/// client-side ([LibraryStore]) rather than inventing an API. That's honest and, for a private
-/// library of this size, instant. Recent searches are stored on-device in SharedPreferences —
-/// nothing about them is sent anywhere.
+/// The library part filters the already-fetched library client-side ([LibraryStore]), which for a
+/// private library of this size is instant. Below it come TMDb's matches (the requests form's
+/// title search, `GET /api/requests/tmdb-search`), each opening the details panel, so a title the
+/// library hasn't got can still be played from a source or asked for. Recent searches are stored
+/// on-device in SharedPreferences — nothing about them is sent anywhere.
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
 
@@ -37,6 +43,13 @@ class _SearchScreenState extends State<SearchScreen> {
   _Filter _filter = _Filter.all;
   List<String> _recent = const [];
 
+  // TMDb's answer for [_tmdbQuery]; asked a moment after typing stops.
+  Timer? _tmdbDebounce;
+  String _tmdbQuery = '';
+  List<TmdbSearchResult> _tmdbResults = const [];
+  bool _tmdbLoading = false;
+  bool _tmdbFailed = false;
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +61,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _tmdbDebounce?.cancel();
     _controller.dispose();
     _focus.dispose();
     super.dispose();
@@ -81,8 +95,55 @@ class _SearchScreenState extends State<SearchScreen> {
     _controller.text = term;
     _controller.selection = TextSelection.collapsed(offset: term.length);
     _remember(term);
+    _askTmdbSoon();
     setState(() {});
   }
+
+  void _askTmdbSoon() {
+    _tmdbDebounce?.cancel();
+    final query = _controller.text.trim();
+    if (query.length < 2) {
+      setState(() {
+        _tmdbQuery = '';
+        _tmdbResults = const [];
+        _tmdbLoading = false;
+        _tmdbFailed = false;
+      });
+      return;
+    }
+    if (query == _tmdbQuery) return;
+    setState(() => _tmdbLoading = true);
+    _tmdbDebounce = Timer(const Duration(milliseconds: 350), () => _askTmdb(query));
+  }
+
+  Future<void> _askTmdb(String query) async {
+    _tmdbQuery = query;
+    try {
+      final answer = await RequestsService.searchTmdb(query);
+      if (!mounted || _controller.text.trim() != query) return;
+      setState(() {
+        // Without a TMDb key on the server there's nothing to show; the library part stands alone.
+        _tmdbResults = answer.available ? answer.results : const [];
+        _tmdbFailed = false;
+        _tmdbLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || _controller.text.trim() != query) return;
+      setState(() {
+        _tmdbResults = const [];
+        _tmdbFailed = true;
+        _tmdbLoading = false;
+      });
+    }
+  }
+
+  /// TMDb's matches the chips leave in. "Continue watching" is the library's alone.
+  List<TmdbSearchResult> get _tmdbShown => switch (_filter) {
+    _Filter.all => _tmdbResults,
+    _Filter.series => _tmdbResults.where((r) => r.isSeries).toList(),
+    _Filter.movies => _tmdbResults.where((r) => !r.isSeries).toList(),
+    _Filter.inProgress => const [],
+  };
 
   List<CatalogListItem> _results(LibraryStore store) {
     final query = _controller.text.trim().toLowerCase();
@@ -198,7 +259,10 @@ class _SearchScreenState extends State<SearchScreen> {
                 hintStyle: TextStyle(color: AppColors.textTertiary),
                 contentPadding: EdgeInsets.zero,
               ),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) {
+                _askTmdbSoon();
+                setState(() {});
+              },
               onSubmitted: _remember,
             ),
           ),
@@ -206,7 +270,10 @@ class _SearchScreenState extends State<SearchScreen> {
             IconButton(
               tooltip: 'Clear search',
               icon: const Icon(Icons.close, size: 18, color: AppColors.textSecondary),
-              onPressed: () => setState(_controller.clear),
+              onPressed: () {
+                _controller.clear();
+                _askTmdbSoon();
+              },
             ),
         ],
       ),
@@ -281,7 +348,9 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
 
-    if (results.isEmpty) {
+    final tmdb = query.length >= 2 ? _tmdbShown : const <TmdbSearchResult>[];
+    final asking = query.length >= 2 && _tmdbLoading && _filter != _Filter.inProgress;
+    if (results.isEmpty && tmdb.isEmpty && !asking) {
       return EmptyState(
         icon: Icons.sentiment_dissatisfied_outlined,
         title: query.isEmpty ? 'Nothing matches that filter' : 'No results for "$query"',
@@ -293,16 +362,42 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
 
-    return ListView.separated(
+    return ListView(
       padding: EdgeInsets.fromLTRB(gutter, 4, gutter, 24),
-      itemCount: results.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 4),
-      itemBuilder: (context, index) => _ResultRow(
-        item: results[index],
-        progress: store.progressByFileId[results[index].id],
-        // "With Matt Smith" — why an actor's name found this, which otherwise looks like a bug.
-        reason: reasonLabel(matchItem(results[index], query)),
-      ),
+      children: [
+        for (final item in results)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: _ResultRow(
+              item: item,
+              progress: store.progressByFileId[item.id],
+              // "With Matt Smith" — why an actor's name found this, which otherwise looks like a bug.
+              reason: reasonLabel(matchItem(item, query)),
+            ),
+          ),
+        if (tmdb.isNotEmpty || asking || (_tmdbFailed && query.length >= 2)) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(0, 18, 0, 6),
+            child: Text(
+              'ON TMDB',
+              style: TextStyle(
+                color: AppColors.textTertiary,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.3,
+              ),
+            ),
+          ),
+          if (asking && tmdb.isEmpty) ...const [
+            Shimmer(height: 66, radius: AppRadius.sm),
+            SizedBox(height: 8),
+            Shimmer(height: 66, radius: AppRadius.sm),
+          ],
+          if (_tmdbFailed && !asking)
+            const Text("TMDb isn't answering right now.", style: TextStyle(color: AppColors.textTertiary, fontSize: 13)),
+          for (final result in tmdb) _TmdbRow(result: result),
+        ],
+      ],
     );
   }
 
@@ -444,6 +539,84 @@ class _ResultRow extends StatelessWidget {
             ),
             const Icon(Icons.chevron_right, size: 18, color: AppColors.textTertiary),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One of TMDb's matches: its poster, title and year. Opens the details panel, which plays it from
+/// a source or asks for it.
+class _TmdbRow extends StatelessWidget {
+  final TmdbSearchResult result;
+
+  const _TmdbRow({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final poster = result.posterUrl;
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      onTap: () => showExploreDetail(context, tmdbType: result.tmdbType, tmdbId: result.tmdbId),
+      child: Semantics(
+        button: true,
+        label: [
+          result.title,
+          if (result.year != null) '${result.year}',
+          result.kindLabel,
+          if (result.inLibrary != null) 'in your library',
+        ].join(', '),
+        excludeSemantics: true,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  width: 44,
+                  height: 66,
+                  child: poster == null
+                      ? const ColoredBox(color: AppColors.surface)
+                      : Image.network(
+                          poster,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const ColoredBox(color: AppColors.surface),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      result.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.foreground, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [if (result.year != null) '${result.year}', result.kindLabel].join(' · '),
+                      style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              ),
+              if (result.inLibrary != null)
+                Container(
+                  margin: const EdgeInsets.only(left: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(color: AppColors.live, borderRadius: BorderRadius.circular(6)),
+                  child: const Text(
+                    'IN LIBRARY',
+                    style: TextStyle(color: AppColors.background, fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                  ),
+                ),
+              const Icon(Icons.chevron_right, size: 18, color: AppColors.textTertiary),
+            ],
+          ),
         ),
       ),
     );

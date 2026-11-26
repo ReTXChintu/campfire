@@ -10,6 +10,7 @@ import 'platform_info.dart';
 import 'services/auth_service.dart';
 import 'services/library_store.dart';
 import 'services/media_session_service.dart';
+import 'services/opinion_store.dart';
 import 'services/token_store.dart';
 import 'theme/app_theme.dart';
 
@@ -48,6 +49,8 @@ void main() async {
         // branches reading the same payload, and search/browse filter it client-side (there is no
         // search endpoint). See services/library_store.dart.
         ChangeNotifierProvider(create: (_) => LibraryStore()),
+        // Watched / liked / disliked for every title, read once so any card can look itself up.
+        ChangeNotifierProvider(create: (_) => OpinionStore()),
       ],
       child: const CampfireApp(),
     ),

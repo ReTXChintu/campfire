@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:campfire_mobile/models/explore.dart';
+import 'package:campfire_mobile/services/opinion_store.dart';
 import 'package:campfire_mobile/theme/app_theme.dart';
 import 'package:campfire_mobile/utils/fisheye_layout.dart';
 import 'package:campfire_mobile/widgets/explore_detail.dart';
@@ -9,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
 /// Explore: the wall's geometry (it has to agree with the shader, or a tap opens the wrong
 /// poster), the API shapes, the where-to-watch panel at phone and desktop sizes, and the wall
@@ -175,11 +177,14 @@ void main() {
           size,
           MediaQuery(
             data: MediaQueryData(size: size, textScaler: TextScaler.linear(scale)),
-            child: ExploreDetailView(
-              tmdbType: 'tv',
-              tmdbId: '1399',
-              initial: ExploreDetail.fromJson(Map<String, dynamic>.from(_detailJson)),
-              titleStyle: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.foreground),
+            child: ChangeNotifierProvider(
+              create: (_) => OpinionStore(),
+              child: ExploreDetailView(
+                tmdbType: 'tv',
+                tmdbId: '1399',
+                initial: ExploreDetail.fromJson(Map<String, dynamic>.from(_detailJson)),
+                titleStyle: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, color: AppColors.foreground),
+              ),
             ),
           ),
         );

@@ -47,6 +47,10 @@ class PlayerChrome extends StatelessWidget {
   /// Null when there's only one audio track.
   final String? audioLabel;
   final String speedLabel;
+
+  /// The source playing it; null hides the source switch (one source, or a watch party).
+  final String? sourceLabel;
+  final VoidCallback? onSources;
   final bool hasEpisodes;
   final bool hasNext;
   final bool showPip;
@@ -98,6 +102,8 @@ class PlayerChrome extends StatelessWidget {
     required this.subtitleLabel,
     required this.audioLabel,
     required this.speedLabel,
+    this.sourceLabel,
+    this.onSources,
     required this.hasEpisodes,
     required this.hasNext,
     required this.showPip,
@@ -279,6 +285,13 @@ class PlayerChrome extends StatelessWidget {
                         onTap: onAudio,
                       ),
                     _LabelButton(label: speedLabel, tooltip: 'Playback speed', onTap: locked ? onLockedTap : onSpeed),
+                    if (sourceLabel != null && onSources != null)
+                      _LabelButton(
+                        icon: Icons.swap_horiz,
+                        label: compact ? null : sourceLabel,
+                        tooltip: 'Playing from $sourceLabel',
+                        onTap: onSources!,
+                      ),
                     if (hasEpisodes)
                       _LabelButton(
                         icon: Icons.video_library_outlined,

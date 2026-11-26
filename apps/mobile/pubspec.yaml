@@ -82,6 +82,7 @@ dependencies:
   # TV pairing-code login: renders the claim-URL QR code on screen. See
   # screens/tv_pairing_login_screen.dart.
   qr_flutter: ^4.1.0
+  flutter_inappwebview: ^6.1.5
 
 dev_dependencies:
   flutter_test:

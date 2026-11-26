@@ -23,6 +23,7 @@ import '../theme/app_theme.dart';
 import '../utils/media_meta.dart';
 import '../utils/start_tracks.dart';
 import 'episodes_panel.dart';
+import 'opinion_buttons.dart';
 import 'player_chrome.dart';
 import 'title_meta_views.dart';
 import 'tv_focusable.dart';
@@ -47,7 +48,7 @@ const _doubleClickWindow = Duration(milliseconds: 300);
 const _partyTick = Duration(milliseconds: 500);
 const _partyHeartbeatEvery = 6;
 
-enum _Menu { none, subtitles, audio, speed, episodes }
+enum _Menu { none, subtitles, audio, speed, episodes, sources }
 
 /// The one and only player, on every platform (libmpv via media_kit) — it decodes any container
 /// directly, exposes whatever audio/subtitle tracks are embedded in it, and seeks MKV's raw bytes
@@ -69,7 +70,40 @@ class MediaKitVideoPlayer extends StatefulWidget {
   final VideoResponse video;
   final WatchPartySyncController? watchPartySync;
 
-  const MediaKitVideoPlayer({super.key, required this.video, this.watchPartySync});
+  /// A hosted source's HLS stream (Bunny, Cloudflare) to play instead of the library's file: real
+  /// seeking, no media token, previews or party sync.
+  final SourceStream? stream;
+
+  /// Caption files the host keeps beside the stream, after the video's own uploaded ones.
+  final List<ConvertedSubtitle> extraSubtitles;
+
+  /// The source this plays from, carried to the next episode; null in a watch party.
+  final String? sourceId;
+
+  /// Every source the viewer could switch to (the switch is hidden with fewer than two).
+  final List<ViewerSource> sources;
+  final PlayerFeatures features;
+
+  /// Where to start instead of the saved position (carried over from a source switch).
+  final double? startAt;
+
+  /// It couldn't be played from this source at all; null keeps the error on the player.
+  final void Function(double? positionSeconds)? onFailed;
+  final void Function(String sourceId, double positionSeconds)? onSwitchSource;
+
+  const MediaKitVideoPlayer({
+    super.key,
+    required this.video,
+    this.watchPartySync,
+    this.stream,
+    this.extraSubtitles = const [],
+    this.sourceId,
+    this.sources = const [],
+    this.features = const PlayerFeatures(),
+    this.startAt,
+    this.onFailed,
+    this.onSwitchSource,
+  });
 
   @override
   State<MediaKitVideoPlayer> createState() => _MediaKitVideoPlayerState();
@@ -208,15 +242,23 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   VideoResponse get video => widget.video;
   WatchPartySyncController? get _sync => widget.watchPartySync;
 
+  /// Played from a host, or as a title the library has no file for: nothing to probe or preview.
+  bool get _hasFile => widget.stream == null && !video.isTitle;
+
+  late final List<ConvertedSubtitle> _subtitles = [...video.subtitles, ...widget.extraSubtitles];
+
+  bool get _canSwitchSource =>
+      widget.onSwitchSource != null && widget.sources.length > 1 && widget.features.sourceMenu;
+
   /// Sync applies to truly seekable content (native and raw MKV — both Range-seekable through
   /// libmpv). Restart-mode can't land on an exact position, so it never syncs.
-  bool get _syncEnabled => (video.isNative || video.isRaw) && (_sync?.enabled ?? false);
+  bool get _syncEnabled => widget.stream == null && (video.isNative || video.isRaw) && (_sync?.enabled ?? false);
 
   /// Following the party (not "on my own") without the right to drive it: playback controls are
   /// locked, because anything done locally would just be undone by the next sync.
   bool get _locked => _syncEnabled && (_sync?.following ?? true) && !(_sync?.canControl ?? false);
 
-  bool get _streamIsSeekable => video.isNative || video.isRaw;
+  bool get _streamIsSeekable => widget.stream != null || video.isNative || video.isRaw;
 
   bool get _isPhone => Platform.isAndroid && !isAndroidTv;
 
@@ -238,7 +280,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     _configureOrientation();
     if (isAndroidTv) _controlsVisible = false;
     if (_isDesktop) _initDesktopVolume();
-    _loadTrickplay();
+    if (_hasFile) _loadTrickplay();
     SharedPreferences.getInstance().then((prefs) {
       final saved = prefs.getBool(upNextAutoplayPrefKey);
       if (saved != null && mounted) setState(() => _autoplay = saved);
@@ -306,7 +348,14 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       }),
       _player.stream.error.listen((message) {
         _dbg('player ERROR: $message');
-        if (mounted) setState(() => _errorMessage = message);
+        if (!mounted) return;
+        // Never started: this source can't play it, and the viewer is offered the others.
+        final failed = widget.onFailed;
+        if (failed != null && !_sawFirstPositionTick) {
+          failed(widget.startAt ?? (video.initialCompleted ? null : video.initialPositionSeconds));
+          return;
+        }
+        setState(() => _errorMessage = message);
       }),
     ]);
     _bootstrap();
@@ -345,7 +394,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     if (_subtitlePreferenceSource == 'external') {
       ConvertedSubtitle? match;
       if (_subtitlePreferenceLanguage != null || _subtitlePreferenceTitle != null) {
-        for (final s in video.subtitles) {
+        for (final s in _subtitles) {
           if (s.language == _subtitlePreferenceLanguage && s.title == _subtitlePreferenceTitle) {
             match = s;
             break;
@@ -353,8 +402,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         }
       } else if (_subtitlePreferenceIndex != null &&
           _subtitlePreferenceIndex! >= 0 &&
-          _subtitlePreferenceIndex! < video.subtitles.length) {
-        match = video.subtitles[_subtitlePreferenceIndex!];
+          _subtitlePreferenceIndex! < _subtitles.length) {
+        match = _subtitles[_subtitlePreferenceIndex!];
       }
       if (match != null) {
         _selectedSubtitleTrack = SubtitleTrack.data(match.vtt, title: match.title, language: match.language);
@@ -385,13 +434,13 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       audioIds: const [],
       subtitleIds: const [],
       tracksKnown: false,
-      externalCount: video.subtitles.length,
+      externalCount: _subtitles.length,
     ).subtitle;
     if (subtitle == null) return;
     if (subtitle.isOff) {
       _selectedSubtitleTrack = SubtitleTrack.no();
     } else {
-      final s = video.subtitles[subtitle.index!];
+      final s = _subtitles[subtitle.index!];
       _selectedSubtitleTrack = SubtitleTrack.data(s.vtt, title: s.title, language: s.language);
       // What the menu's tick and a party announcement read. Not saved: there's no source.
       _subtitlePreferenceIndex = s.index;
@@ -412,7 +461,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       audioIds: [for (final t in audio) t.id],
       subtitleIds: [for (final t in subtitles) t.id],
       tracksKnown: audio.isNotEmpty || subtitles.isNotEmpty || _tracks.video.any((t) => real(t.id)),
-      externalCount: video.subtitles.length,
+      externalCount: _subtitles.length,
     );
     if (_startAudioPending && !plan.audioPending) {
       _startAudioPending = false;
@@ -428,7 +477,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   /// mpv numbers a file's tracks the way the backend's `n` does — except in a restart-mode remux.
-  bool get _tracksMatchFile => _streamIsSeekable;
+  bool get _tracksMatchFile => widget.stream == null && _streamIsSeekable;
 
   ViewerTrack? _viewerAudio(String id) =>
       _tracksMatchFile ? video.audioTracks?.where((t) => t.mpvId == id).firstOrNull : null;
@@ -437,6 +486,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       _tracksMatchFile ? video.subtitleTracks?.where((t) => t.mpvId == id).firstOrNull : null;
 
   Uri _streamUri({double restartOffsetSeconds = 0}) {
+    final hosted = widget.stream;
+    if (hosted != null) return Uri.parse(hosted.url);
     final params = <String, String>{'token': ?_mediaToken};
     if (video.isRaw) {
       params['raw'] = '1';
@@ -448,23 +499,30 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
   }
 
   Future<void> _bootstrap() async {
-    CatalogService.fetchProbe(video.fileId).then((p) {
-      if (mounted) setState(() => _probe = p);
-    }).catchError((_) {});
+    if (_hasFile) {
+      CatalogService.fetchProbe(video.fileId).then((p) {
+        if (mounted) setState(() => _probe = p);
+      }).catchError((_) {});
 
-    try {
-      _mediaToken = await MediaTokenService.mint(video.fileId);
-    } catch (_) {
-      // The stream request will 401 and surface through the error stream.
+      try {
+        _mediaToken = await MediaTokenService.mint(video.fileId);
+      } catch (_) {
+        // The stream request will 401 and surface through the error stream.
+      }
+      if (!mounted) return;
     }
-    if (!mounted) return;
 
     // Opened into a watch party: the party decides where playback starts, not this account's own
     // saved resume point — that's what used to put every guest somewhere different on join.
     final inParty = _sync?.initialPartyId != null;
-    final resumeSeconds = (!inParty && !video.initialCompleted && video.initialPositionSeconds > 5)
-        ? video.initialPositionSeconds
-        : 0.0;
+    final carried = widget.startAt;
+    final resumeSeconds = inParty
+        ? 0.0
+        : carried != null
+            ? (carried > 5 ? carried : 0.0)
+            : (!video.initialCompleted && video.initialPositionSeconds > 5)
+                ? video.initialPositionSeconds
+                : 0.0;
     final needsResumeSeek = resumeSeconds > 0 && _streamIsSeekable;
     if (needsResumeSeek) _resumeSeekComplete = false;
     _firstPositionTickCompleter = Completer<void>();
@@ -715,8 +773,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
         _selectSubtitle(SubtitleTrack.no(), source: 'off');
         return true;
       case 'external':
-        ConvertedSubtitle? match = video.subtitles.where((s) => s.index == choice.index).firstOrNull;
-        match ??= video.subtitles
+        ConvertedSubtitle? match = _subtitles.where((s) => s.index == choice.index).firstOrNull;
+        match ??= _subtitles
             .where((s) => s.language == choice.language && s.title == choice.title)
             .firstOrNull;
         if (match == null) return true;
@@ -1008,7 +1066,9 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     _saveProgress(force: true);
     _skipOrientationRestoreOnDispose = true;
     _carryForcedLandscape = _forcedLandscape;
-    context.pushReplacement('/watch/$fileId');
+    // The next episode plays from the same source.
+    final source = widget.sourceId;
+    context.pushReplacement(source == null ? '/watch/$fileId' : '/watch/$fileId?source=${Uri.encodeQueryComponent(source)}');
   }
 
   // ===============================================================================================
@@ -1424,11 +1484,14 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     }
   }
 
+  String get _sourceName => widget.sources.where((s) => s.id == widget.sourceId).firstOrNull?.name ?? 'Source';
+
   String _menuTitle(_Menu menu) => switch (menu) {
         _Menu.subtitles => 'Subtitles',
         _Menu.audio => 'Audio',
         _Menu.speed => 'Speed',
         _Menu.episodes => 'Episodes',
+        _Menu.sources => 'Play from',
         _Menu.none => '',
       };
 
@@ -1526,7 +1589,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final gutter = AppLayout.gutter(MediaQuery.sizeOf(context).width);
     final meta = MediaMeta.parse(video.title);
     final realAudio = _tracks.audio.where((t) => t.id != 'auto' && t.id != 'no').length;
-    final hasSubtitles = video.subtitles.isNotEmpty || _tracks.subtitle.length > 2;
+    final hasSubtitles = widget.features.captions && (_subtitles.isNotEmpty || _tracks.subtitle.length > 2);
     final sync = _sync;
 
     return ColoredBox(
@@ -1582,10 +1645,22 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
                         label: 'Audio',
                         onTap: realAudio > 1 ? () => _openMenu(_Menu.audio, landscape: false) : null,
                       ),
+                      if (_canSwitchSource)
+                        _ActionTile(
+                          icon: Icons.swap_horiz,
+                          label: _sourceName,
+                          onTap: () => _openMenu(_Menu.sources, landscape: false),
+                        ),
                       _ActionTile(icon: Icons.fullscreen, label: 'Full screen', onTap: _toggleFullscreen),
                     ],
                   ),
                 ),
+                // A film's own opinion; an episode's series has its own on the series page.
+                if (video.episode == null && video.meta.tmdb != null)
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(gutter, 10, gutter, 0),
+                    child: OpinionButtons(type: video.meta.tmdb!.type, id: video.meta.tmdb!.id),
+                  ),
                 if (video.episodes.isNotEmpty) ...[
                   Padding(
                     padding: EdgeInsets.fromLTRB(gutter, 18, gutter, 6),
@@ -1831,7 +1906,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
     final meta = MediaMeta.parse(video.title);
     final sync = _sync;
     final realAudio = _tracks.audio.where((t) => t.id != 'auto' && t.id != 'no').length;
-    final hasSubtitles = video.subtitles.isNotEmpty || _tracks.subtitle.length > 2;
+    final hasSubtitles = widget.features.captions && (_subtitles.isNotEmpty || _tracks.subtitle.length > 2);
     return PlayerChrome(
       visible: _controlsVisible,
       landscape: landscape,
@@ -1855,6 +1930,8 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
       subtitleLabel: hasSubtitles ? _subtitleLabel() : null,
       audioLabel: realAudio > 1 ? _audioLabel() : null,
       speedLabel: '${_speed == _speed.roundToDouble() ? _speed.toStringAsFixed(0) : _speed}×',
+      sourceLabel: _canSwitchSource ? _sourceName : null,
+      onSources: _canSwitchSource ? () => _openMenu(_Menu.sources, landscape: landscape) : null,
       hasEpisodes: video.episodes.isNotEmpty,
       hasNext: video.nextFileId != null,
       showPip: _isPhone && landscape,
@@ -1917,7 +1994,7 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
               onDone();
             },
           ),
-          for (final s in video.subtitles)
+          for (final s in _subtitles)
             _trackRow(
               label: _languageName(s.language) ?? s.title ?? 'Track ${s.index}',
               detail: [?s.title, 'Uploaded'].join(' · '),
@@ -1997,6 +2074,20 @@ class _MediaKitVideoPlayerState extends State<MediaKitVideoPlayer> with WidgetsB
               onTap: () {
                 _setSpeed(s);
                 onDone();
+              },
+            ),
+        ];
+      case _Menu.sources:
+        return [
+          for (final source in widget.sources)
+            _trackRow(
+              label: source.name,
+              selected: source.id == widget.sourceId,
+              onTap: () {
+                onDone();
+                if (source.id == widget.sourceId) return;
+                _saveProgress(force: true);
+                widget.onSwitchSource?.call(source.id, _positionSeconds);
               },
             ),
         ];

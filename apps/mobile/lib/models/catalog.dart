@@ -1,8 +1,11 @@
 // Mirrors apps/frontend/src/lib/{catalogListItem,types}.ts — same shapes, since both clients hit
 // the same apps/backend REST API.
 
+import 'play.dart';
 import 'title_meta.dart';
 import 'tracks.dart';
+
+export 'play.dart';
 
 export 'tracks.dart';
 
@@ -579,6 +582,18 @@ class VideoResponse {
   /// What this one file has, for the details under the player. Null until read.
   final TitleLanguages? languages;
 
+  /// Every way to play it, in order: the title's own embeds, then each source (Drive among them).
+  /// From an older backend, the embeds and then Drive.
+  final List<PlayerOption> players;
+
+  /// What the viewer picks from: every source added in admin, in its order. From an older backend,
+  /// the players themselves.
+  final List<ViewerSource> sources;
+
+  /// The series' own name, for an episode with no series page behind it (a title the library
+  /// doesn't have).
+  final String? seriesTitle;
+
   const VideoResponse({
     required this.fileId,
     required this.title,
@@ -613,7 +628,13 @@ class VideoResponse {
     this.startSubtitle,
     this.hasStartTracks = false,
     this.languages,
+    this.players = const [],
+    this.sources = const [],
+    this.seriesTitle,
   });
+
+  /// Watched as a title the library doesn't have ("tmdb:movie:603"): no file, no party.
+  bool get isTitle => isTitleId(fileId);
 
   bool get isNative => seekMode == 'native';
   bool get isRaw => seekMode == 'raw';
@@ -657,5 +678,19 @@ class VideoResponse {
     startSubtitle: StartSubtitle.tryParse(json['startSubtitle']),
     hasStartTracks: json.containsKey('startAudio') || json.containsKey('startSubtitle'),
     languages: TitleLanguages.tryParse(json['languages']),
+    players: _playersOf(json),
+    sources: json['sources'] is List
+        ? ViewerSource.listOf(json['sources'])
+        : [for (final p in _playersOf(json)) ViewerSource(id: p.id, name: p.name)],
+    seriesTitle: json['seriesTitle'] as String?,
   );
+
+  static List<PlayerOption> _playersOf(Map<String, dynamic> json) {
+    if (json['players'] is List) return PlayerOption.listOf(json['players']);
+    final embeds = [for (final e in (json['embeds'] as List?) ?? const []) ?VideoEmbed.tryParse(e)];
+    return [
+      for (final (i, e) in embeds.indexed) PlayerOption(id: 'embed-$i', kind: PlayerKind.embed, name: e.provider, url: e.url),
+      const PlayerOption(id: 'drive', kind: PlayerKind.drive, name: 'Drive'),
+    ];
+  }
 }

@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/feed.dart';
+import '../models/play.dart';
 import '../models/title_meta.dart';
+import '../services/title_service.dart';
+import 'opinion_buttons.dart';
+import 'title_play.dart';
 import 'trailer_button.dart';
 import '../models/explore.dart';
 import '../services/api_client.dart';
@@ -14,9 +19,11 @@ import 'ui_kit.dart';
 
 /// Opens one Explore title: a panel from the right on a wide screen, a sheet from the bottom on a
 /// phone. Resolves when it's closed.
-Future<void> showExploreDetail(BuildContext context, {required String tmdbType, required String tmdbId}) {
+///
+/// With [play], it opens on the list of sources to play from (a Play button elsewhere).
+Future<void> showExploreDetail(BuildContext context, {required String tmdbType, required String tmdbId, bool play = false}) {
   final wide = MediaQuery.sizeOf(context).width >= 900;
-  final body = ExploreDetailView(tmdbType: tmdbType, tmdbId: tmdbId);
+  final body = ExploreDetailView(tmdbType: tmdbType, tmdbId: tmdbId, startChoosing: play);
   if (wide) {
     return showGeneralDialog<void>(
       context: context,
@@ -28,7 +35,12 @@ Future<void> showExploreDetail(BuildContext context, {required String tmdbType, 
         alignment: Alignment.centerRight,
         child: Material(
           color: AppColors.bgElevated,
-          child: SizedBox(width: 460, height: double.infinity, child: body),
+          // Room for the episode list and "More like this" beside a big screen's edge.
+          child: SizedBox(
+            width: (MediaQuery.sizeOf(context).width * 0.55).clamp(460.0, 760.0),
+            height: double.infinity,
+            child: body,
+          ),
         ),
       ),
       transitionBuilder: (context, animation, _, child) => SlideTransition(
@@ -49,7 +61,8 @@ Future<void> showExploreDetail(BuildContext context, {required String tmdbType, 
       initialChildSize: 0.86,
       minChildSize: 0.4,
       maxChildSize: 0.95,
-      builder: (context, controller) => ExploreDetailView(tmdbType: tmdbType, tmdbId: tmdbId, scrollController: controller),
+      builder: (context, controller) =>
+          ExploreDetailView(tmdbType: tmdbType, tmdbId: tmdbId, scrollController: controller, startChoosing: play),
     ),
   );
 }
@@ -60,6 +73,9 @@ class ExploreDetailView extends StatefulWidget {
   final String tmdbType;
   final String tmdbId;
   final ScrollController? scrollController;
+
+  /// Opened on the sources to play from.
+  final bool startChoosing;
 
   /// For tests: skips the network.
   final ExploreDetail? initial;
@@ -73,6 +89,7 @@ class ExploreDetailView extends StatefulWidget {
     required this.tmdbType,
     required this.tmdbId,
     this.scrollController,
+    this.startChoosing = false,
     this.initial,
     this.titleStyle,
   });
@@ -87,22 +104,74 @@ class _ExploreDetailViewState extends State<ExploreDetailView> {
   bool _busy = false;
   String? _actionError;
   bool _requested = false;
+  // The title shown: "More like this" opens another in this same panel.
+  late String _type = widget.tmdbType;
+  late String _id = widget.tmdbId;
+  late bool _choosing = widget.startChoosing;
+  SeriesEpisodes? _series;
+  Future<List<TitleItem>>? _similar;
+  ScrollController? _ownScroll;
+
+  ScrollController get _scroll => widget.scrollController ?? (_ownScroll ??= ScrollController());
 
   @override
   void initState() {
     super.initState();
     _detail = widget.initial;
     if (_detail == null) _load();
+    if (widget.initial == null) _similar = TitleService.fetchSimilar(_type, _id);
+    if (_choosing) _playIfOnlySource();
+  }
+
+  @override
+  void dispose() {
+    _ownScroll?.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
     setState(() => _error = null);
     try {
-      final detail = await ExploreApi.fetchTitle(widget.tmdbType, widget.tmdbId);
+      final detail = await ExploreApi.fetchTitle(_type, _id);
       if (mounted) setState(() => _detail = detail);
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
+  }
+
+  void _openOther(TitleItem item) {
+    setState(() {
+      _type = item.tmdbType;
+      _id = item.tmdbId;
+      _detail = null;
+      _series = null;
+      _choosing = false;
+      _requested = false;
+      _actionError = null;
+      _similar = TitleService.fetchSimilar(_type, _id);
+    });
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    _load();
+  }
+
+  /// With one source there's nothing to pick: Play is the pick.
+  Future<void> _playIfOnlySource() async {
+    try {
+      final sources = await TitleService.fetchSources();
+      if (!mounted || sources.length != 1) return;
+      playFrom(context, type: _type, id: _id, source: sources.single.id);
+    } catch (_) {
+      // The menu shows the error and a retry.
+    }
+  }
+
+  void _onPlay() {
+    if (_choosing) {
+      setState(() => _choosing = false);
+      return;
+    }
+    setState(() => _choosing = true);
+    _playIfOnlySource();
   }
 
   Future<void> _request(ExploreDetail d) async {
@@ -148,7 +217,7 @@ class _ExploreDetailViewState extends State<ExploreDetailView> {
     return Stack(
       children: [
         ListView(
-          controller: widget.scrollController,
+          controller: _scroll,
           padding: EdgeInsets.zero,
           children: [
             if (d.backdropUrl != null)
@@ -178,6 +247,15 @@ class _ExploreDetailViewState extends State<ExploreDetailView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _header(d),
+                  const SizedBox(height: 16),
+                  _playButton(d),
+                  if (_choosing) ...[
+                    const SizedBox(height: 12),
+                    // A series plays where the viewer stopped (the server works it out).
+                    SourceMenu(type: d.tmdbType, id: d.tmdbId),
+                  ],
+                  const SizedBox(height: 14),
+                  OpinionButtons(type: d.tmdbType, id: d.tmdbId),
                   if (d.tagline != null) ...[
                     const SizedBox(height: 16),
                     Text(d.tagline!, style: const TextStyle(color: AppColors.textTertiary, fontSize: 14, fontStyle: FontStyle.italic)),
@@ -195,6 +273,18 @@ class _ExploreDetailViewState extends State<ExploreDetailView> {
                   _where(d),
                   if (d.libraryRoute == null) ...[const SizedBox(height: 20), _requestBlock(d)],
                   if (d.cast.isNotEmpty) ...[const SizedBox(height: 24), _cast(d)],
+                  // Not for a test's title, which has no network behind it.
+                  if (d.isSeries && widget.initial == null) ...[
+                    const SizedBox(height: 24),
+                    SeriesEpisodeList(
+                      key: ValueKey('episodes-${d.tmdbId}'),
+                      seriesId: d.tmdbId,
+                      onLoaded: (series) {
+                        if (mounted) setState(() => _series = series);
+                      },
+                    ),
+                  ],
+                  _moreLikeThis(),
                   const SizedBox(height: 22),
                   const Text(
                     'Availability from JustWatch, via TMDB. "Open" takes you to that service.',
@@ -252,6 +342,115 @@ class _ExploreDetailViewState extends State<ExploreDetailView> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _playButton(ExploreDetail d) {
+    final series = d.isSeries ? _series : null;
+    return TvFocusable(
+      autofocus: !_choosing,
+      borderRadius: BorderRadius.circular(10),
+      onTap: _onPlay,
+      child: Semantics(
+        button: true,
+        expanded: _choosing,
+        child: Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          decoration: BoxDecoration(color: AppColors.foreground, borderRadius: BorderRadius.circular(10)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.play_arrow_rounded, color: AppColors.background),
+              const SizedBox(width: 6),
+              Text(series?.playLabel ?? 'Play',
+                  style: const TextStyle(color: AppColors.background, fontSize: 15, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Opens another title in this same panel.
+  Widget _moreLikeThis() {
+    return FutureBuilder<List<TitleItem>>(
+      future: _similar,
+      builder: (context, snapshot) {
+        final items = snapshot.data ?? const <TitleItem>[];
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('MORE LIKE THIS',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+              const SizedBox(height: 10),
+              LayoutBuilder(builder: (context, box) {
+                final columns = box.maxWidth >= 560 ? 5 : (box.maxWidth >= 380 ? 4 : 3);
+                const gap = 10.0;
+                final width = (box.maxWidth - gap * (columns - 1)) / columns;
+                return Wrap(
+                  spacing: gap,
+                  runSpacing: 14,
+                  children: [for (final item in items) SizedBox(width: width, child: _similarCard(item))],
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _similarCard(TitleItem item) {
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      onTap: () => _openOther(item),
+      child: Semantics(
+        button: true,
+        label: '${item.title}, ${item.kindLabel}${item.inLibrary != null ? ', in your library' : ''}',
+        excludeSemantics: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AspectRatio(
+              aspectRatio: 2 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (item.posterUrl != null)
+                      Image.network(item.posterUrl!,
+                          fit: BoxFit.cover, errorBuilder: (_, _, _) => const ColoredBox(color: AppColors.surface))
+                    else
+                      const ColoredBox(color: AppColors.surface),
+                    if (item.inLibrary != null)
+                      Positioned(
+                        left: 5,
+                        top: 5,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(color: AppColors.live, borderRadius: BorderRadius.circular(5)),
+                          child: const Text('IN LIBRARY',
+                              style: TextStyle(
+                                  color: AppColors.background, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.8)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(item.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.foreground, fontSize: 12, fontWeight: FontWeight.w600, height: 1.2)),
+          ],
+        ),
+      ),
     );
   }
 

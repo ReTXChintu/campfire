@@ -11,9 +11,11 @@ import 'screens/explore_screen.dart';
 import 'screens/folder_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/play_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/requests_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/section_screen.dart';
 import 'screens/tv_pairing_login_screen.dart';
 import 'screens/watch_screen.dart';
 import 'services/auth_service.dart';
@@ -121,12 +123,36 @@ GoRouter buildRouter(AuthService auth) {
         builder: (context, state) => FolderScreen(folderId: state.pathParameters['folderId']!),
       ),
 
-      // Outside the shell: the player owns the whole window/screen.
+      // One of Home's feed sections as an endless grid, pushed over the shell like a series page.
+      GoRoute(
+        path: '/section/:sectionId',
+        builder: (context, state) => SectionScreen(
+          sectionId: state.pathParameters['sectionId']!,
+          kind: state.uri.queryParameters['kind'] ?? 'all',
+        ),
+      ),
+
+      // Every Play button: asks the server where the title is watched (the library's page for it,
+      // or the title's own `/watch/tmdb:…`) and goes there with the source the viewer picked.
+      GoRoute(
+        path: '/play/:type/:tmdbId',
+        builder: (context, state) => PlayScreen(
+          type: state.pathParameters['type']!,
+          tmdbId: state.pathParameters['tmdbId']!,
+          season: int.tryParse(state.uri.queryParameters['season'] ?? ''),
+          episode: int.tryParse(state.uri.queryParameters['episode'] ?? ''),
+          source: state.uri.queryParameters['source'],
+        ),
+      ),
+
+      // Outside the shell: the player owns the whole window/screen. `source` is the one the viewer
+      // picked (models/play.dart); without it a title with more than one asks.
       GoRoute(
         path: '/watch/:fileId',
         builder: (context, state) => WatchScreen(
           fileId: state.pathParameters['fileId']!,
           partyId: state.uri.queryParameters['party'],
+          source: state.uri.queryParameters['source'],
         ),
       ),
 
