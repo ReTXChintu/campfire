@@ -31,9 +31,9 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -44,7 +44,7 @@ jobs:
       # is all this needs; Gradle/AGP fetches whatever platform/build-tools version it wants itself
       # during the actual build. log-accepted-android-sdk-licenses: false just quiets the otherwise
       # multi-thousand-line dump of full license text on every run.
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: "platform-tools"
           log-accepted-android-sdk-licenses: false
@@ -93,7 +93,7 @@ jobs:
       - name: Stage artifact under its fixed deploy name
         run: cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk ${{ env.APK_NAME }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-apk
           path: ${{ env.APK_NAME }}
@@ -102,7 +102,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -156,7 +156,7 @@ jobs:
         shell: pwsh
         run: Copy-Item "apps/mobile/windows/installer/Output/CampfireSetup.exe" "${{ env.WINDOWS_INSTALLER_NAME }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: ${{ env.WINDOWS_INSTALLER_NAME }}
@@ -169,18 +169,18 @@ jobs:
       # No `path:` given — actions/download-artifact reconstructs each single-file artifact
       # directly at the workspace root under its original name, so the scp step below needs no
       # directory-stripping trickery to avoid nesting a "dist/" prefix on the server.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: android-apk
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: windows-installer
 
       # Always the same two destination filenames — overwrites whatever was there before, so
       # apps/frontend/.env's download URLs never need updating.
       - name: Upload builds to the server's frontend/public folder
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
@@ -190,7 +190,7 @@ jobs:
           target: "/opt/var/campfire/apps/frontend/public"
 
       - name: Pull latest code, rebuild the web apps, restart pm2
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           port: ${{ secrets.DEPLOY_PORT || 22 }}
