@@ -38,7 +38,7 @@ dependencies:
   flutter_secure_storage: ^9.2.2
   go_router: ^14.6.2
   provider: ^6.1.2
-  google_fonts: ^6.2.1
+  google_fonts: ^9.0.0
   shared_preferences: ^2.3.3
 
   # MKV playback (Windows desktop + Android): libmpv-backed, unlike video_player this decodes the
